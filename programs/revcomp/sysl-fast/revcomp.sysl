@@ -1,0 +1,53 @@
+import sysl.buf.{Buf, buf}
+import sysl.io.{read_all, stdin}
+
+const line_len: usize = 60
+
+// complement[b] is the IUPAC complement of the base b, upper case, whatever b's case.
+complements() -> [256]u8
+    var table: [256]u8
+    val from = "ACGTUMRWSYKVHDBN"
+    val to = "TGCAAKYWSRMBDHVN"
+
+    for i in 0..<from.len
+        table[from.bytes[i]] = to.bytes[i]
+        table[from.bytes[i] | 0x20] = to.bytes[i]
+
+    table
+
+write_reversed(seq: []const u8, out: Buf[u8])
+    var i = seq.len
+
+    while i > 0
+        val width = if i > line_len then line_len else i
+
+        for j in 0..<width do out.push(seq[i - 1 - j])
+
+        out.push(u8('\n'))
+        i -= width
+
+main()
+    var input = stdin()
+    val data = read_all(&input)
+    val table = complements()
+    val out: Buf[u8] = buf()
+    val seq: Buf[u8] = buf()
+    var i = 0
+
+    while i < data.len()
+        var end = i
+
+        while end < data.len() && data[end] != u8('\n') do end += 1
+
+        if data[i] == u8('>')
+            write_reversed(seq.view(), out)
+            seq.clear()
+
+            for j in i..<end + 1 do out.push(data[j])
+        else
+            for j in i..<end do seq.push(table[data[j]])
+
+        i = end + 1
+
+    write_reversed(seq.view(), out)
+    putbytes(out.view())

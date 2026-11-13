@@ -13,7 +13,7 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 programs = ["nbody", "spectralnorm", "fannkuchredux", "binarytrees",
             "mandelbrot", "fasta", "knucleotide", "revcomp"]
-columns = ["c", "rust", "cpp", "swift", "zig", "nim", "julia", "sysl-idiomatic", "sysl-tuned"]
+columns = ["c", "rust", "cpp", "swift", "zig", "nim", "julia", "sysl-idiomatic", "sysl-fast"]
 
 
 def run(cmd):

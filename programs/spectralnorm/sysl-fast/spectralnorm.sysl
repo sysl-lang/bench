@@ -1,31 +1,20 @@
 import sysl.text.parse_int
 
-// Row i of A is 1 / d, where d starts at T(i) + i + 1 and grows by i + j + 1 per
-// column (T is the triangular number), so no product is needed inside the loop.
+a(i: usize, j: usize) -> real = 1.0 / real((i + j) * (i + j + 1) / 2 + i + 1)
+
 times(v: []const real, out: []real)
     for i in 0..<out.len
         var sum = 0.0
-        var d = real(i * (i + 1) / 2 + i + 1)
-        var step = real(i + 1)
 
-        for j in 0..<v.len
-            sum += v[j] / d
-            d += step
-            step += 1.0
+        for j in 0..<v.len do sum += a(i, j) * v[j]
 
         out[i] = sum
 
-// Column i of A: d starts at T(i) + 1 and grows by i + j + 2.
 times_transpose(v: []const real, out: []real)
     for i in 0..<out.len
         var sum = 0.0
-        var d = real(i * (i + 1) / 2 + 1)
-        var step = real(i + 2)
 
-        for j in 0..<v.len
-            sum += v[j] / d
-            d += step
-            step += 1.0
+        for j in 0..<v.len do sum += a(j, i) * v[j]
 
         out[i] = sum
 

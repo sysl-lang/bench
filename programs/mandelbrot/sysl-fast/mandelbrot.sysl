@@ -1,0 +1,41 @@
+import sysl.text.parse_int
+
+const iterations = 50
+
+val lanes: <8>real = [0, 1, 2, 3, 4, 5, 6, 7]
+val weights: <8>u8 = [128, 64, 32, 16, 8, 4, 2, 1]
+
+// One byte of the image: eight pixels on one row, computed together. A pixel
+// that has escaped keeps growing and never comes back inside, so the eight
+// iterate until every one has escaped or the iterations run out.
+octet(cr: <8>real, ci: real) -> u8
+    var zr: <8>real = 0
+    var zi: <8>real = 0
+    var tr: <8>real = 0
+    var ti: <8>real = 0
+
+    for _ in 0..<iterations
+        if !(tr + ti <= 4.0).any() then break
+
+        zi = 2.0 * zr * zi + ci
+        zr = tr - ti + cr
+        tr = zr * zr
+        ti = zi * zi
+
+    (tr + ti <= 4.0).select(weights, 0).sum()
+
+main(args: []string)
+    val n = usize(parse_int(args[1]).unwrap())
+    var row: []u8 = [0; (n + 7) / 8]
+
+    print("P4")
+    print(n, n)
+
+    for y in 0..<n
+        val ci = 2.0 * real(y) / real(n) - 1.0
+
+        for byte in 0..<row.len do row[byte] = octet(2.0 * (lanes + real(byte * 8)) / real(n) - 1.5, ci)
+
+        if n % 8 != 0 then row[n / 8] = row[n / 8] & (0xFF << (8 - n % 8))
+
+        putbytes(row)

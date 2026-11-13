@@ -1,20 +1,18 @@
 import sysl.math.max
 import sysl.text.parse_int
 
-// Every node is its own heap object, as in the other languages' programs.
-struct Node
-    left: Option[&Node]
-    right: Option[&Node]
-end Node
+enum Tree
+    Leaf
+    Node(left: &Tree, right: &Tree)
 
-make(depth: int) -> &Node
-    if depth == 0 then Node(None, None)
-    else Node(Some(make(depth - 1)), Some(make(depth - 1)))
+make(depth: int) -> &Tree
+    if depth == 0 then Leaf
+    else Node(make(depth - 1), make(depth - 1))
 
-check(node: &Node) -> int
-    node.left match
-        Some(l) -> 1 + check(l) + check(node.right.unwrap())
-        None -> 1
+check(t: &Tree) -> int
+    *t match
+        Leaf -> 1
+        Node(l, r) -> 1 + check(l) + check(r)
 
 main(args: []string)
     val n = parse_int(args[1]).unwrap()
