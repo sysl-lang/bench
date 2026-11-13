@@ -68,7 +68,7 @@ count_kmers(seq: []const u8, k: usize) -> Map[Kmer, int]
 
     for i in k - 1..<seq.len
         key = (key << 2 | usize(seq[i])) & mask
-        counts.put(Kmer(key), counts.get_or(Kmer(key), 0) + 1)
+        counts.upsert(Kmer(key), 0, _ + 1)
 
     counts
 
