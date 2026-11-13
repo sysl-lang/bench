@@ -64,12 +64,26 @@ floating-point comparison would change the work, so neither form uses them.
   `sysl-fast`; neither is decoding the sequence into a preallocated array in place of `Buf.push`
   (finding 1).
 
-## 4. binarytrees — a 48-byte node and a thread-local read on every drop
+## 4. binarytrees — a 48-byte node, and two hook calls and a thread-local read per freed object
 
-Each node is `malloc(48)`, carrying a refcount, a drop-function pointer, a size and a tag, against
-C's 16 bytes. The drop goes through `l_arc.reap`, which reads thread-local state. The number of
-allocations is the same as C's. A struct form with `Option[&Node]` children is no faster (1.50x), so
-the enum is not the cause.
+Each node is `malloc(48)`: a 24-byte header (strong count, drop hook, weak count) and a 24-byte enum
+(tag and two references), against C's 16 bytes. The number of allocations is the same as C's. A
+struct form with `Option[&Node]` children is no faster (1.50x), so the enum is not the cause.
+
+Measured on sysl 0.10.7 at size 18 (exclusive run):
+
+- **The size is worth about 4%, and the header cannot reach it.** C with `malloc(16)`, `malloc(32)` and
+  `malloc(48)` takes 562, 606 and 643 ms. Packing the two counts into one word makes the box 40 bytes,
+  which Darwin's malloc rounds to the same 48. Reaching 32 needs the hook pointer gone, and a
+  type-erased release (a view's owner, a `&Trait`) has nothing else to find the destructor through.
+- **The drop machinery was the rest.** Every child a hook let go of went through `arc.release` and
+  `arc.reap` (a call and a thread-local ask, to find the drain already running), and an empty leaf
+  then took two more hook calls to be freed.
+- **Fixed on sysl dev (branch `header-shrink`, for 0.11):** the hook is handed the drain's slot and
+  queues what it lets go of there, and a box with nothing in it to tear down (here every leaf) is freed
+  on the spot. binarytrees went from 917.5 to 752.2 ms (-18%). The other programs did not move.
+- **Left:** two counts in one word would pay on glibc, where a 48-byte box is a 64-byte chunk, but it
+  changes the documented three-word header. That is a user decision.
 
 ## 5. nbody — no fix item left at 0.10.7
 
