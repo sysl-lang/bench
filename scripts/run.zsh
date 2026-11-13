@@ -15,6 +15,9 @@ cd $ROOT
 verify_only=0
 [[ $1 == --verify ]] && verify_only=1
 
+# With --verify, further arguments name the languages to check (default: all).
+if (( verify_only && $# > 1 )); then LANGS=(${@:2}); fi
+
 # Runs the program for a size and writes its output to stdout.
 run_program() {  # <program> <language> <small|big>
   local prog=$1 lang=$2 size=$3 exe=$(exe $1 $2)
