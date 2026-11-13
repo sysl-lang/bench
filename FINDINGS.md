@@ -12,15 +12,19 @@ run, wall-clock ratio to C).
 | binarytrees | 1.65 | 1.77 |
 | nbody | 1.57 | 0.91 |
 
-## 1. revcomp — `Buf.push` is a real call per byte
+## 1. revcomp — the buffer's header is reloaded and stored on every push
 
-The hot loop `out.push(seq[..])` compiles to `bl _sysl.buf$Buf.push.byte` for every byte. The
-standard library is linked as an archive, so none of its functions are inlined; C does a pointer
-store.
+`Buf.push` is already inlined in an optimised build: a store, a length bump and a cold out-of-line
+`grow_store`. But the loop in `write_reversed` costs about 10 instructions and 4 memory operations per
+byte (`ldp cap,len` / cmp / `ldr data` / `strb` / `str len` / `ldr cap` / cmp + branch), where C keeps
+a pointer in a register.
 
-- **Suspect:** `Buf.push` is not inlined. Make the fast path `@inline` and the growth path
-  `@cold @noinline`.
-- **Reduction:** `val b: Buf[u8] = buf(); for i in 0..<100000000 do b.push(u8(i))`
+- **Cause:** LLVM is not told that the byte store through the element storage cannot alias the
+  `BufCore` header, so data, len and cap are reloaded and len is stored back for every byte. The
+  `count <= elems.len` re-check after each store (deliberate, `library/sysl/buf/buf.sysl`) cannot fold
+  away for the same reason. There is also a bounds check on `seq[i-1-j]`.
+- **Fix:** alias information (scoped `!alias.scope`/`!noalias`, or TBAA) that separates a
+  container's slot storage from struct-field accesses. This is the same cause as findings 2 and 5.
 
 ## 2. fasta — generator state goes through memory every symbol
 
