@@ -12,9 +12,17 @@ traced to a cause in [FINDINGS.md](FINDINGS.md).
 
 Each program is written once per language. sysl has two versions:
 
-- **`sysl-idiomatic`** is the way a sysl user would write the program: no type, suffix or cast the
-  compiler can infer, standard-library containers, no tricks. **This is the form that counts.**
-- **`sysl-tuned`** is the fastest safe sysl the author could find that still does the same work.
+- **`sysl-idiomatic`** is what a sysl programmer writes by default: the pleasant form, with no type,
+  suffix or cast the compiler can infer, standard-library containers, and vectors (`<N>T`) only where
+  they are the natural tool, as in mandelbrot. **This is the form that counts.**
+- **`sysl-fast`** may use any documented sysl feature that trades pleasantness for speed: vectors
+  everywhere, fixed-size arrays, unchecked indexing, explicit layouts, manual unrolling. It may not
+  work around the compiler: a change that would be pointless once the compiler does its job (hoisting
+  fields into locals by hand, calling an intrinsic by hand, hand strength reduction) is a finding in
+  [FINDINGS.md](FINDINGS.md), not code. Where no such feature beats the idiomatic program, `sysl-fast`
+  is a copy of it.
+
+Both sysl forms use the same algorithm as C.
 
 The C, Rust, C++ and Swift programs are Benchmarks Game sources (BSD-3). Where the site publishes only
 a threaded or crate-dependent program, it is adapted to what the rules below require. [SOURCES.md](SOURCES.md)
@@ -23,7 +31,7 @@ names the origin of every file and says exactly what was changed.
 ## The rules
 
 1. **Single-threaded, in every language.** One core, no thread, task queue or `rayon`.
-2. **The idiomatic form counts.** `sysl-tuned` is reported beside it, never instead of it.
+2. **The idiomatic form counts.** `sysl-fast` is reported beside it, never instead of it.
 3. **Every program does the same work.** The algorithm is fixed per program (SOURCES.md lists it): the
    same generator, the same data structure, the same per-element operation. In particular trees are
    built from individually allocated nodes, k-mers are counted in a hash table, and fasta picks each
@@ -36,7 +44,7 @@ names the origin of every file and says exactly what was changed.
 ## Layout
 
 ```
-programs/<name>/{sysl-idiomatic,sysl-tuned,c,rust,cpp,swift}/   one source file per directory
+programs/<name>/{sysl-idiomatic,sysl-fast,c,rust,cpp,swift}/   one source file per directory
 expected/ref/      the Benchmarks Game's published output (and input) at a small size
 expected/<name>.sha256   sha256 of the output at the timed size, from the C program
 scripts/build.zsh  builds everything into build/ and generates the shared input

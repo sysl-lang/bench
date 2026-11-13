@@ -74,20 +74,27 @@ and C++ are mostly this. The fannkuch programs generate the permutations in the 
 rotation schemes (C: Ledrug's; C++: Branimir Maksimovic's; Rust: a factorial-number scheme; Swift and
 sysl: Rex Kerr's count array).
 
-## sysl-tuned and the reference algorithm
+## The two sysl forms
 
-`sysl-tuned` may change how the work is done but not what work is done. What each one does differently
-from `sysl-idiomatic`:
+Both sysl forms use C's algorithm: the same work, the same arithmetic on the same data.
 
-- **nbody**: `bodies[i]`'s fields are read once into locals before the inner loop and its velocity is
-  accumulated in locals; `sqrt` is the `llvm.sqrt` intrinsic.
-- **spectralnorm**: the denominator of row i is advanced by addition instead of recomputed from a product.
+**`sysl-idiomatic`** is what a sysl programmer writes by default: the pleasant form, using whatever the
+language offers for writing it pleasantly. That includes vectors (`<N>T`) where they are the natural
+tool: mandelbrot computes the eight pixels of one output byte as one `<8>real`.
+
+**`sysl-fast`** may use any documented feature that trades pleasantness for speed: vectors everywhere,
+fixed-size arrays, unchecked indexing, explicit layouts, manual unrolling. It may not carry a
+workaround for a compiler gap. The test is whether the change would be pointless once the compiler
+does its job; if so, it is an entry in FINDINGS.md and not code. Hand-hoisting fields into locals,
+calling `llvm.sqrt` by hand, hand strength reduction and keeping generator state in a local by hand
+are all workarounds in this sense. Where no legitimate feature beats the idiomatic program,
+`sysl-fast` is a copy of it.
+
+What each `sysl-fast` program does differently from `sysl-idiomatic`:
+
+- **nbody**: a body's position and velocity are `<3>real`, so a pair's distance, its squared length
+  and both velocity updates are vector operations.
 - **fannkuchredux**: the permutation state is three `[16]usize` arrays instead of heap slices.
-- **binarytrees**: nodes are a struct with `Option[&Node]` children instead of an enum. Same allocation
-  pattern, and no faster.
-- **mandelbrot**: eight pixels per step over fixed-size arrays, always the full 50 iterations.
-- **fasta**: the generator state lives in a local and the symbol is chosen by counting integer
-  thresholds, which picks the same symbol as the idiomatic floating-point comparison.
-- **knucleotide**: the sequence is decoded once into one preallocated array, and the hash table's key is a
-  struct with a one-multiply hash. Every k-mer is still counted in a hash table.
-- **revcomp**: the output is written by index into one preallocated array, not pushed byte by byte.
+- **spectralnorm**: a copy. Rust's form, two columns per step, needs the integer denominators of two
+  columns as a `<2>real`, and sysl has no conversion from `<2>usize` to `<2>real` (FINDINGS.md).
+- **binarytrees, mandelbrot, fasta, knucleotide, revcomp**: copies.
