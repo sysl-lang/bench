@@ -1,0 +1,44 @@
+import sysl.text.parse_int
+
+const iterations = 50
+
+inside(cr: real, ci: real) -> bool
+    var zr = 0.0
+    var zi = 0.0
+    var tr = 0.0
+    var ti = 0.0
+    var i = 0
+
+    while i < iterations && tr + ti <= 4.0
+        zi = 2.0 * zr * zi + ci
+        zr = tr - ti + cr
+        tr = zr * zr
+        ti = zi * zi
+        i += 1
+
+    tr + ti <= 4.0
+
+main(args: []string)
+    val n = usize(parse_int(args[1]).unwrap())
+    var row: []u8 = [0; (n + 7) / 8]
+
+    print("P4")
+    print(n, n)
+
+    for y in 0..<n
+        val ci = 2.0 * real(y) / real(n) - 1.0
+        var bits: u8 = 0
+        var count = 0
+
+        for x in 0..<n
+            val cr = 2.0 * real(x) / real(n) - 1.5
+
+            bits = bits << 1 | (if inside(cr, ci) then 1 else 0)
+            count += 1
+
+            if count == 8 || x == n - 1
+                row[x / 8] = bits << (8 - count)
+                bits = 0
+                count = 0
+
+        putbytes(row)

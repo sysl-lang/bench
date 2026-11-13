@@ -1,0 +1,45 @@
+import sysl.text.parse_int
+
+const iterations = 50
+
+// Eight pixels at a time, so the loop body is straight-line arithmetic over
+// fixed-size arrays that the optimizer can turn into vector operations. A
+// pixel that has escaped keeps growing, and never comes back inside.
+main(args: []string)
+    val n = usize(parse_int(args[1]).unwrap())
+    var row: []u8 = [0; (n + 7) / 8]
+    var xs: []real = [0.0; n + 8]
+
+    for x in 0..<n + 8 do xs[x] = 2.0 * real(x) / real(n) - 1.5
+
+    print("P4")
+    print(n, n)
+
+    for y in 0..<n
+        val ci = 2.0 * real(y) / real(n) - 1.0
+
+        for byte in 0..<(n + 7) / 8
+            var zr: [8]real
+            var zi: [8]real
+            var tr: [8]real
+            var ti: [8]real
+            var cr: [8]real
+
+            for k in 0..<8 do cr[k] = xs[byte * 8 + k]
+
+            for _ in 0..<iterations
+                for k in 0..<8
+                    zi[k] = 2.0 * zr[k] * zi[k] + ci
+                    zr[k] = tr[k] - ti[k] + cr[k]
+                    tr[k] = zr[k] * zr[k]
+                    ti[k] = zi[k] * zi[k]
+
+            var bits: u8 = 0
+
+            for k in 0..<8 do bits = bits << 1 | (if tr[k] + ti[k] <= 4.0 then 1 else 0)
+
+            row[byte] = bits
+
+        if n % 8 != 0 then row[n / 8] = row[n / 8] & (0xFF << (8 - n % 8))
+
+        putbytes(row)

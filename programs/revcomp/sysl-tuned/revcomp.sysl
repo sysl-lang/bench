@@ -1,0 +1,68 @@
+import sysl.io.{read_all, stdin}
+
+const line_len: usize = 60
+
+// complement[b] is the IUPAC complement of the base b, upper case, whatever b's case.
+complements() -> [256]u8
+    var table: [256]u8
+    val from = "ACGTUMRWSYKVHDBN"
+    val to = "TGCAAKYWSRMBDHVN"
+
+    for i in 0..<from.len
+        table[from.bytes[i]] = to.bytes[i]
+        table[from.bytes[i] | 0x20] = to.bytes[i]
+
+    table
+
+main()
+    var input = stdin()
+    val data = read_all(&input)
+    val bytes = data.view()
+    val table = complements()
+    var out: []u8 = [0; bytes.len * 2]
+    var seq: []u8 = [0; bytes.len]
+    var n: usize = 0
+    var at: usize = 0
+    var i: usize = 0
+
+    while i < bytes.len
+        if bytes[i] == u8('>')
+            // The record before it is finished: write it reversed, sixty to a line.
+            var left = n
+
+            while left > 0
+                val width = if left > line_len then line_len else left
+
+                for j in 0..<width do out[at + j] = seq[left - 1 - j]
+
+                out[at + width] = u8('\n')
+                at += width + 1
+                left -= width
+
+            n = 0
+
+            while bytes[i] != u8('\n')
+                out[at] = bytes[i]
+                at += 1
+                i += 1
+
+            out[at] = u8('\n')
+            at += 1
+        else if bytes[i] != u8('\n')
+            seq[n] = table[bytes[i]]
+            n += 1
+
+        i += 1
+
+    var left = n
+
+    while left > 0
+        val width = if left > line_len then line_len else left
+
+        for j in 0..<width do out[at + j] = seq[left - 1 - j]
+
+        out[at + width] = u8('\n')
+        at += width + 1
+        left -= width
+
+    putbytes(out[0..<at])

@@ -1,0 +1,110 @@
+import sysl.buf.{Buf, buf}
+import sysl.container.{Map, map_with_capacity}
+import sysl.math.min
+import sysl.io.{read_all, stdin}
+import sysl.slices.sort_by
+import sysl.text.from_utf8_lossy
+
+const letters = "ACGT"
+
+// A k-mer's code with a one-multiply hash: the codes are already dense, so the
+// library's three-multiply integer mixer buys nothing here.
+struct Kmer
+    code: usize
+end Kmer
+
+impl Hash for Kmer
+    hash(self) -> u64 = u64(self.code) *% 0x9E3779B97F4A7C15
+
+impl Eq for Kmer
+    eq(self, other: Kmer) -> bool = self.code == other.code
+
+struct Entry
+    key: usize
+    count: int
+end Entry
+
+// A base's code, in A C G T order, whatever its case.
+code_of(base: u8) -> u8
+    base & 0xDF match
+        u8('A') -> 0
+        u8('C') -> 1
+        u8('G') -> 2
+        _ -> 3
+
+// The bases of the THREE section as codes 0..3, in one allocation.
+read_sequence() -> []u8
+    var input = stdin()
+    val data = read_all(&input)
+    val bytes = data.view()
+    var seq: []u8 = [0; bytes.len]
+    var n: usize = 0
+    var i: usize = 0
+    var inside = false
+
+    while i < bytes.len
+        if bytes[i] == u8('>')
+            if inside then break
+
+            inside = bytes[i + 1] == u8('T') && bytes[i + 2] == u8('H') && bytes[i + 3] == u8('R')
+
+            while bytes[i] != u8('\n') do i += 1
+        else if inside && bytes[i] != u8('\n')
+            seq[n] = code_of(bytes[i])
+            n += 1
+
+        i += 1
+
+    seq[0..<n]
+
+// How often each k-mer occurs, keyed by its 2k-bit code. The table is sized for
+// the entries it can hold, so it never rehashes while counting.
+count_kmers(seq: []const u8, k: usize) -> Map[Kmer, int]
+    val counts: Map[Kmer, int] = map_with_capacity(min(usize(1) << (2 * k), seq.len))
+    val mask = (usize(1) << (2 * k)) - 1
+    var key: usize = 0
+
+    for i in 0..<k - 1 do key = key << 2 | usize(seq[i])
+
+    for i in k - 1..<seq.len
+        key = (key << 2 | usize(seq[i])) & mask
+        counts.put(Kmer(key), counts.get_or(Kmer(key), 0) + 1)
+
+    counts
+
+name_of(key: usize, k: usize) -> string
+    var chars: Buf[u8] = buf()
+
+    for i in 0..<k
+        chars.push(letters.bytes[key >> (2 * (k - 1 - i)) & 3])
+
+    from_utf8_lossy(chars.view())
+
+print_frequencies(seq: []const u8, k: usize)
+    var entries: Buf[Entry] = buf()
+    val total = seq.len - k + 1
+
+    for (key, count) in count_kmers(seq, k) do entries.push(Entry(key.code, count))
+
+    sort_by(entries.view_mut(), (a, b) -> a.count > b.count || a.count == b.count && name_of(a.key, k) < name_of(b.key, k))
+
+    for e in entries.view()
+        print(f"${name_of(e.key, k)} ${100.0 * real(e.count) / real(total)}%.3f")
+
+    print("")
+
+print_count(seq: []const u8, pattern: string)
+    var key: usize = 0
+
+    for b in pattern.bytes do key = key << 2 | usize(code_of(b))
+
+    print(f"${count_kmers(seq, pattern.len).get_or(Kmer(key), 0)}\t$pattern")
+
+main()
+    val seq = read_sequence()
+
+    print_frequencies(seq, 1)
+    print_frequencies(seq, 2)
+
+    for pattern in ["GGT", "GGTA", "GGTATT", "GGTATTTTAATT", "GGTATTTTAATTTATAGT"]
+        print_count(seq, pattern)

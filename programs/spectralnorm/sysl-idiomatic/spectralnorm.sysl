@@ -1,0 +1,42 @@
+import sysl.text.parse_int
+
+a(i: usize, j: usize) -> real = 1.0 / real((i + j) * (i + j + 1) / 2 + i + 1)
+
+times(v: []const real, out: []real)
+    for i in 0..<out.len
+        var sum = 0.0
+
+        for j in 0..<v.len do sum += a(i, j) * v[j]
+
+        out[i] = sum
+
+times_transpose(v: []const real, out: []real)
+    for i in 0..<out.len
+        var sum = 0.0
+
+        for j in 0..<v.len do sum += a(j, i) * v[j]
+
+        out[i] = sum
+
+times_a_transpose_a(v: []const real, out: []real, tmp: []real)
+    times(v, tmp)
+    times_transpose(tmp, out)
+
+main(args: []string)
+    val n = usize(parse_int(args[1]).unwrap())
+    var u: []real = [1.0; n]
+    var v: []real = [0.0; n]
+    var tmp: []real = [0.0; n]
+
+    for _ in 0..<10
+        times_a_transpose_a(u, v, tmp)
+        times_a_transpose_a(v, u, tmp)
+
+    var vbv = 0.0
+    var vv = 0.0
+
+    for i in 0..<n
+        vbv += u[i] * v[i]
+        vv += v[i] * v[i]
+
+    print(f"${(vbv / vv).sqrt()}%.9f")

@@ -1,0 +1,93 @@
+import sysl.buf.{Buf, buf}
+import sysl.container.{Map, map}
+import sysl.io.{read_all, stdin}
+import sysl.slices.sort_by
+import sysl.text.from_utf8_lossy
+
+const letters = "ACGT"
+
+struct Entry
+    key: u64
+    count: int
+end Entry
+
+// A base's code, in A C G T order, whatever its case.
+code_of(base: u8) -> u8
+    base & 0xDF match
+        u8('A') -> 0
+        u8('C') -> 1
+        u8('G') -> 2
+        _ -> 3
+
+// The bases of the THREE section as codes 0..3, in A C G T order.
+read_sequence() -> Buf[u8]
+    var input = stdin()
+    val data = read_all(&input)
+    val seq: Buf[u8] = buf()
+    var i = 0
+    var inside = false
+
+    while i < data.len()
+        if data[i] == u8('>')
+            if inside then break
+
+            inside = data[i + 1] == u8('T') && data[i + 2] == u8('H') && data[i + 3] == u8('R')
+
+            while data[i] != u8('\n') do i += 1
+        else if inside && data[i] != u8('\n')
+            seq.push(code_of(data[i]))
+
+        i += 1
+
+    seq
+
+count_kmers(seq: []const u8, k: usize) -> Map[u64, int]
+    val counts: Map[u64, int] = map()
+    val mask = (u64(1) << (2 * k)) - 1
+    var key: u64 = 0
+
+    for i in 0..<seq.len
+        key = (key << 2 | u64(seq[i])) & mask
+
+        if i + 1 >= k then counts.put(key, counts.get_or(key, 0) + 1)
+
+    counts
+
+name_of(key: u64, k: usize) -> string
+    var chars: Buf[u8] = buf()
+
+    for i in 0..<k
+        chars.push(letters.bytes[usize(key >> (2 * (k - 1 - i)) & 3)])
+
+    from_utf8_lossy(chars.view())
+
+print_frequencies(seq: []const u8, k: usize)
+    val counts = count_kmers(seq, k)
+    var entries: Buf[Entry] = buf()
+    val total = seq.len - k + 1
+
+    for (key, count) in counts do entries.push(Entry(key, count))
+
+    sort_by(entries.view_mut(), (a, b) -> a.count > b.count || a.count == b.count && name_of(a.key, k) < name_of(b.key, k))
+
+    for e in entries.view()
+        print(f"${name_of(e.key, k)} ${100.0 * real(e.count) / real(total)}%.3f")
+
+    print("")
+
+print_count(seq: []const u8, pattern: string)
+    var key: u64 = 0
+
+    for b in pattern.bytes
+        key = key << 2 | u64(code_of(b))
+
+    print(f"${count_kmers(seq, pattern.len).get_or(key, 0)}\t$pattern")
+
+main()
+    val seq = read_sequence()
+
+    print_frequencies(seq.view(), 1)
+    print_frequencies(seq.view(), 2)
+
+    for pattern in ["GGT", "GGTA", "GGTATT", "GGTATTTTAATT", "GGTATTTTAATTTATAGT"]
+        print_count(seq.view(), pattern)

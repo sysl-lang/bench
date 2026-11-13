@@ -1,0 +1,53 @@
+import sysl.text.parse_int
+
+// Row i of A is 1 / d, where d starts at T(i) + i + 1 and grows by i + j + 1 per
+// column (T is the triangular number), so no product is needed inside the loop.
+times(v: []const real, out: []real)
+    for i in 0..<out.len
+        var sum = 0.0
+        var d = real(i * (i + 1) / 2 + i + 1)
+        var step = real(i + 1)
+
+        for j in 0..<v.len
+            sum += v[j] / d
+            d += step
+            step += 1.0
+
+        out[i] = sum
+
+// Column i of A: d starts at T(i) + 1 and grows by i + j + 2.
+times_transpose(v: []const real, out: []real)
+    for i in 0..<out.len
+        var sum = 0.0
+        var d = real(i * (i + 1) / 2 + 1)
+        var step = real(i + 2)
+
+        for j in 0..<v.len
+            sum += v[j] / d
+            d += step
+            step += 1.0
+
+        out[i] = sum
+
+times_a_transpose_a(v: []const real, out: []real, tmp: []real)
+    times(v, tmp)
+    times_transpose(tmp, out)
+
+main(args: []string)
+    val n = usize(parse_int(args[1]).unwrap())
+    var u: []real = [1.0; n]
+    var v: []real = [0.0; n]
+    var tmp: []real = [0.0; n]
+
+    for _ in 0..<10
+        times_a_transpose_a(u, v, tmp)
+        times_a_transpose_a(v, u, tmp)
+
+    var vbv = 0.0
+    var vv = 0.0
+
+    for i in 0..<n
+        vbv += u[i] * v[i]
+        vv += v[i] * v[i]
+
+    print(f"${(vbv / vv).sqrt()}%.9f")

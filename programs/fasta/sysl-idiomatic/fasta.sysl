@@ -1,0 +1,80 @@
+import sysl.math.min
+import sysl.text.parse_int
+
+const line_len: usize = 60
+
+const alu = "GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGG" +
+            "GAGGCCGAGGCGGGCGGATCACCTGAGGTCAGGAGTTCGAGA" +
+            "CCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACTAAAAAT" +
+            "ACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCA" +
+            "GCTACTCGGGAGGCTGAGGCAGGAGAATCGCTTGAACCCGGG" +
+            "AGGCGGAGGTTGCAGTGAGCCGAGATCGCGCCACTGCACTCC" +
+            "AGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA"
+
+const iub_symbols = "acgtBDHKMNRSVWY"
+val iub_probabilities = [0.27, 0.12, 0.12, 0.27, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02]
+
+const sapiens_symbols = "acgt"
+val sapiens_probabilities = [0.3029549426680, 0.1979883004921, 0.1975473066391, 0.3015094502008]
+
+struct Random
+    last: int
+
+    next(*self) -> real
+        self.last = (self.last * 3877 + 29573) % 139968
+
+        real(self.last) / 139968.0
+end Random
+
+repeat_fasta(header: string, seq: string, n: usize)
+    var line: [61]u8
+    var at: usize = 0
+    var left = n
+
+    print(header)
+
+    while left > 0
+        val width = min(line_len, left)
+
+        for i in 0..<width
+            line[i] = seq.bytes[at]
+            at = (at + 1) % seq.len
+
+        line[width] = 10
+        putbytes(line[0..width])
+        left -= width
+
+random_fasta(header: string, symbols: string, probabilities: []const real, n: usize, rng: *Random)
+    var cumulative: []real = [0.0; probabilities.len]
+    var line: [61]u8
+    var total = 0.0
+    var left = n
+
+    for i in 0..<probabilities.len
+        total += probabilities[i]
+        cumulative[i] = total
+
+    print(header)
+
+    while left > 0
+        val width = min(line_len, left)
+
+        for i in 0..<width
+            val r = rng.next()
+            var k = 0
+
+            while cumulative[k] < r do k += 1
+
+            line[i] = symbols.bytes[k]
+
+        line[width] = 10
+        putbytes(line[0..width])
+        left -= width
+
+main(args: []string)
+    val n = usize(parse_int(args[1]).unwrap())
+    var rng = Random(42)
+
+    repeat_fasta(">ONE Homo sapiens alu", alu, n * 2)
+    random_fasta(">TWO IUB ambiguity codes", iub_symbols, iub_probabilities, n * 3, &rng)
+    random_fasta(">THREE Homo sapiens frequency", sapiens_symbols, sapiens_probabilities, n * 5, &rng)

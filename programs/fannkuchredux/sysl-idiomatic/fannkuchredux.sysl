@@ -1,0 +1,66 @@
+import sysl.text.parse_int
+
+fannkuch(n: usize) -> (int, int)
+    var perm1: []usize = [0; n]
+    var perm: []usize = [0; n]
+    var count: []usize = [0; n]
+    var max_flips = 0
+    var checksum = 0
+    var perm_count = 0
+    var r = n
+
+    for i in 0..<n do perm1[i] = i
+
+    loop
+        while r != 1
+            count[r - 1] = r
+            r -= 1
+
+        for i in 0..<n do perm[i] = perm1[i]
+
+        var flips = 0
+
+        loop
+            val k = perm[0]
+
+            if k == 0 then break
+
+            var lo = 0
+            var hi = k
+
+            while lo < hi
+                val t = perm[lo]
+
+                perm[lo] = perm[hi]
+                perm[hi] = t
+                lo += 1
+                hi -= 1
+
+            flips += 1
+
+        if flips > max_flips then max_flips = flips
+
+        checksum += if perm_count % 2 == 0 then flips else -flips
+
+        loop
+            if r == n then return (checksum, max_flips)
+
+            val first = perm1[0]
+
+            for i in 0..<r do perm1[i] = perm1[i + 1]
+
+            perm1[r] = first
+            count[r] -= 1
+
+            if count[r] > 0 then break
+
+            r += 1
+
+        perm_count += 1
+
+main(args: []string)
+    val n = usize(parse_int(args[1]).unwrap())
+    val (checksum, max_flips) = fannkuch(n)
+
+    print(checksum)
+    print(f"Pfannkuchen($n) = $max_flips")
