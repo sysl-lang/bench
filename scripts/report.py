@@ -13,7 +13,7 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 programs = ["nbody", "spectralnorm", "fannkuchredux", "binarytrees",
             "mandelbrot", "fasta", "knucleotide", "revcomp"]
-columns = ["c", "rust", "cpp", "swift", "sysl-idiomatic", "sysl-tuned"]
+columns = ["c", "rust", "cpp", "swift", "zig", "nim", "julia", "sysl-idiomatic", "sysl-tuned"]
 
 
 def run(cmd):
@@ -38,6 +38,9 @@ toolchains = {
     "rust": {"version": first_line(run(["rustc", "--version"])),
              "llvm": run(["rustc", "--version", "--verbose"]).split("LLVM version:")[-1].strip()},
     "swift": {"version": first_line(run(["swiftc", "--version"])), "llvm": clang_llvm},
+    "zig": {"version": "zig " + first_line(run(["zig", "version"]))},
+    "nim": {"version": first_line(run(["nim", "--version"])), "llvm": clang_llvm},
+    "julia": {"version": first_line(run(["julia", "--version"]))},
     "hyperfine": {"version": first_line(run(["hyperfine", "--version"]))},
 }
 flags = {
@@ -46,6 +49,10 @@ flags = {
     "cpp": "clang++ -std=c++20 -O3 -march=native",
     "rust": "rustc --edition 2021 -C opt-level=3 -C target-cpu=native",
     "swift": "swiftc -O",
+    "zig": "zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded",
+    "nim": "nim c -d:danger --opt:speed --mm:orc --cc:clang --passC:-march=native --threads:off",
+    "julia": "julia -O3 --check-bounds=no --startup-file=no (JIT: every timed run includes "
+             "Julia's startup and compilation, as on the Benchmarks Game)",
 }
 machine = {"cpu": run(["sysctl", "-n", "machdep.cpu.brand_string"]),
            "os": first_line(run(["sw_vers", "-productVersion"]))}
