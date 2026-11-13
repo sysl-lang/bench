@@ -1,16 +1,16 @@
 # Findings
 
-Where idiomatic sysl takes more than 1.2x as long as C, and why. Each finding is one fix item for the
-compiler or the standard library. Figures are from `results/2026-11-13.md` (sysl 0.10.6, exclusive
-run, wall-clock ratio to C).
+Where sysl loses to C, and why. Each finding is one fix item for the compiler or the standard library.
+A speed-up that only a workaround in the source reaches (one that would be pointless once the
+compiler does its job) is recorded here and not written into `sysl-fast`. Figures are from
+`results/2026-11-13.md` (sysl 0.10.7, wall-clock ratio to C).
 
-| program | sysl-idiomatic | sysl-tuned |
-|---|---:|---:|
-| revcomp | 3.57 | 1.61 |
-| fasta | 3.19 | 1.18 |
-| knucleotide | 2.68 | 1.67 |
-| binarytrees | 1.65 | 1.77 |
-| nbody | 1.57 | 0.91 |
+| program | sysl-idiomatic |
+|---|---:|
+| revcomp | 3.67 |
+| knucleotide | 1.44 |
+| binarytrees | 1.42 |
+| fasta | 1.17 |
 
 ## 1. revcomp — the buffer's header is reloaded and stored on every push
 
@@ -24,17 +24,29 @@ a pointer in a register.
   `count <= elems.len` re-check after each store (deliberate, `library/sysl/buf/buf.sysl`) cannot fold
   away for the same reason. There is also a bounds check on `seq[i-1-j]`.
 - **Fix:** alias information (scoped `!alias.scope`/`!noalias`, or TBAA) that separates a
-  container's slot storage from struct-field accesses. This is the same cause as findings 2 and 5.
+  container's slot storage from struct-field accesses. This is the same cause as finding 2.
+- Writing the output by index into one preallocated array measured 1.65x. It would be pointless once
+  `push` keeps its header in registers, so it is a workaround and is not in `sysl-fast`.
 
 ## 2. fasta — generator state goes through memory every symbol
 
-The random generator's state sits behind `*Random` and is stored back to memory for every symbol
-(`str w9,[x23]`), and there is an `fdiv` per symbol. C keeps the seed in a register.
+The random generator's state sits behind `*Random`. In sysl 0.10.7's `random_fasta`, every symbol
+reloads the pointer from the stack and the state through it, and the state is stored back once per
+line:
 
-Part of the 3.19x measured above was not the compiler's: the idiomatic program then picked a symbol
-with an early-exit `while cumulative[k] < r` loop, a different algorithm from C's, which counts
-`v > p[j]` over the table without branches. It now uses C's algorithm
-(`below.count_where(p -> r > p)` over `cumul`), and its ratio is to be re-measured.
+```
+ldr   x8, [sp, #0x38]     ; the *Random, every symbol
+ldr   w8, [x8]            ; its state, every symbol
+madd  w8, w8, w16, w22    ; state * 3877 + 29573
+...
+str   w8, [x9]            ; stored back after the line
+```
+
+C keeps the seed in a register for the whole loop. Writing `state` into a local by hand and returning
+it is a workaround for this, so it is not in `sysl-fast`. The `fdiv` per symbol is C's too. Counting
+`r > p` over the 14-entry IUB table is vectorized as one 8-wide block plus a scalar tail of 6
+compare-and-increment steps, the same work as C's count. Integer thresholds in place of the
+floating-point comparison would change the work, so neither form uses them.
 
 - **Suspect:** no noalias/TBAA information separates the pointee from the local `[61]u8` line, so
   LLVM cannot keep `last` in a register.
@@ -48,22 +60,52 @@ with an early-exit `while cumulative[k] < r` loop, a different algorithm from C'
 - A newtype key with a one-multiply `impl Hash` alone took it from 2.68x to 1.67x, so the library's
   integer mixer, or its distribution on dense keys, is expensive.
 - `map_with_capacity` made no difference.
+- The newtype key would be pointless with a cheaper library mixer, so it is a workaround and is not in
+  `sysl-fast`; neither is decoding the sequence into a preallocated array in place of `Buf.push`
+  (finding 1).
 
 ## 4. binarytrees — a 48-byte node and a thread-local read on every drop
 
 Each node is `malloc(48)`, carrying a refcount, a drop-function pointer, a size and a tag, against
 C's 16 bytes. The drop goes through `l_arc.reap`, which reads thread-local state. The number of
-allocations is the same as C's. The tuned struct form is no faster (1.77x), so the enum is not the
-cause.
+allocations is the same as C's. A struct form with `Option[&Node]` children is no faster (1.50x), so
+the enum is not the cause.
 
-## 5. nbody — field reloads blocked by possible aliasing
+## 5. nbody — no fix item left at 0.10.7
 
-In the inner loop, the fields of `bodies[i]` and `bodies[j].mass` are reloaded on every iteration,
-because the stores to `bodies[j]` might alias them. C hoists them and SLP-vectorises the loop (28
-instructions against 40). The IR also emits a whole-struct load for every field read.
+Idiomatic nbody runs at 0.91x C. Two workarounds were measured against it in the same run and are
+not in `sysl-fast`:
 
-- **Secondary:** `d2.sqrt()` is `bl _real.sqrt`. The `extern "llvm.sqrt"` intrinsic gave `fsqrt`, but
-  no speedup on its own.
+- **Hoisting `bodies[i]`'s fields into locals by hand** before the inner loop, with the velocity
+  accumulated in locals: 0.90x, so the reloads that possible aliasing between `bodies[i]` and
+  `bodies[j]` forces cost nothing measurable now.
+- **`extern "llvm.sqrt"` in place of `.sqrt()`**: not needed. `.sqrt()` compiles to `fsqrt` inline
+  (ten `fsqrt` in the binary, no `bl` to a sqrt function).
+
+The gap to Rust (0.58x) and C++ (0.71x) is their vectorized layouts, which `sysl-fast` expresses with
+`<3>real` position and velocity.
+
+## 6. spectralnorm — the loop is C's, and the hand strength reduction changed the arithmetic
+
+Idiomatic spectralnorm runs at 0.97x C, and its inner loop is C's instruction for instruction:
+
+```
+sysl                              C
+sub   x17, x14, #0x1              sub   w15, w13, #0x1
+mul   x17, x14, x17               mul   w15, w13, w15
+add   x17, x13, x17, lsr #1       add   w15, w11, w15, lsr #1
+ucvtf d2, x17                     scvtf d2, w15
+fdiv  d2, d0, d2                  fdiv  d2, d0, d2
+ldr   d3, [x15], #0x8             ldr   d3, [x14], #0x8
+fmadd d1, d2, d3, d1              fmadd d1, d2, d3, d1
+```
+
+The `A^T` loop is already strength-reduced by LLVM in sysl (an `add` per column in place of the
+`mul`). A hand-written form that advances the denominator by addition and divides `v[j] / d` measured
+0.74x, but the speed comes from computing `v[j] / d` in place of `(1 / d) * v[j]`, one rounding fewer
+and different arithmetic from C's, not from anything the compiler missed. There is no compiler item
+here. The gap to Rust (0.37x) is its two-columns-per-step form, which sysl cannot write with vectors
+(below).
 
 ## Language gaps and diagnostics found while writing the programs
 
@@ -74,3 +116,16 @@ instructions against 40). The IR also emits a whole-struct load for every field 
 - `val es: Buf[E]; sort_by(es.view_mut(), (a, b) -> a.c > b.c)` reports "'a' has no type here" when
   the real error is `view_mut` on a `val`. With `var`, the closure's parameter types are inferred.
 - sysl has no equivalent of `-march=native`, while C and C++ are built with it.
+- **A vector has no lane-wise conversion between lane types.** Rust's spectralnorm computes the
+  integer denominators of two columns and converts them to two doubles; in sysl that is a `<2>usize`
+  to `<2>real`, and neither spelling is accepted:
+
+  ```
+  val i: <2>usize = [3, 4]
+  val f: <2>real = i      // cannot initialize 'f': declared <2>real but the value is <2>usize
+  val g = <2>real(i)      // expression expected
+  ```
+
+  The vectors reference page lists no such conversion ("Nothing converts through anything else"), so
+  this is a gap rather than a bug. Integer `/` is refused on vectors by design; the halving would be
+  `>> 1`. `sysl-fast` spectralnorm stays a copy of the idiomatic program until the conversion exists.
