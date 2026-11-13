@@ -1,62 +1,71 @@
 # The Computer Language Benchmarks Game: reverse-complement. Same algorithm as the C version:
 # each sequence line is complemented through a 256-entry table (characters without an entry are
-# dropped) and stored reversed, then the record is written in 60-column lines.
+# dropped) and the record is stored reversed, then written in 60-column lines. Input is read in
+# bulk, each record is compacted and reversed in place, and the output is built in one buffer.
 
 function make_table()
     xtab = zeros(UInt8, 256)
     from = codeunits("ABCDGHKMNRSTVWY")
     to = codeunits("TVGHCDMKNYSABWR")
-    for (f, t) in zip(from, to)
-        xtab[Int(f)+1] = t
-        xtab[Int(f)+33] = t
+    for i in eachindex(from)
+        xtab[Int(from[i])+1] = to[i]
+        xtab[Int(from[i])+33] = to[i]
     end
     return xtab
 end
 
 const xtab = make_table()
 
-function emit(io, rec::Vector{UInt8}, rlen::Int, line::Vector{UInt8})
-    e = rlen
+# Appends the reversed record s[1:n] to out at position o, 60 columns per line.
+function emit!(out::Vector{UInt8}, o::Int, s::Vector{UInt8}, n::Int)
+    e = n
     while e > 0
         x = min(e, 60)
         for k in 1:x
-            line[k] = rec[e-k+1]
+            @inbounds out[o+k] = s[e-k+1]
         end
-        line[x+1] = 0x0a
-        unsafe_write(io, pointer(line), x + 1)
+        o += x + 1
+        @inbounds out[o] = 0x0a
         e -= x
     end
+    return o
 end
 
 function main()
-    input = read(stdin)
+    # read(::IO) is not inferred on this Julia, so the assertion keeps everything below type-stable.
+    input = read(stdin)::Vector{UInt8}
     n = length(input)
+    out = Vector{UInt8}(undef, n + n ÷ 60 + 64)
     rec = Vector{UInt8}(undef, n + 1)
-    line = Vector{UInt8}(undef, 61)
-    out = IOBuffer()
+    o = 0
     rlen = 0
     pos = 1
     while pos <= n
-        e = findnext(==(0x0a), input, pos)
-        e = e === nothing ? n + 1 : e
-        if e > pos && input[pos] == UInt8('>')
-            emit(out, rec, rlen, line)
+        e = pos
+        while e <= n && @inbounds(input[e]) != 0x0a
+            e += 1
+        end
+        if e > pos && @inbounds(input[pos]) == UInt8('>')
+            o = emit!(out, o, rec, rlen)
             rlen = 0
-            write(out, view(input, pos:e-1))
-            write(out, 0x0a)
+            len = e - pos
+            copyto!(out, o + 1, input, pos, len)
+            o += len
+            o += 1
+            @inbounds out[o] = 0x0a
         else
             for i in pos:e-1
-                c = xtab[Int(input[i])+1]
+                @inbounds c = xtab[Int(input[i])+1]
                 if c != 0
                     rlen += 1
-                    rec[rlen] = c
+                    @inbounds rec[rlen] = c
                 end
             end
         end
         pos = e + 1
     end
-    emit(out, rec, rlen, line)
-    write(stdout, take!(out))
+    o = emit!(out, o, rec, rlen)
+    unsafe_write(stdout, pointer(out), o)
     flush(stdout)
 end
 
