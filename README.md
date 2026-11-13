@@ -81,7 +81,7 @@ Timings are only meaningful on an idle machine. On the author's machine, where m
 jobs, the proper way to run it is:
 
 ```
-caffeinate -dimsu marshal run --exclusive --quiet-load 2 --deadline 2h --dir <repo> --label "bench timing" -- zsh scripts/run.zsh
+caffeinate -dimsu marshal run --exclusive --quiet-load auto --deadline 2h --dir <repo> --label "bench timing" -- zsh scripts/run.zsh
 ```
 
 A run taken while other builds are going says so in its results file.
