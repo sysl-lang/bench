@@ -27,6 +27,18 @@ a pointer in a register.
   container's slot storage from struct-field accesses. This is the same cause as finding 2.
 - Writing the output by index into one preallocated array measured 1.65x. It would be pointless once
   `push` keeps its header in registers, so it is a workaround and is not in `sysl-fast`.
+- **Done for 0.11 (branch `buf-alias-scope`):** the header and element scopes already marked every
+  `BufCore` field and `b[i]`, but the store `push` makes (`slot_place`) carried none. It now carries
+  the element scope, so the capacity is no longer read again after each store, and where nothing
+  else in the loop branches out, the count and capacity stay in registers. The data pointer is still
+  loaded once per element, because LLVM will not reload it after the growth call. Timed under
+  `--exclusive`: 295.0 ms before, 289.9 ms after (-1.7%). With the source read `@unchecked` the times
+  are 180.1 ms and 162.6 ms (-10%). None of the other seven programs got slower.
+- **What is left is the bounds check on `seq[i-1-j]`.** With the same compiler, checked takes 305 ms
+  and unchecked 180 ms. The check is a branch out of the loop on every byte. It also stops GVN's load
+  PRE from carrying the header across iterations, so the count, capacity and data pointer are read
+  again for every byte. Even a check LLVM can prove (`seq[seq.len - 1 - j]`) is folded only after
+  GVN has run. This needs its own item: subscript checks folded or hoisted before GVN.
 
 ## 2. fasta — generator state goes through memory every symbol
 
