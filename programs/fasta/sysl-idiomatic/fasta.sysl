@@ -1,4 +1,5 @@
 import sysl.math.min
+import sysl.seq.Sequence
 import sysl.text.parse_int
 
 const line_len: usize = 60
@@ -26,8 +27,9 @@ struct Random
         real(self.last) / 139968.0
 end Random
 
+// The sequence followed by its own first line, so every line is one slice of it.
 repeat_fasta(header: string, seq: string, n: usize)
-    var line: [61]u8
+    val wrapped = seq + seq[0..<line_len]
     var at: usize = 0
     var left = n
 
@@ -36,23 +38,23 @@ repeat_fasta(header: string, seq: string, n: usize)
     while left > 0
         val width = min(line_len, left)
 
-        for i in 0..<width
-            line[i] = seq.bytes[at]
-            at = (at + 1) % seq.len
-
-        line[width] = 10
-        putbytes(line[0..width])
+        print(wrapped[at..<at + width])
+        at = (at + width) % seq.len
         left -= width
 
+// A symbol's index is how many cumulative probabilities lie below the draw. The last is never
+// counted, so a draw at the top of the range still lands on the last symbol.
 random_fasta(header: string, symbols: string, probabilities: []const real, n: usize, rng: *Random)
-    var cumulative: []real = [0.0; probabilities.len]
+    var cumul: []real = [0.0; probabilities.len]
     var line: [61]u8
     var total = 0.0
     var left = n
 
     for i in 0..<probabilities.len
         total += probabilities[i]
-        cumulative[i] = total
+        cumul[i] = total
+
+    val below = cumul[0..<cumul.len - 1]
 
     print(header)
 
@@ -61,11 +63,8 @@ random_fasta(header: string, symbols: string, probabilities: []const real, n: us
 
         for i in 0..<width
             val r = rng.next()
-            var k = 0
 
-            while cumulative[k] < r do k += 1
-
-            line[i] = symbols.bytes[k]
+            line[i] = symbols.bytes[below.count_where(p -> r > p)]
 
         line[width] = 10
         putbytes(line[0..width])

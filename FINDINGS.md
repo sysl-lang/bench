@@ -29,9 +29,12 @@ a pointer in a register.
 ## 2. fasta — generator state goes through memory every symbol
 
 The random generator's state sits behind `*Random` and is stored back to memory for every symbol
-(`str w9,[x23]`). There is an `fdiv` per symbol, and the lookup is a bounds-checked,
-data-dependent `while cumulative[k] < r` loop. C keeps the seed in a register and counts
-`v > p[j]` without branches.
+(`str w9,[x23]`), and there is an `fdiv` per symbol. C keeps the seed in a register.
+
+Part of the 3.19x measured above was not the compiler's: the idiomatic program then picked a symbol
+with an early-exit `while cumulative[k] < r` loop, a different algorithm from C's, which counts
+`v > p[j]` over the table without branches. It now uses C's algorithm
+(`below.count_where(p -> r > p)` over `cumul`), and its ratio is to be re-measured.
 
 - **Suspect:** no noalias/TBAA information separates the pointee from the local `[61]u8` line, so
   LLVM cannot keep `last` in a register.

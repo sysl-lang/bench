@@ -1,3 +1,4 @@
+import sysl.slices.{copy, reverse}
 import sysl.text.parse_int
 
 fannkuch(n: usize) -> (int, int)
@@ -16,31 +17,23 @@ fannkuch(n: usize) -> (int, int)
             count[r - 1] = r
             r -= 1
 
-        for i in 0..<n do perm[i] = perm1[i]
+        // A permutation that starts with 0 takes no flips. The flip that brings 0 to the front is
+        // counted without being made, so one that would bring it there at once needs no copy.
+        if perm1[0] != 0
+            var flips = 1
 
-        var flips = 0
+            if perm1[perm1[0]] != 0
+                copy(perm, perm1)
 
-        loop
-            val k = perm[0]
+                loop
+                    reverse(perm[0..perm[0]])
+                    flips += 1
 
-            if k == 0 then break
+                    if perm[perm[0]] == 0 then break
 
-            var lo = 0
-            var hi = k
+            if flips > max_flips then max_flips = flips
 
-            while lo < hi
-                val t = perm[lo]
-
-                perm[lo] = perm[hi]
-                perm[hi] = t
-                lo += 1
-                hi -= 1
-
-            flips += 1
-
-        if flips > max_flips then max_flips = flips
-
-        checksum += if perm_count % 2 == 0 then flips else -flips
+            checksum += if perm_count % 2 == 0 then flips else -flips
 
         loop
             if r == n then return (checksum, max_flips)
