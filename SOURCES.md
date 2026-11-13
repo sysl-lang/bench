@@ -94,7 +94,8 @@ What each `sysl-fast` program does differently from `sysl-idiomatic`:
 
 - **nbody**: a body's position and velocity are `<3>real`, so a pair's distance, its squared length
   and both velocity updates are vector operations.
-- **fannkuchredux**: the permutation state is three `[16]usize` arrays instead of heap slices.
 - **spectralnorm**: a copy. Rust's form, two columns per step, needs the integer denominators of two
   columns as a `<2>real`, and sysl has no conversion from `<2>usize` to `<2>real` (FINDINGS.md).
+- **fannkuchredux**: a copy. Three `[16]usize` arrays in place of the heap slices measured no faster
+  (1.351 s against 1.333 s).
 - **binarytrees, mandelbrot, fasta, knucleotide, revcomp**: copies.
