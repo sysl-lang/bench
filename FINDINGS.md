@@ -39,6 +39,10 @@ a pointer in a register.
   PRE from carrying the header across iterations, so the count, capacity and data pointer are read
   again for every byte. Even a check LLVM can prove (`seq[seq.len - 1 - j]`) is folded only after
   GVN has run. This needs its own item: subscript checks folded or hoisted before GVN.
+- **Measured on sysl 0.11.0** (`results/2026-11-14.md`): idiomatic revcomp takes 172 ms, against 305 ms
+  on 0.10.7 (3.67x C down to 2.07x), which is the unchecked figure above. The 0.11 bounds hoist (P4)
+  together with the element scope removed the per-byte check. What remains against C is the
+  output loop's data-pointer reload.
 
 ## 2. fasta — generator state goes through memory every symbol
 
@@ -96,6 +100,8 @@ Measured on sysl 0.10.7 at size 18 (exclusive run):
   on the spot. binarytrees went from 917.5 to 752.2 ms (-18%). The other programs did not move.
 - **Left:** two counts in one word would pay on glibc, where a 48-byte box is a 64-byte chunk, but it
   changes the documented three-word header. That is a user decision.
+- **Measured on sysl 0.11.0** (`results/2026-11-14.md`): 754 ms (1.19x C), against 893 ms (1.42x) on
+  0.10.7, which matches the 752 ms the fix measured on dev.
 
 ## 5. nbody — no fix item left at 0.10.7
 
