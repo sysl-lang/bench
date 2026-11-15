@@ -18,7 +18,7 @@ for prog in $PROGRAMS; do
     out=$BUILD/$prog/$lang
     rm -f $out
     case $lang in
-      sysl-*) sysl build --release -O3 -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
+      sysl-*) sysl build --release -O3 --cpu native -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
       c)      clang -std=gnu17 -O3 -march=native -w -I$dir $dir/$prog.c -o $out -lm >$out.log 2>&1 ;;
       cpp)    clang++ -std=c++20 -O3 -march=native -w $dir/$prog.cpp -o $out >$out.log 2>&1 ;;
       rust)   rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native $dir/$prog.rs -o $out >$out.log 2>&1 ;;

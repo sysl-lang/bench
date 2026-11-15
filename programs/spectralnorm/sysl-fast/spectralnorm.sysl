@@ -1,22 +1,31 @@
 import sysl.text.parse_int
 
-a(i: usize, j: usize) -> real = 1.0 / real((i + j) * (i + j + 1) / 2 + i + 1)
+// Two columns per step, as in the Rust program: both columns' integer
+// denominators are computed together and converted to two doubles.
+a2(ii: <2>usize, jj: <2>usize) -> <2>real
+    val s = ii + jj
+
+    <2>real((s * (s + 1) >> 1) + ii + 1)
 
 times(v: []const real, out: []real)
     for i in 0..<out.len
-        var sum = 0.0
+        var sum: <2>real = 0
 
-        for j in 0..<v.len do sum += a(i, j) * v[j]
+        for j in 0..<v.len / 2
+            val top: <2>real = v.load(2 * j)
+            sum += top / a2([i, i], [2 * j, 2 * j + 1])
 
-        out[i] = sum
+        out[i] = sum.sum()
 
 times_transpose(v: []const real, out: []real)
     for i in 0..<out.len
-        var sum = 0.0
+        var sum: <2>real = 0
 
-        for j in 0..<v.len do sum += a(j, i) * v[j]
+        for j in 0..<v.len / 2
+            val top: <2>real = v.load(2 * j)
+            sum += top / a2([2 * j, 2 * j + 1], [i, i])
 
-        out[i] = sum
+        out[i] = sum.sum()
 
 times_a_transpose_a(v: []const real, out: []real, tmp: []real)
     times(v, tmp)

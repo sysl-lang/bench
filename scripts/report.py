@@ -44,7 +44,7 @@ toolchains = {
     "hyperfine": {"version": first_line(run(["hyperfine", "--version"]))},
 }
 flags = {
-    "sysl": "sysl build --release -O3",
+    "sysl": "sysl build --release -O3 --cpu native",
     "c": "clang -std=gnu17 -O3 -march=native",
     "cpp": "clang++ -std=c++20 -O3 -march=native",
     "rust": "rustc --edition 2021 -C opt-level=3 -C target-cpu=native",

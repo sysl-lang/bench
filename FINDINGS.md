@@ -136,8 +136,15 @@ The `A^T` loop is already strength-reduced by LLVM in sysl (an `add` per column 
 `mul`). A hand-written form that advances the denominator by addition and divides `v[j] / d` measured
 0.74x, but the speed comes from computing `v[j] / d` in place of `(1 / d) * v[j]`, one rounding fewer
 and different arithmetic from C's, not from anything the compiler missed. There is no compiler item
-here. The gap to Rust (0.37x) is its two-columns-per-step form, which sysl cannot write with vectors
-(below).
+here. Rust's 0.37x is its two-columns-per-step form. `sysl-fast` writes the same arithmetic: the two
+columns' integer denominators as a `<2>usize`, converted with `<2>real(...)` (a vector converts
+lane-wise from 0.11.0, and `>> 1` stands for the halving, since integer `/` is not defined on
+vectors), and runs at 0.57x C. The remaining gap to Rust is 0.20x.
+
+sysl builds with `--cpu native` (or `--cpu <llvm-name>`, from 0.11.3), the counterpart of C's
+`-march=native`; against the generic-target build the geometric mean of `sysl-idiomatic` went from
+1.01 to 1.00 and `sysl-fast` from 0.96 to 0.88 (that includes the spectralnorm form above; revcomp
+moved from 2.08 to 1.92).
 
 ## Language gaps and diagnostics found while writing the programs
 
@@ -147,17 +154,3 @@ here. The gap to Rust (0.37x) is its two-columns-per-step form, which sysl canno
   but usize was given"), although the literal `60` does.
 - `val es: Buf[E]; sort_by(es.view_mut(), (a, b) -> a.c > b.c)` reports "'a' has no type here" when
   the real error is `view_mut` on a `val`. With `var`, the closure's parameter types are inferred.
-- sysl has no equivalent of `-march=native`, while C and C++ are built with it.
-- **A vector has no lane-wise conversion between lane types.** Rust's spectralnorm computes the
-  integer denominators of two columns and converts them to two doubles; in sysl that is a `<2>usize`
-  to `<2>real`, and neither spelling is accepted:
-
-  ```
-  val i: <2>usize = [3, 4]
-  val f: <2>real = i      // cannot initialize 'f': declared <2>real but the value is <2>usize
-  val g = <2>real(i)      // expression expected
-  ```
-
-  The vectors reference page lists no such conversion ("Nothing converts through anything else"), so
-  this is a gap rather than a bug. Integer `/` is refused on vectors by design; the halving would be
-  `>> 1`. `sysl-fast` spectralnorm stays a copy of the idiomatic program until the conversion exists.

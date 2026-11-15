@@ -39,7 +39,7 @@ names the origin of every file and says exactly what was changed.
    arena for binary-trees or a direct-indexed array for k-nucleotide, is not allowed in either sysl form.
 4. **Output is verified before anything is timed.** A wrong answer fails the run.
 5. **Release flags**: C and C++ `-O3 -march=native`; Rust `-C opt-level=3 -C target-cpu=native`; Swift
-   `-O`; sysl `--release -O3` (sysl has no `-march` flag, so it builds for the generic target).
+   `-O`; sysl `--release -O3 --cpu native`.
 
 ## Layout
 
