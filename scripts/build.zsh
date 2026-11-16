@@ -16,6 +16,7 @@ for prog in $PROGRAMS; do
   for lang in $LANGS; do
     dir=programs/$prog/$lang
     out=$BUILD/$prog/$lang
+    [[ $lang == eiffel-contracts ]] && dir=programs/$prog/eiffel   # the same source, built with assertions on
     rm -f $out
     case $lang in
       sysl-*) sysl build --release -O3 --cpu native -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
@@ -28,6 +29,22 @@ for prog in $PROGRAMS; do
       go)     go build -o $out $dir/$prog.go >$out.log 2>&1 ;;
       d)      ldc2 -O3 -release -mcpu=native -of=$out -od=$BUILD/.dobj/$prog $dir/$prog.d >$out.log 2>&1 ;;
       odin)   odin build $dir/$prog.odin -file -o:speed -microarch:native -out:$out >$out.log 2>&1 ;;
+      c3)     c3c compile -O3 --obj-out $BUILD/.c3obj/$prog -o $out $dir/$prog.c3 >$out.log 2>&1 ;;
+      eiffel|eiffel-contracts)
+              # EiffelStudio's finalized (optimised) build. The .ecf has a `release` target with
+              # every assertion off and a `contracts` target with them all on.
+              target=release
+              [[ $lang == eiffel-contracts ]] && target=contracts
+              rm -rf $BUILD/.eifgen/$prog/$lang
+              ec -batch -finalize -config $dir/$prog.ecf -target $target -project_path $BUILD/.eifgen/$prog/$lang -c_compile >$out.log 2>&1
+              cp $BUILD/.eifgen/$prog/$lang/EIFGENs/$target/F_code/$prog $out 2>>$out.log ;;
+      java)   # The JVM runs bytecode: the "executable" is a launcher, so every timed run
+              # includes JVM startup and JIT warm-up, as on the Benchmarks Game.
+              mkdir -p $BUILD/.jclasses/$prog
+              if javac -d $BUILD/.jclasses/$prog $dir/$prog.java >$out.log 2>&1; then
+                printf '#!/bin/sh\nexec java -cp %s %s "$@"\n' $BUILD/.jclasses/$prog $prog > $out
+                chmod +x $out
+              fi ;;
       julia)  # Julia is JIT-compiled: the "executable" is a launcher, so every timed run
               # includes Julia's startup and compilation, as on the Benchmarks Game.
               printf '#!/bin/sh\nexec julia -O3 --check-bounds=no --startup-file=no %s "$@"\n' $ROOT/$dir/$prog.jl > $out

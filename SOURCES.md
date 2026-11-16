@@ -89,6 +89,41 @@ associative array `uint[ulong]` and Odin's built-in `map[u64]u32`, keyed by the 
 `core.stdc` stdio and `malloc` where the C program does; Odin uses `core:bufio` over stdin and stdout
 and `new`/`free`.
 
+### Java
+
+Java's programs come from the same archive (`*.java` files, BSD-3, headers kept), compiled with `javac`
+and run with `java -cp`. Each is the single-threaded entry that is the C program's algorithm; none needed a
+change, and every one is single-threaded as published.
+
+| program | Java archive file | changes |
+|---|---|---|
+| nbody | `nbody.java-8.java` | unchanged |
+| spectralnorm | `spectralnorm.java-8.java` | unchanged |
+| fannkuchredux | `fannkuchredux.java-8.java` | unchanged |
+| binarytrees | `binarytrees.java-2.java` | unchanged (a `TreeNode` per allocation, no pool) |
+| mandelbrot | `mandelbrot.java-8.java` | unchanged |
+| fasta | `fasta.java-8.java` | unchanged (a transliteration of the C program, linear lookup) |
+| knucleotide | `knucleotide.java-8.java` | unchanged (a `HashMap<String,Integer>` keyed by the k-mer as a string, sorted by count) |
+| revcomp | `revcomp.java-4.java` | unchanged |
+
+### C3, Eiffel
+
+**C3 and Eiffel are not in the archive.** Every C3 and Eiffel program is **a port of the C program, written
+for this suite**, from the same C file as the C row above (same algorithm and data layout, idiomatic for
+the language).
+
+- **C3**: `libc` `putc`, `fwrite` and `fgets` for output and input where the C program uses stdio; `mem::alloc`
+  and `mem::free` for the tree nodes. k-nucleotide counts into the standard library's `HashMap{ulong, uint}`
+  keyed by the 2k-bit code and sorts with `libc::qsort`. reverse-complement fills a growing buffer in
+  order through the complement table and writes it back reversed, where the C program fills from the end.
+- **Eiffel** (EiffelStudio's `ec`): arrays are `ARRAY [REAL_64]` and `ARRAY [INTEGER]` (n-body keeps one
+  array per field, because a second class for the body would put a second file in the directory);
+  binary-trees has a second class `TREE_NODE`; output goes through `io`. k-nucleotide counts into
+  `HASH_TABLE [INTEGER, INTEGER_64]` keyed by the 2k-bit code and orders the at most sixteen entries of
+  a frequency table with an insertion sort. reverse-complement, like C3's, builds the sequence in order
+  and writes it back reversed. Each program has an `.ecf` project file with two targets, `release` and
+  `contracts` (README rule 7).
+
 ## Implementation variants of one algorithm
 
 Some programs differ in how the same arithmetic is laid out, as they do on the Benchmarks Game. The

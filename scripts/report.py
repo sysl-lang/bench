@@ -13,8 +13,8 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 programs = ["nbody", "spectralnorm", "fannkuchredux", "binarytrees",
             "mandelbrot", "fasta", "knucleotide", "revcomp"]
-systems = ["c", "rust", "cpp", "zig", "d", "odin", "nim", "swift", "sysl-idiomatic", "sysl-fast"]
-managed = ["go", "julia"]
+systems = ["c", "rust", "cpp", "zig", "d", "odin", "c3", "nim", "swift", "sysl-idiomatic", "sysl-fast"]
+managed = ["go", "java", "eiffel", "eiffel-contracts", "julia"]
 columns = systems + managed
 
 
@@ -47,6 +47,10 @@ toolchains = {
     "d": {"version": first_line(run(["ldc2", "--version"])),
           "llvm": run(["ldc2", "--version"]).split("LLVM ")[1].split("\n")[0].strip()},
     "odin": {"version": first_line(run(["odin", "version"])), "llvm": clang_llvm},
+    "c3": {"version": first_line(run(["c3c", "--version"])),
+           "llvm": run(["c3c", "--version"]).split("LLVM version:")[1].split("\n")[0].strip()},
+    "java": {"version": first_line(run(["java", "--version"]))},
+    "eiffel": {"version": first_line(run(["ec", "-version"])), "llvm": clang_llvm},
     "hyperfine": {"version": first_line(run(["hyperfine", "--version"]))},
 }
 flags = {
@@ -60,6 +64,17 @@ flags = {
     "go": "go build (default flags: Go has no optimisation level; bounds checks stay on)",
     "d": "ldc2 -O3 -release -mcpu=native (-release drops asserts and the bounds checks of @system code)",
     "odin": "odin build -o:speed -microarch:native (bounds checks stay on)",
+    "c3": "c3c compile -O3 (-O3 is c3c's unsafe mode: runtime bounds checks and contracts are off; "
+          "c3c has no native-CPU option for arm64)",
+    "java": "javac, then java -cp (default JIT flags; bounds checks stay on; JVM startup and JIT "
+            "warm-up are inside every timed run, as on the Benchmarks Game)",
+    "eiffel": "ec -finalize -c_compile, ECF target `release`: every assertion off (precondition, "
+              "postcondition, check, invariant, loop); the C compiler is the machine's clang with "
+              "EiffelStudio's own flags, which have no native-CPU option; array indices are not "
+              "range-checked, as they are by a precondition",
+    "eiffel-contracts": "the same source as `eiffel`, ECF target `contracts`: precondition, "
+                        "postcondition, check, invariant and loop (invariant and variant) "
+                        "assertions all on",
     "julia": "julia -O3 --check-bounds=no --startup-file=no (JIT: every timed run includes "
              "Julia's startup and compilation, as on the Benchmarks Game)",
 }
