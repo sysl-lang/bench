@@ -34,7 +34,8 @@ for prog in $PROGRAMS; do
       c3)     c3c compile -O3 --obj-out $BUILD/.c3obj/$prog -o $out $dir/$prog.c3 >$out.log 2>&1 ;;
       eiffel|eiffel-contracts)
               # EiffelStudio's finalized (optimised) build. The .ecf has a `release` target with
-              # every assertion off and a `contracts` target with them all on.
+              # every assertion off and a `contracts` target with them all on; both inline
+              # (`inlining` true, `inlining_size` 100), as a finalized release build should.
               target=release
               [[ $lang == eiffel-contracts ]] && target=contracts
               rm -rf $BUILD/.eifgen/$prog/$lang

@@ -11,6 +11,8 @@
 		<setting name="console_application" value="true"/>
 		<setting name="executable_name" value="knucleotide"/>
 		<setting name="exception_trace" value="false"/>
+		<setting name="inlining" value="true"/>
+		<setting name="inlining_size" value="100"/>
 		<capability>
 			<concurrency support="none"/>
 		</capability>

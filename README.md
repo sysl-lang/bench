@@ -46,7 +46,8 @@ names the origin of every file and says exactly what was changed.
    (Go has no optimisation level); D (LDC) `-O3 -release -mcpu=native`; Odin `-o:speed -microarch:native`;
    C3 `c3c compile -O3` (c3c has no native-CPU option on arm64); Ada (GNAT) `gnatmake -O3 -gnatp -march=native`; Java `javac` and `java` with default
    flags (the JIT already targets the host CPU); Eiffel `ec -finalize -c_compile` (EiffelStudio's
-   optimised build, which has no native-CPU option); sysl `--release -O3 --cpu native`.
+   optimised build with Eiffel-level inlining on, `inlining_size` 100, set in each .ecf; without it
+   every `ARRAY.item` is an out-of-line call with GC bookkeeping; no native-CPU option); sysl `--release -O3 --cpu native`.
 6. **Checks that remain.** Rust, Go, Odin and Java keep their bounds checks. C, C++, Zig ReleaseFast, Nim
    `danger`, C3 `-O3` (c3c's unsafe mode, which turns off bounds checks and contracts) and Ada `-gnatp`
    (which suppresses every run-time check) have none, and D
