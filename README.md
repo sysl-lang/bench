@@ -44,15 +44,26 @@ names the origin of every file and says exactly what was changed.
 5. **Release flags**: C and C++ `-O3 -march=native`; Rust `-C opt-level=3 -C target-cpu=native`; Swift
    `-O`; Zig `-O ReleaseFast -mcpu=native`; Nim `-d:danger --opt:speed`; Go `go build` with default flags
    (Go has no optimisation level); D (LDC) `-O3 -release -mcpu=native`; Odin `-o:speed -microarch:native`;
-   sysl `--release -O3 --cpu native`.
-6. **Checks that remain.** Rust, Go and Odin keep their bounds checks. C, C++, Zig ReleaseFast and Nim
-   `danger` have none, and D with `-release` drops the bounds checks of `@system` code, which is what
-   these D programs are.
+   C3 `c3c compile -O3` (c3c has no native-CPU option on arm64); Java `javac` and `java` with default
+   flags (the JIT already targets the host CPU); Eiffel `ec -finalize -c_compile` (EiffelStudio's
+   optimised build, which has no native-CPU option); sysl `--release -O3 --cpu native`.
+6. **Checks that remain.** Rust, Go, Odin and Java keep their bounds checks. C, C++, Zig ReleaseFast, Nim
+   `danger` and C3 `-O3` (c3c's unsafe mode, which turns off bounds checks and contracts) have none, and D
+   with `-release` drops the bounds checks of `@system` code, which is what these D programs are. Eiffel's
+   array indices are checked by a precondition, so they are checked only where assertions are on.
+7. **Eiffel is timed twice.** `eiffel` is the finalized build with every assertion off, which is its release
+   mode; `eiffel-contracts` is the same source built with `precondition`, `postcondition`, `check`,
+   `invariant` and `loop` assertions all on. Each Eiffel program carries its contracts: preconditions on
+   index ranges and sizes, class invariants, and loop invariants and variants where the loop has one. The
+   second column measures what the contracts cost at run time.
+8. **Java's timing is the whole process**, JVM startup and JIT warm-up included, as in the Benchmarks Game:
+   `build/<program>/java` is a launcher script that runs `java -cp` on the compiled classes, as the Julia
+   one does. Eiffel and C3 compile to native executables.
 
 ## Groups
 
-The tables group the languages. **Systems**: c, cpp, rust, zig, d, odin, nim, swift, sysl-idiomatic,
-sysl-fast. **Managed**: go, julia. The criterion: a systems language can run with no tracing GC and no
+The tables group the languages. **Systems**: c, cpp, rust, zig, d, odin, c3, nim, swift, sysl-idiomatic,
+sysl-fast. **Managed**: go, java, eiffel, eiffel-contracts, julia. The criterion: a systems language can run with no tracing GC and no
 required runtime, with deterministic destruction and control over layout (Swift via Embedded Swift, Nim
 via `--os:standalone`, D via `-betterC`); every program here runs in the language's normal hosted mode.
 The report gives the geometric mean of each group as well as overall.
@@ -60,7 +71,9 @@ The report gives the geometric mean of each group as well as overall.
 ## Layout
 
 ```
-programs/<name>/{sysl-idiomatic,sysl-fast,c,rust,cpp,swift,zig,nim,julia,go,d,odin}/   one source file per directory
+programs/<name>/{sysl-idiomatic,sysl-fast,c,rust,cpp,swift,zig,nim,julia,go,d,odin,c3,java,eiffel}/   one source file per directory
+                   (Eiffel adds its .ecf project file, and a second class file where a program needs one;
+                   `eiffel-contracts` is built from the `eiffel` directory)
 expected/ref/      the Benchmarks Game's published output (and input) at a small size
 expected/<name>.sha256   sha256 of the output at the timed size, from the C program
 scripts/build.zsh  builds everything into build/ and generates the shared input
@@ -79,7 +92,7 @@ at `build/inputs/`.
 
 ## Running it
 
-Requires clang, rustc, swiftc, zig, nim, julia, go, ldc2, odin, [hyperfine](https://github.com/sharkdp/hyperfine) 2.x and `sysl` on
+Requires clang, rustc, swiftc, zig, nim, julia, go, ldc2, odin, c3c, a JDK (`javac`, `java`), EiffelStudio (`ec`), [hyperfine](https://github.com/sharkdp/hyperfine) 2.x and `sysl` on
 `PATH`.
 
 ```
