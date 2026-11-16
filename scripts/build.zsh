@@ -29,6 +29,8 @@ for prog in $PROGRAMS; do
       go)     go build -o $out $dir/$prog.go >$out.log 2>&1 ;;
       d)      ldc2 -O3 -release -mcpu=native -of=$out -od=$BUILD/.dobj/$prog $dir/$prog.d >$out.log 2>&1 ;;
       odin)   odin build $dir/$prog.odin -file -o:speed -microarch:native -out:$out >$out.log 2>&1 ;;
+      ada)    mkdir -p $BUILD/.adaobj/$prog
+              gnatmake -q -O3 -gnatp -march=native -D $BUILD/.adaobj/$prog -o $out $dir/$prog.adb >$out.log 2>&1 ;;
       c3)     c3c compile -O3 --obj-out $BUILD/.c3obj/$prog -o $out $dir/$prog.c3 >$out.log 2>&1 ;;
       eiffel|eiffel-contracts)
               # EiffelStudio's finalized (optimised) build. The .ecf has a `release` target with

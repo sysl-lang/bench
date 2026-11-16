@@ -124,6 +124,30 @@ the language).
   and writes it back reversed. Each program has an `.ecf` project file with two targets, `release` and
   `contracts` (README rule 7).
 
+### Ada
+
+**Every Ada program is a port of the C program, written for this suite** (same algorithm and data
+layout, idiomatic Ada, one `.adb` file per program), compiled with GNAT 16.1.0. The archive's Ada
+programs were passed over, not adapted: the single-threaded ones (`nbody.gnat`, `spectralnorm.gnat`,
+`binarytrees.gnat`, `fasta.gnat`, `revcomp.gnat`) are the 2005 originals, each split across several
+compilation units that `gnatchop` would have to cut apart, and the fast ones (`fannkuchredux.gnat-3`,
+`knucleotide.gnat-2`, `mandelbrot.gnat-3`, `spectralnorm.gnat-3`, `revcomp.gnat-2`) are built on Ada
+tasks, so adapting them to one thread means rewriting them. Each file keeps the header of the C
+program it ports, so **the licence is the Benchmarks Game's BSD-3-Clause** as for the C programs.
+
+- **Numbers**: `Long_Float` and `Ada.Numerics.Long_Elementary_Functions.Sqrt`; output through
+  `Float_IO` with `Aft => 9, Exp => 0` (and `Aft => 3` for k-nucleotide's percentages, which the C
+  program divides in single precision, so the Ada divides in `Float`).
+- **binarytrees**: an access type, `new` and `Ada.Unchecked_Deallocation` per node (GNAT's default pool
+  is `malloc`/`free`).
+- **mandelbrot**: a row of bytes at a time written to a `Text_Streams` stream, because `Text_IO` is
+  text.
+- **fasta, revcomp, knucleotide**: input and output through `Ada.Text_IO` lines; revcomp fills a buffer
+  from its end through the complement table, as the C program does.
+- **knucleotide** counts into the standard library's `Ada.Containers.Hashed_Maps` (`Unsigned_64` to
+  `Unsigned_32`) keyed by the 2k-bit code, with the C program's `key xor key >> 7` hash, and sorts the
+  elements with `Ada.Containers.Generic_Array_Sort`.
+
 ## Implementation variants of one algorithm
 
 Some programs differ in how the same arithmetic is laid out, as they do on the Benchmarks Game. The

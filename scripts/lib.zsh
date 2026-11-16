@@ -1,11 +1,11 @@
 # Shared definitions for build.zsh and run.zsh. Sourced, never run.
 
 ROOT=${0:A:h:h}
-export PATH=/Users/work/.cargo/bin:/opt/homebrew/opt/openjdk/bin:/opt/homebrew/opt/eiffelstudio/bin:/opt/homebrew/bin:$PATH
+export PATH=$HOME/.local/gnat-16.1.0/bin:/Users/work/.cargo/bin:/opt/homebrew/opt/openjdk/bin:/opt/homebrew/opt/eiffelstudio/bin:/opt/homebrew/bin:$PATH
 
 PROGRAMS=(nbody spectralnorm fannkuchredux binarytrees mandelbrot fasta knucleotide revcomp)
-LANGS=(sysl-idiomatic sysl-tuned c rust cpp swift zig nim julia go d odin c3 java eiffel eiffel-contracts)
-SYSTEMS=(c rust cpp zig d odin c3 nim swift sysl-idiomatic sysl-tuned)
+LANGS=(sysl-idiomatic sysl-tuned c rust cpp swift zig nim julia go d odin c3 ada java eiffel eiffel-contracts)
+SYSTEMS=(c rust cpp zig d odin c3 ada nim swift sysl-idiomatic sysl-tuned)
 MANAGED=(go java eiffel eiffel-contracts julia)
 
 # Size handed to each program as its one argument. knucleotide and revcomp

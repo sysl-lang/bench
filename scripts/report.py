@@ -13,14 +13,15 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 programs = ["nbody", "spectralnorm", "fannkuchredux", "binarytrees",
             "mandelbrot", "fasta", "knucleotide", "revcomp"]
-systems = ["c", "rust", "cpp", "zig", "d", "odin", "c3", "nim", "swift", "sysl-idiomatic", "sysl-tuned"]
+systems = ["c", "rust", "cpp", "zig", "d", "odin", "c3", "ada", "nim", "swift", "sysl-idiomatic", "sysl-tuned"]
 managed = ["go", "java", "eiffel", "eiffel-contracts", "julia"]
 columns = systems + managed
 
 
 def run(cmd):
     env = dict(os.environ)
-    env["PATH"] = "/Users/work/.cargo/bin:" + env["PATH"]
+    env["PATH"] = (os.path.expanduser("~/.local/gnat-16.1.0/bin") + ":/Users/work/.cargo/bin:"
+                   + env["PATH"])
     out = subprocess.run(cmd, capture_output=True, text=True, env=env, input="")
     return (out.stdout + out.stderr).strip()
 
@@ -49,6 +50,8 @@ toolchains = {
     "odin": {"version": first_line(run(["odin", "version"])), "llvm": clang_llvm},
     "c3": {"version": first_line(run(["c3c", "--version"])),
            "llvm": run(["c3c", "--version"]).split("LLVM version:")[1].split("\n")[0].strip()},
+    "ada": {"version": first_line(run(["gnat", "--version"])),
+            "backend": "GCC's own back end (not LLVM)"},
     "java": {"version": first_line(run(["java", "--version"]))},
     "eiffel": {"version": first_line(run(["ec", "-version"])), "llvm": clang_llvm},
     "hyperfine": {"version": first_line(run(["hyperfine", "--version"]))},
@@ -66,6 +69,9 @@ flags = {
     "odin": "odin build -o:speed -microarch:native (bounds checks stay on)",
     "c3": "c3c compile -O3 (-O3 is c3c's unsafe mode: runtime bounds checks and contracts are off; "
           "c3c has no native-CPU option for arm64)",
+    "ada": "gnatmake -O3 -gnatp -march=native (-gnatp suppresses every run-time check, "
+           "bounds checks included, as C's -O3 has none; GNAT is GCC's Ada front end and "
+           "uses GCC's back end)",
     "java": "javac, then java -cp (default JIT flags; bounds checks stay on; JVM startup and JIT "
             "warm-up are inside every timed run, as on the Benchmarks Game)",
     "eiffel": "ec -finalize -c_compile, ECF target `release`: every assertion off (precondition, "
