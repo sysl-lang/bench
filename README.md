@@ -39,12 +39,25 @@ names the origin of every file and says exactly what was changed.
    arena for binary-trees or a direct-indexed array for k-nucleotide, is not allowed in either sysl form.
 4. **Output is verified before anything is timed.** A wrong answer fails the run.
 5. **Release flags**: C and C++ `-O3 -march=native`; Rust `-C opt-level=3 -C target-cpu=native`; Swift
-   `-O`; sysl `--release -O3 --cpu native`.
+   `-O`; Zig `-O ReleaseFast -mcpu=native`; Nim `-d:danger --opt:speed`; Go `go build` with default flags
+   (Go has no optimisation level); D (LDC) `-O3 -release -mcpu=native`; Odin `-o:speed -microarch:native`;
+   sysl `--release -O3 --cpu native`.
+6. **Checks that remain.** Rust, Go and Odin keep their bounds checks. C, C++, Zig ReleaseFast and Nim
+   `danger` have none, and D with `-release` drops the bounds checks of `@system` code, which is what
+   these D programs are.
+
+## Groups
+
+The tables group the languages. **Systems**: c, cpp, rust, zig, d, odin, nim, swift, sysl-idiomatic,
+sysl-fast. **Managed**: go, julia. The criterion: a systems language can run with no tracing GC and no
+required runtime, with deterministic destruction and control over layout (Swift via Embedded Swift, Nim
+via `--os:standalone`, D via `-betterC`); every program here runs in the language's normal hosted mode.
+The report gives the geometric mean of each group as well as overall.
 
 ## Layout
 
 ```
-programs/<name>/{sysl-idiomatic,sysl-fast,c,rust,cpp,swift}/   one source file per directory
+programs/<name>/{sysl-idiomatic,sysl-fast,c,rust,cpp,swift,zig,nim,julia,go,d,odin}/   one source file per directory
 expected/ref/      the Benchmarks Game's published output (and input) at a small size
 expected/<name>.sha256   sha256 of the output at the timed size, from the C program
 scripts/build.zsh  builds everything into build/ and generates the shared input
@@ -63,7 +76,7 @@ at `build/inputs/`.
 
 ## Running it
 
-Requires clang, rustc, swiftc, [hyperfine](https://github.com/sharkdp/hyperfine) 2.x and `sysl` on
+Requires clang, rustc, swiftc, zig, nim, julia, go, ldc2, odin, [hyperfine](https://github.com/sharkdp/hyperfine) 2.x and `sysl` on
 `PATH`.
 
 ```

@@ -4,7 +4,9 @@ ROOT=${0:A:h:h}
 export PATH=/Users/work/.cargo/bin:/opt/homebrew/bin:$PATH
 
 PROGRAMS=(nbody spectralnorm fannkuchredux binarytrees mandelbrot fasta knucleotide revcomp)
-LANGS=(sysl-idiomatic sysl-fast c rust cpp swift zig nim julia)
+LANGS=(sysl-idiomatic sysl-fast c rust cpp swift zig nim julia go d odin)
+SYSTEMS=(c rust cpp zig d odin nim swift sysl-idiomatic sysl-fast)
+MANAGED=(go julia)
 
 # Size handed to each program as its one argument. knucleotide and revcomp
 # take no argument and read the generated fasta file on standard input.

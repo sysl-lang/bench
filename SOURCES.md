@@ -64,6 +64,31 @@ included, must do (README rule 3).
 | revcomp | Rust | `revcomp.rust-2.rust` | `rayon::join` replaced by a local sequential `join` |
 | revcomp | Swift | `revcomp.swift` | the Dispatch reader, worker and writer queues replaced by a sequential loop |
 
+### Go, D and Odin
+
+Go's programs come from the same archive (`*.go` files, BSD-3, headers kept). Where several entries
+exist the one chosen is the single-threaded entry that is the C program's algorithm, or the fastest
+threaded one converted. Go has no optimisation flags, so `go build` runs with its defaults.
+
+| program | Go archive file | changes |
+|---|---|---|
+| nbody | `nbody.go` | unchanged |
+| spectralnorm | `spectralnorm.go-8.go` | unchanged |
+| fannkuchredux | `fannkuchredux.go-8.go` | unchanged |
+| binarytrees | `binarytrees.go-7.go` | unchanged (a `*Node` per allocation) |
+| mandelbrot | `mandelbrot.go-8.go` | unchanged |
+| fasta | `fasta.go-8.go` | unchanged (a transliteration of the C program, linear lookup) |
+| knucleotide | `knucleotide.go-4.go` | keys the `map` by the 2k-bit `uint32`/`uint64` code. The `runtime.NumCPU` goroutine workers and result channels replaced by running the seven jobs in order on the main goroutine |
+| revcomp | `revcomp.go-2.go` | unchanged |
+
+**D and Odin are not in the archive.** Every D and Odin program is **a port of the C program, written
+for this suite** (same algorithm and data layout, idiomatic for the language): `nbody`,
+`spectralnorm`, `fannkuchredux`, `binarytrees`, `mandelbrot`, `fasta`, `knucleotide` and `revcomp`, in
+both languages, from the same C file as the C row above. k-nucleotide counts into D's built-in
+associative array `uint[ulong]` and Odin's built-in `map[u64]u32`, keyed by the 2k-bit code. D uses
+`core.stdc` stdio and `malloc` where the C program does; Odin uses `core:bufio` over stdin and stdout
+and `new`/`free`.
+
 ## Implementation variants of one algorithm
 
 Some programs differ in how the same arithmetic is laid out, as they do on the Benchmarks Game. The

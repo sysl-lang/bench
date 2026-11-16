@@ -25,6 +25,9 @@ for prog in $PROGRAMS; do
       swift)  swiftc -O $dir/$prog.swift -o $out >$out.log 2>&1 ;;
       zig)    (cd $dir && zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded -lc --cache-dir $BUILD/.zig-cache --global-cache-dir $BUILD/.zig-global -femit-bin=$out $prog.zig) >$out.log 2>&1 ;;
       nim)    nim c -d:danger --opt:speed --mm:orc --cc:clang --passC:-march=native --threads:off --hints:off --warnings:off --nimcache:$BUILD/.nimcache/$prog -o:$out $dir/$prog.nim >$out.log 2>&1 ;;
+      go)     go build -o $out $dir/$prog.go >$out.log 2>&1 ;;
+      d)      ldc2 -O3 -release -mcpu=native -of=$out -od=$BUILD/.dobj/$prog $dir/$prog.d >$out.log 2>&1 ;;
+      odin)   odin build $dir/$prog.odin -file -o:speed -microarch:native -out:$out >$out.log 2>&1 ;;
       julia)  # Julia is JIT-compiled: the "executable" is a launcher, so every timed run
               # includes Julia's startup and compilation, as on the Benchmarks Game.
               printf '#!/bin/sh\nexec julia -O3 --check-bounds=no --startup-file=no %s "$@"\n' $ROOT/$dir/$prog.jl > $out

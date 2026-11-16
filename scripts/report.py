@@ -13,7 +13,9 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 programs = ["nbody", "spectralnorm", "fannkuchredux", "binarytrees",
             "mandelbrot", "fasta", "knucleotide", "revcomp"]
-columns = ["c", "rust", "cpp", "swift", "zig", "nim", "julia", "sysl-idiomatic", "sysl-fast"]
+systems = ["c", "rust", "cpp", "zig", "d", "odin", "nim", "swift", "sysl-idiomatic", "sysl-fast"]
+managed = ["go", "julia"]
+columns = systems + managed
 
 
 def run(cmd):
@@ -41,6 +43,10 @@ toolchains = {
     "zig": {"version": "zig " + first_line(run(["zig", "version"]))},
     "nim": {"version": first_line(run(["nim", "--version"])), "llvm": clang_llvm},
     "julia": {"version": first_line(run(["julia", "--version"]))},
+    "go": {"version": first_line(run(["go", "version"]))},
+    "d": {"version": first_line(run(["ldc2", "--version"])),
+          "llvm": run(["ldc2", "--version"]).split("LLVM ")[1].split("\n")[0].strip()},
+    "odin": {"version": first_line(run(["odin", "version"])), "llvm": clang_llvm},
     "hyperfine": {"version": first_line(run(["hyperfine", "--version"]))},
 }
 flags = {
@@ -51,6 +57,9 @@ flags = {
     "swift": "swiftc -O",
     "zig": "zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded",
     "nim": "nim c -d:danger --opt:speed --mm:orc --cc:clang --passC:-march=native --threads:off",
+    "go": "go build (default flags: Go has no optimisation level; bounds checks stay on)",
+    "d": "ldc2 -O3 -release -mcpu=native (-release drops asserts and the bounds checks of @system code)",
+    "odin": "odin build -o:speed -microarch:native (bounds checks stay on)",
     "julia": "julia -O3 --check-bounds=no --startup-file=no (JIT: every timed run includes "
              "Julia's startup and compilation, as on the Benchmarks Game)",
 }
@@ -97,7 +106,19 @@ for lang in columns:
     vals = [data[p][lang]["cpu_ratio_to_c"] for p in programs]
     cpu_geo[lang] = math.exp(sum(math.log(v) for v in vals) / len(vals))
 
-doc = {"date": stamp, "machine": machine, "toolchains": toolchains, "flags": flags,
+def group_geo(langs, key):
+    vals = [data[p][lang][key] for p in programs for lang in langs]
+    return math.exp(sum(math.log(v) for v in vals) / len(vals))
+
+
+group_geo_wall = {"all": group_geo(columns, "ratio_to_c"), "systems": group_geo(systems, "ratio_to_c"),
+                  "managed": group_geo(managed, "ratio_to_c")}
+group_geo_cpu = {"all": group_geo(columns, "cpu_ratio_to_c"), "systems": group_geo(systems, "cpu_ratio_to_c"),
+                 "managed": group_geo(managed, "cpu_ratio_to_c")}
+
+doc = {"date": stamp, "groups": {"systems": systems, "managed": managed},
+       "group_geometric_mean_ratio_to_c": group_geo_wall,
+       "group_geometric_mean_cpu_ratio_to_c": group_geo_cpu, "machine": machine, "toolchains": toolchains, "flags": flags,
        "hyperfine": "--warmup 3 --runs 10",
        "load": {"start": load("load-start.txt"), "end": load("load-end.txt")}, "programs": data, "geometric_mean_ratio_to_c": geo,
        "geometric_mean_cpu_ratio_to_c": cpu_geo}
@@ -109,7 +130,8 @@ lines = [f"# Results {stamp}", "",
          f"{machine['cpu']}, macOS {machine['os']}. Single-threaded, `hyperfine --warmup 3 --runs 10`.", "",
          *([f"**{os.environ['BENCH_NOTE']}**", ""] if os.environ.get("BENCH_NOTE") else []),
          "Each cell is the mean time as a ratio to C (1.00 = as fast as C, higher is slower). "
-         "The `C (s)` column is C's own mean in seconds.", "",
+         "The `C (s)` column is C's own mean in seconds. Columns are grouped: **systems** languages "
+         f"({', '.join(systems)}) first, then **managed** ({', '.join(managed)}).", "",
          "Load average at the start and end of the run (`uptime`); if other builds were running, "
          "the figures were measured under load and are noisier than an idle-machine run:", "",
          "```", doc["load"]["start"], doc["load"]["end"], "```", "",
@@ -121,6 +143,9 @@ for prog in programs:
     lines.append(f"| {prog} | {e['c']['mean']:.3f} | {cells} |")
 lines.append("| **geometric mean** | | " +
              " | ".join(f"{geo[c]:.2f}" for c in columns if c != "c") + " |")
+lines += ["", "Geometric mean over every program and language in a group (wall clock; systems includes C):", "",
+          "| overall | systems | managed |", "|---:|---:|---:|",
+          f"| {group_geo_wall['all']:.2f} | {group_geo_wall['systems']:.2f} | {group_geo_wall['managed']:.2f} |"]
 lines += ["", "## CPU time", "",
           "The same ratios computed from CPU time (user plus system) instead of wall-clock time, which a "
           "busy machine disturbs less.", "",
@@ -132,6 +157,8 @@ for prog in programs:
     lines.append(f"| {prog} | {e['c']['cpu_mean']:.3f} | {cells} |")
 lines.append("| **geometric mean** | | " +
              " | ".join(f"{cpu_geo[c]:.2f}" for c in columns if c != "c") + " |")
+lines += ["", "| overall (CPU) | systems (CPU) | managed (CPU) |", "|---:|---:|---:|",
+          f"| {group_geo_cpu['all']:.2f} | {group_geo_cpu['systems']:.2f} | {group_geo_cpu['managed']:.2f} |"]
 lines += ["", "## Toolchains", ""]
 for name, t in toolchains.items():
     extra = f" (LLVM: {t['llvm']})" if t.get("llvm") else ""
