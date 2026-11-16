@@ -136,10 +136,14 @@ The `A^T` loop is already strength-reduced by LLVM in sysl (an `add` per column 
 `mul`). A hand-written form that advances the denominator by addition and divides `v[j] / d` measured
 0.74x, but the speed comes from computing `v[j] / d` in place of `(1 / d) * v[j]`, one rounding fewer
 and different arithmetic from C's, not from anything the compiler missed. There is no compiler item
-here. Rust's 0.37x is its two-columns-per-step form. `sysl-fast` writes the same arithmetic: the two
-columns' integer denominators as a `<2>usize`, converted with `<2>real(...)` (a vector converts
-lane-wise from 0.11.0, and `>> 1` stands for the halving, since integer `/` is not defined on
-vectors), and runs at 0.57x C. The remaining gap to Rust is 0.20x.
+here. Rust's 0.37x is its two-columns-per-step form. `sysl-fast` writes the same arithmetic: each
+step loads two elements as a `<2>real` and divides them by the two columns' denominators in one
+two-lane `fdiv`, and runs at 0.40x C. The denominators stay scalar integer arithmetic, as Rust's do:
+its `usizex2` is a struct of two `usize`, which LLVM keeps in general registers. Computing them as a
+`<2>usize` measured 0.57x, because NEON has no 64-bit lane multiply: every step moved both lanes out
+to general registers for the `mul` and back, and the vector induction variable kept LLVM from
+strength-reducing the `A^T` loop. clang emits the same loop for the same `vector_size(16)` C, so that
+is the form, not the compiler.
 
 sysl builds with `--cpu native` (or `--cpu <llvm-name>`, from 0.11.3), the counterpart of C's
 `-march=native`; against the generic-target build the geometric mean of `sysl-idiomatic` went from

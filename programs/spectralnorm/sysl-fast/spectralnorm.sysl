@@ -1,19 +1,19 @@
 import sysl.text.parse_int
 
-// Two columns per step, as in the Rust program: both columns' integer
-// denominators are computed together and converted to two doubles.
-a2(ii: <2>usize, jj: <2>usize) -> <2>real
-    val s = ii + jj
+// The denominator of A[i][j], as a double. It stays scalar integer
+// arithmetic: a 64-bit lane multiply has no vector instruction, so a
+// `<2>usize` form moves every lane out to a general register and back.
+a(i: usize, j: usize) -> real = real((i + j) * (i + j + 1) / 2 + i + 1)
 
-    <2>real((s * (s + 1) >> 1) + ii + 1)
-
+// Two columns per step, as in the Rust program: the two denominators
+// meet the two vector elements in one two-lane divide.
 times(v: []const real, out: []real)
     for i in 0..<out.len
         var sum: <2>real = 0
 
         for j in 0..<v.len / 2
             val top: <2>real = v.load(2 * j)
-            sum += top / a2([i, i], [2 * j, 2 * j + 1])
+            sum += top / [a(i, 2 * j), a(i, 2 * j + 1)]
 
         out[i] = sum.sum()
 
@@ -23,7 +23,7 @@ times_transpose(v: []const real, out: []real)
 
         for j in 0..<v.len / 2
             val top: <2>real = v.load(2 * j)
-            sum += top / a2([2 * j, 2 * j + 1], [i, i])
+            sum += top / [a(2 * j, i), a(2 * j + 1, i)]
 
         out[i] = sum.sum()
 
