@@ -1,5 +1,5 @@
 import sysl.math.min
-import sysl.seq.Sequence
+import sysl.slices.copy
 import sysl.text.parse_int
 
 const line_len: usize = 60
@@ -18,62 +18,90 @@ val iub_probabilities = [0.27, 0.12, 0.12, 0.27, 0.02, 0.02, 0.02, 0.02, 0.02, 0
 const sapiens_symbols = "acgt"
 val sapiens_probabilities = [0.3029549426680, 0.1979883004921, 0.1975473066391, 0.3015094502008]
 
-struct Random
-    last: int
-
-    next(*self) -> real
-        self.last = (self.last * 3877 + 29573) % 139968
-
-        real(self.last) / 139968.0
-end Random
+// Lines written per `putbytes`: one call per block, not one per line.
+const block_lines: usize = 1024
 
 // The sequence followed by its own first line, so every line is one slice of it.
+//
+// Tuned: the lines are copied into one block and written with one `putbytes`, where `print` is a
+// call and a newline per line.
 repeat_fasta(header: string, seq: string, n: usize)
-    val wrapped = seq + seq[0..<line_len]
-    var at: usize = 0
+    val wrapped = (seq + seq[0..<line_len]).bytes
+    var block: []u8 = [0; block_lines * (line_len + 1)]
+    var from: usize = 0
     var left = n
 
     print(header)
 
     while left > 0
-        val width = min(line_len, left)
+        var at: usize = 0
 
-        print(wrapped[at..<at + width])
-        at = (at + width) % seq.len
-        left -= width
+        while left > 0 && at < block.len
+            val width = min(line_len, left)
+
+            copy(block[at..<at + width], wrapped[from..<from + width])
+            block[at + width] = 10
+            at += width + 1
+            from = (from + width) % seq.len
+            left -= width
+
+        putbytes(block[0..<at])
 
 // A symbol's index is how many cumulative probabilities lie below the draw. The last is never
 // counted, so a draw at the top of the range still lands on the last symbol.
-random_fasta(header: string, symbols: string, probabilities: []const real, n: usize, rng: *Random)
-    var cumul: []real = [0.0; probabilities.len]
-    var line: [61]u8
+//
+// The generator's state comes in as `seed` and its last value goes back as the result.
+//
+// Tuned: the state is a local `u32` for the whole run, where a `Random` behind a pointer is
+// reloaded through it every symbol (FINDINGS 2); `u32`, as in C, because the state's update is the
+// loop's critical path and an unsigned remainder by a constant is one instruction shorter. The
+// thresholds sit in one `W`-lane vector, padded with 2.0, which no draw exceeds, so the count is
+// one lane-wise compare and a sum in place of a chain of scalar compares. Lines are gathered into
+// one block and written with one `putbytes`.
+random_fasta[const W: usize](header: string, symbols: string, probabilities: []const real, n: usize, seed: u32) -> u32
+    var thresholds: [W]real = [2.0; W]
+    var block: []u8 = [0; block_lines * (line_len + 1)]
     var total = 0.0
     var left = n
+    var state = seed
 
-    for i in 0..<probabilities.len
+    for i in 0..<probabilities.len - 1
         total += probabilities[i]
-        cumul[i] = total
+        thresholds[i] = total
 
-    val below = cumul[0..<cumul.len - 1]
+    val below: <W>real = thresholds.load(0)
+    val one: <W>u64 = 1
 
     print(header)
 
     while left > 0
-        val width = min(line_len, left)
+        var at: usize = 0
 
-        for i in 0..<width
-            val r = rng.next()
+        while left > 0 && at < block.len
+            val width = min(line_len, left)
 
-            line[i] = symbols.bytes[below.count_where(p -> r > p)]
+            @unchecked
+                for i in 0..<width
+                    state = (state * 3877 + 29573) % 139968
 
-        line[width] = 10
-        putbytes(line[0..width])
-        left -= width
+                    val r = real(state) / 139968.0
+
+                    block[at + i] = symbols.bytes[(r > below).select(one, 0).sum()]
+
+                block[at + width] = 10
+
+            at += width + 1
+            left -= width
+
+        putbytes(block[0..<at])
+
+    state
 
 main(args: []string)
     val n = usize(parse_int(args[1]).unwrap())
-    var rng = Random(42)
 
     repeat_fasta(">ONE Homo sapiens alu", alu, n * 2)
-    random_fasta(">TWO IUB ambiguity codes", iub_symbols, iub_probabilities, n * 3, &rng)
-    random_fasta(">THREE Homo sapiens frequency", sapiens_symbols, sapiens_probabilities, n * 5, &rng)
+
+    val seed = random_fasta[16](">TWO IUB ambiguity codes", iub_symbols, iub_probabilities, n * 3, 42)
+
+    random_fasta[4](">THREE Homo sapiens frequency", sapiens_symbols, sapiens_probabilities, n * 5, seed)

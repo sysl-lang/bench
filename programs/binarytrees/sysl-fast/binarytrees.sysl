@@ -1,25 +1,46 @@
 import sysl.math.max
 import sysl.text.parse_int
 
-enum Tree
-    Leaf
-    Node(left: &Tree, right: &Tree)
+// Tuned: C's own node. A counted `&Tree` is a 24-byte header plus a 24-byte enum, 48 bytes against
+// C's 16, and every release goes through the counting machinery. Here a node is two raw pointers,
+// allocated with `malloc` and given back with `free` exactly as C does, so the work is C's.
+struct Node
+    left: *Node
+    right: *Node
 
-make(depth: int) -> &Tree
-    if depth == 0 then Leaf
-    else Node(make(depth - 1), make(depth - 1))
+extern malloc(n: usize) -> *Node
+extern free(p: *Node)
 
-check(t: &Tree) -> int
-    *t match
-        Leaf -> 1
-        Node(l, r) -> 1 + check(l) + check(r)
+make(depth: int) -> *Node
+    val node = malloc(sizeof(Node))
+
+    if depth == 0
+        node.left = null
+        node.right = null
+    else
+        node.left = make(depth - 1)
+        node.right = make(depth - 1)
+
+    node
+
+check(t: *Node) -> int = if t.left == null then 1 else 1 + check(t.left) + check(t.right)
+
+delete(t: *Node)
+    if t.left != null
+        delete(t.left)
+        delete(t.right)
+
+    free(t)
 
 main(args: []string)
     val n = parse_int(args[1]).unwrap()
     val min_depth = 4
     val max_depth = max(min_depth + 2, n)
 
-    print(f"stretch tree of depth ${max_depth + 1}\t check: ${check(make(max_depth + 1))}")
+    val stretch = make(max_depth + 1)
+
+    print(f"stretch tree of depth ${max_depth + 1}\t check: ${check(stretch)}")
+    delete(stretch)
 
     val long_lived = make(max_depth)
 
@@ -27,7 +48,11 @@ main(args: []string)
         val iterations = 1 << (max_depth - depth + min_depth)
         var total = 0
 
-        for _ in 0..<iterations do total += check(make(depth))
+        for _ in 0..<iterations
+            val tree = make(depth)
+
+            total += check(tree)
+            delete(tree)
 
         print(f"$iterations\t trees of depth $depth\t check: $total")
 

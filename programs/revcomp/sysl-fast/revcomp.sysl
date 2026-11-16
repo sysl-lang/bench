@@ -22,12 +22,15 @@ val complement = complements()
 
 // Swaps the complements of d[a..<a + n] and d[b - n..<b], the first run read forwards and the
 // second backwards.
+//
+// Tuned: `@unchecked`, since both runs lie inside `d` by construction.
 swap_runs(d: []u8, a: usize, b: usize, n: usize)
-    for k in 0..<n
-        val x = d[a + k]
+    @unchecked
+        for k in 0..<n
+            val x = d[a + k]
 
-        d[a + k] = complement[d[b - 1 - k]]
-        d[b - 1 - k] = complement[x]
+            d[a + k] = complement[d[b - 1 - k]]
+            d[b - 1 - k] = complement[x]
 
 // Reverse-complements one sequence's lines in place, leaving every newline where it was. d is the
 // lines without their final newline. Each round swaps a run from the front with a run from the back:
@@ -71,20 +74,30 @@ reverse_complement(d: []u8)
 
         swap_runs(d, front, back_end, min(front_end - front, back_end - back))
 
+extern malloc(n: usize) -> *u8
+extern realloc(p: *u8, n: usize) -> *u8
+extern read(fd: i32, into: *u8, n: usize) -> isize
+
 main()
-    var input = stdin()
-    var data: Buf[u8] = buf()
+    // Tuned: the input goes into storage grown with `realloc`, which hands large blocks on by
+    // remapping their pages, where `Buf`'s growth allocates afresh and copies every byte across
+    // (FINDINGS 1).
+    var cap: usize = 1 << 20
+    var len: usize = 0
+    var storage = malloc(cap)
 
     loop
-        data.reserve(1 << 16)
+        if cap - len < 1 << 16
+            cap *= 2
+            storage = realloc(storage, cap)
 
-        val got = input.read(data.spare()).len
+        val got = read(0, &storage[len], cap - len)
 
-        if got == 0 then break
+        if got <= 0 then break
 
-        data.set_len(data.len() + got)
+        len += usize(got)
 
-    val bytes = data.view_mut()
+    val bytes = storage[0..<len]
     var i = 0
 
     while i < bytes.len
@@ -94,4 +107,4 @@ main()
         reverse_complement(bytes[start..<end - 1])
         i = end
 
-    putbytes(data.view())
+    putbytes(bytes)

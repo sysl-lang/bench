@@ -14,13 +14,17 @@ octet(cr: <8>real, ci: real) -> u8
     var tr: <8>real = 0
     var ti: <8>real = 0
 
-    for _ in 0..<iterations
+    // Tuned: the escape test runs every fifth iteration rather than every one. A pixel that has
+    // escaped only grows (or overflows to infinity or NaN, which fail `<= 4.0` too), so the
+    // iterations past its escape cannot bring it back inside, and the image is the same.
+    for _ in 0..<iterations / 5
         if !(tr + ti <= 4.0).any() then break
 
-        zi = 2.0 * zr * zi + ci
-        zr = tr - ti + cr
-        tr = zr * zr
-        ti = zi * zi
+        for _ in 0..<5
+            zi = 2.0 * zr * zi + ci
+            zr = tr - ti + cr
+            tr = zr * zr
+            ti = zi * zi
 
     (tr + ti <= 4.0).select(weights, 0).sum()
 

@@ -7,25 +7,30 @@ a(i: usize, j: usize) -> real = real((i + j) * (i + j + 1) / 2 + i + 1)
 
 // Two columns per step, as in the Rust program: the two denominators
 // meet the two vector elements in one two-lane divide.
+//
+// Tuned: `@unchecked`, since every load is a pair inside `v`; the check was a compare and branch
+// in the inner loop.
 times(v: []const real, out: []real)
-    for i in 0..<out.len
-        var sum: <2>real = 0
+    @unchecked
+        for i in 0..<out.len
+            var sum: <2>real = 0
 
-        for j in 0..<v.len / 2
-            val top: <2>real = v.load(2 * j)
-            sum += top / [a(i, 2 * j), a(i, 2 * j + 1)]
+            for j in 0..<v.len / 2
+                val top: <2>real = v.load(2 * j)
+                sum += top / [a(i, 2 * j), a(i, 2 * j + 1)]
 
-        out[i] = sum.sum()
+            out[i] = sum.sum()
 
 times_transpose(v: []const real, out: []real)
-    for i in 0..<out.len
-        var sum: <2>real = 0
+    @unchecked
+        for i in 0..<out.len
+            var sum: <2>real = 0
 
-        for j in 0..<v.len / 2
-            val top: <2>real = v.load(2 * j)
-            sum += top / [a(2 * j, i), a(2 * j + 1, i)]
+            for j in 0..<v.len / 2
+                val top: <2>real = v.load(2 * j)
+                sum += top / [a(2 * j, i), a(2 * j + 1, i)]
 
-        out[i] = sum.sum()
+            out[i] = sum.sum()
 
 times_a_transpose_a(v: []const real, out: []real, tmp: []real)
     times(v, tmp)

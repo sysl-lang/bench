@@ -1,55 +1,84 @@
-import sysl.slices.{copy, reverse}
 import sysl.text.parse_int
 
+// Tuned: a permutation of up to 16 elements is one `<16>u8` register, and flipping its first k + 1
+// elements is one constant shuffle, where a scalar `reverse` swaps one pair at a time. A shuffle's
+// lanes are part of the instruction, so `flip` dispatches on k to one shuffle per prefix length.
+
+// The lanes that reverse the first k + 1 and leave the rest where they are.
+const reversal(k: usize) -> [16]usize
+    var lanes: [16]usize = [0; 16]
+
+    for i in 0..<16 do lanes[i] = if i <= k then k - i else i
+
+    lanes
+
+flipped[const K: usize](p: <16>u8) -> <16>u8 = p.shuffle(reversal(K))
+
+flip(p: <16>u8, k: u8) -> <16>u8
+    k match
+        1 -> flipped[1](p)
+        2 -> flipped[2](p)
+        3 -> flipped[3](p)
+        4 -> flipped[4](p)
+        5 -> flipped[5](p)
+        6 -> flipped[6](p)
+        7 -> flipped[7](p)
+        8 -> flipped[8](p)
+        9 -> flipped[9](p)
+        10 -> flipped[10](p)
+        11 -> flipped[11](p)
+        12 -> flipped[12](p)
+        13 -> flipped[13](p)
+        14 -> flipped[14](p)
+        15 -> flipped[15](p)
+        _ -> p
+
 fannkuch(n: usize) -> (int, int)
-    var perm1: []usize = [0; n]
-    var perm: []usize = [0; n]
-    var count: []usize = [0; n]
+    var perm1: [16]u8 = [0; 16]
+    var count: [16]usize = [0; 16]
     var max_flips = 0
     var checksum = 0
     var perm_count = 0
     var r = n
 
-    for i in 0..<n do perm1[i] = i
+    for i in 0..<n do perm1[i] = u8(i)
 
-    loop
-        while r != 1
-            count[r - 1] = r
-            r -= 1
+    @unchecked
+        loop
+            while r != 1
+                count[r - 1] = r
+                r -= 1
 
-        // A permutation that starts with 0 takes no flips. The flip that brings 0 to the front is
-        // counted without being made, so one that would bring it there at once needs no copy.
-        if perm1[0] != 0
-            var flips = 1
-
-            if perm1[perm1[0]] != 0
-                copy(perm, perm1)
+            // A permutation that starts with 0 takes no flips; the flips are made until 0 is first.
+            if perm1[0] != 0
+                var p: <16>u8 = perm1.load(0)
+                var flips = 0
 
                 loop
-                    reverse(perm[0..perm[0]])
+                    p = flip(p, p[0])
                     flips += 1
 
-                    if perm[perm[0]] == 0 then break
+                    if p[0] == 0 then break
 
-            if flips > max_flips then max_flips = flips
+                if flips > max_flips then max_flips = flips
 
-            checksum += if perm_count % 2 == 0 then flips else -flips
+                checksum += if perm_count % 2 == 0 then flips else -flips
 
-        loop
-            if r == n then return (checksum, max_flips)
+            loop
+                if r == n then return (checksum, max_flips)
 
-            val first = perm1[0]
+                val first = perm1[0]
 
-            for i in 0..<r do perm1[i] = perm1[i + 1]
+                for i in 0..<r do perm1[i] = perm1[i + 1]
 
-            perm1[r] = first
-            count[r] -= 1
+                perm1[r] = first
+                count[r] -= 1
 
-            if count[r] > 0 then break
+                if count[r] > 0 then break
 
-            r += 1
+                r += 1
 
-        perm_count += 1
+            perm_count += 1
 
 main(args: []string)
     val n = usize(parse_int(args[1]).unwrap())

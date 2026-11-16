@@ -1,15 +1,64 @@
 import sysl.buf.{Buf, buf}
-import sysl.container.{Map, map}
-import sysl.io.{read_all, stdin}
 import sysl.slices.sort_by
-import sysl.text.from_utf8_lossy
+import sysl.text.{Search, from_utf8_lossy}
+
+extern malloc(n: usize) -> *u8
+extern realloc(p: *u8, n: usize) -> *u8
+extern free(p: *u8)
+extern read(fd: i32, into: *u8, n: usize) -> isize
 
 const letters = "ACGT"
+
+// No k-mer key reaches this: an 18-mer is 36 bits.
+const empty: u64 = 0xFFFFFFFFFFFFFFFF
 
 struct Entry
     key: u64
     count: int
 end Entry
+
+// Tuned: the counts live in a table of the program's own (FINDINGS 3), the open-addressing table
+// with linear probing that khash is, where `Map` makes an out-of-line call per position and mixes
+// the key expensively. The slot is the top bits of the key times the 64-bit golden ratio, Rust's
+// own k-mer hasher, and the table doubles when it is half full.
+struct Counts
+    keys: []u64
+    counts: []int
+    len: usize
+    shift: u64
+end Counts
+
+slot_of(key: u64, shift: u64) -> usize = usize((key *% 0x9E3779B97F4A7C15) >> shift)
+
+new_counts(bits: u64) -> Counts = Counts([empty; 1 << bits], [0; 1 << bits], 0, 64 - bits)
+
+// The same entries in a table twice the size.
+grown(t: Counts) -> Counts
+    var bigger = new_counts(64 - t.shift + 1)
+
+    @unchecked
+        for i in 0..<t.keys.len
+            val key = t.keys[i]
+
+            if key != empty
+                var at = slot_of(key, bigger.shift)
+
+                while bigger.keys[at] != empty do at = (at + 1) & (bigger.keys.len - 1)
+
+                bigger.keys[at] = key
+                bigger.counts[at] = t.counts[i]
+
+    bigger.len = t.len
+    bigger
+
+count_of(t: Counts, key: u64) -> int
+    var at = slot_of(key, t.shift)
+
+    loop
+        if t.keys[at] == key then return t.counts[at]
+        if t.keys[at] == empty then return 0
+
+        at = (at + 1) & (t.keys.len - 1)
 
 // A base's code, in A C G T order, whatever its case.
 code_of(base: u8) -> u8
@@ -20,38 +69,80 @@ code_of(base: u8) -> u8
         _ -> 3
 
 // The bases of the THREE section as codes 0..3, in A C G T order.
-read_sequence() -> Buf[u8]
-    var input = stdin()
-    val data = read_all(&input)
-    val seq: Buf[u8] = buf()
+//
+//
+// Tuned: stdin is read straight into storage grown with `realloc` (`read_all` pushes byte by byte,
+// and `Buf`'s growth copies every byte to fresh storage: FINDINGS 1), and the codes are written by
+// index into a preallocated array in place of a `Buf.push` per base.
+read_sequence() -> []u8
+    var cap: usize = 1 << 20
+    var len: usize = 0
+    var storage = malloc(cap)
+
+    loop
+        if cap - len < 1 << 16
+            cap *= 2
+            storage = realloc(storage, cap)
+
+        val got = read(0, &storage[len], cap - len)
+
+        if got <= 0 then break
+
+        len += usize(got)
+
+    val bytes = storage[0..<len]
     var i = 0
-    var inside = false
 
-    while i < data.len()
-        if data[i] == u8('>')
-            if inside then break
+    loop
+        val line = bytes.index_of_byte_from(u8('>'), i).unwrap() + 1
 
-            inside = data[i + 1] == u8('T') && data[i + 2] == u8('H') && data[i + 3] == u8('R')
+        i = bytes.index_of_byte_from(u8('\n'), line).unwrap() + 1
 
-            while data[i] != u8('\n') do i += 1
-        else if inside && data[i] != u8('\n')
-            seq.push(code_of(data[i]))
+        if bytes[line] == u8('T') && bytes[line + 1] == u8('H') then break
 
-        i += 1
+    var seq: []u8 = [0; bytes.len - i]
+    var n: usize = 0
 
-    seq
+    @unchecked
+        while i < bytes.len && bytes[i] != u8('>')
+            if bytes[i] != u8('\n')
+                seq[n] = code_of(bytes[i])
+                n += 1
 
-count_kmers(seq: []const u8, k: usize) -> Map[u64, int]
-    val counts: Map[u64, int] = map()
+            i += 1
+
+    free(storage)
+    seq[0..<n]
+
+count_kmers(seq: []const u8, k: usize) -> Counts
+    var t = new_counts(12)
     val mask = (u64(1) << (2 * k)) - 1
     var key: u64 = 0
 
-    for i in 0..<seq.len
-        key = (key << 2 | u64(seq[i])) & mask
+    @unchecked
+        for i in 0..<seq.len
+            key = (key << 2 | u64(seq[i])) & mask
 
-        if i + 1 >= k then counts.upsert(key, 0, _ + 1)
+            if i + 1 >= k
+                var at = slot_of(key, t.shift)
 
-    counts
+                loop
+                    if t.keys[at] == key
+                        t.counts[at] += 1
+                        break
+
+                    if t.keys[at] == empty
+                        t.keys[at] = key
+                        t.counts[at] = 1
+                        t.len += 1
+
+                        if 2 * t.len > t.keys.len then t = grown(t)
+
+                        break
+
+                    at = (at + 1) & (t.keys.len - 1)
+
+    t
 
 name_of(key: u64, k: usize) -> string
     var chars: Buf[u8] = buf()
@@ -66,7 +157,8 @@ print_frequencies(seq: []const u8, k: usize)
     var entries: Buf[Entry] = buf()
     val total = seq.len - k + 1
 
-    for (key, count) in counts do entries.push(Entry(key, count))
+    for i in 0..<counts.keys.len
+        if counts.keys[i] != empty then entries.push(Entry(counts.keys[i], counts.counts[i]))
 
     sort_by(entries.view_mut(), (a, b) -> a.count > b.count || a.count == b.count && name_of(a.key, k) < name_of(b.key, k))
 
@@ -81,13 +173,13 @@ print_count(seq: []const u8, pattern: string)
     for b in pattern.bytes
         key = key << 2 | u64(code_of(b))
 
-    print(f"${count_kmers(seq, pattern.len).get_or(key, 0)}\t$pattern")
+    print(f"${count_of(count_kmers(seq, pattern.len), key)}\t$pattern")
 
 main()
     val seq = read_sequence()
 
-    print_frequencies(seq.view(), 1)
-    print_frequencies(seq.view(), 2)
+    print_frequencies(seq, 1)
+    print_frequencies(seq, 2)
 
     for pattern in ["GGT", "GGTA", "GGTATT", "GGTATTTTAATT", "GGTATTTTAATTTATAGT"]
-        print_count(seq.view(), pattern)
+        print_count(seq, pattern)
