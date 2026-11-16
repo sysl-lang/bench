@@ -13,7 +13,7 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 programs = ["nbody", "spectralnorm", "fannkuchredux", "binarytrees",
             "mandelbrot", "fasta", "knucleotide", "revcomp"]
-systems = ["c", "rust", "cpp", "zig", "d", "odin", "c3", "nim", "swift", "sysl-idiomatic", "sysl-fast"]
+systems = ["c", "rust", "cpp", "zig", "d", "odin", "c3", "nim", "swift", "sysl-idiomatic", "sysl-tuned"]
 managed = ["go", "java", "eiffel", "eiffel-contracts", "julia"]
 columns = systems + managed
 

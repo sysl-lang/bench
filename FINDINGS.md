@@ -2,7 +2,7 @@
 
 Where sysl loses to C, and why. Each finding is one fix item for the compiler or the standard library.
 
-The second sysl column, `sysl-tuned` (its programs still sit in `programs/*/sysl-fast/`), is made
+The second sysl column, `sysl-tuned` (`programs/*/sysl-tuned/`), is made
 as fast as it can be by hand, workarounds included: the same algorithm as C, but with whatever a
 program can do itself to get past a compiler or library gap. **Each workaround is listed under its
 program as a "Tuned" line**: what it does, what it bought, and the compiler or library item it
@@ -20,10 +20,10 @@ Figures in the older text are from `results/2026-11-13.md` (sysl 0.10.7, wall-cl
 
 ## 1. revcomp — `read_all` and `Buf.extend` copy byte by byte
 
-On sysl 0.11.5 (`--release -O3 --cpu native`, one `marshal run --exclusive`, 10 runs): **sysl-fast
+On sysl 0.11.5 (`--release -O3 --cpu native`, one `marshal run --exclusive`, 10 runs): **sysl-tuned
 39.6 ms** (Rust 38.8, C 81.7), **sysl-idiomatic 148.7 ms** (1.82x C).
 
-**sysl-fast is Rust's algorithm**: the input is read straight into one `Buf` (`reserve`, `spare`,
+**sysl-tuned is Rust's algorithm**: the input is read straight into one `Buf` (`reserve`, `spare`,
 `set_len`), each sequence is reverse-complemented in place by swapping a run from the front with a run
 from the back so the newlines never move, and the whole buffer goes out in one `putbytes`. It does the
 same work as Rust and runs at Rust's speed. **sysl-idiomatic** reads with `read_all`, finds lines with
@@ -38,9 +38,9 @@ same work as Rust and runs at Rust's speed. **sysl-idiomatic** reads with `read_
 
 - **`read_all` pushes byte by byte** (`library/sysl/io/read.sysl`, `for b in got do out.push(b)`): a
   `ldrb`/`strb` loop with the push's capacity test per byte, plus a doubling `grow` that copies element
-  by element. sysl-fast with `read_all` in place of its own read loop takes 85.6 ms against 51.2 ms (a
+  by element. sysl-tuned with `read_all` in place of its own read loop takes 85.6 ms against 51.2 ms (a
   loaded-machine pair), so the library read costs about 35 ms of 100 MB. **Fix item:** read into the
-  buffer's spare room (`reserve` + `read(spare)` + `set_len`), as sysl-fast does.
+  buffer's spare room (`reserve` + `read(spare)` + `set_len`), as sysl-tuned does.
 - **`Buf.extend` does not become a `memcpy` for a short run.** `BufCore.extend` copies with
   `slot_place` per element. LLVM vectorises that loop in 64-byte blocks but always leaves 1 to 64 bytes
   for a scalar tail, so a run under 64 bytes (every FASTA line) is copied entirely one byte at a time.
@@ -177,7 +177,7 @@ Measured on sysl 0.10.7 at size 18 (exclusive run):
 ## 5. nbody — no fix item left at 0.10.7
 
 Idiomatic nbody runs at 0.91x C. Two workarounds were measured against it in the same run and are
-not in `sysl-fast`:
+not in `sysl-tuned`:
 
 - **Hoisting `bodies[i]`'s fields into locals by hand** before the inner loop, with the velocity
   accumulated in locals: 0.90x, so the reloads that possible aliasing between `bodies[i]` and
@@ -185,7 +185,7 @@ not in `sysl-fast`:
 - **`extern "llvm.sqrt"` in place of `.sqrt()`**: not needed. `.sqrt()` compiles to `fsqrt` inline
   (ten `fsqrt` in the binary, no `bl` to a sqrt function).
 
-The gap to Rust (0.58x) and C++ (0.71x) is their vectorized layouts, which `sysl-fast` expresses with
+The gap to Rust (0.58x) and C++ (0.71x) is their vectorized layouts, which `sysl-tuned` expresses with
 `<3>real` position and velocity.
 
 **sysl-tuned, sysl 0.11.5** (exclusive run): **878 ms, unchanged**, 0.60x C (Rust 0.58x). One tuning
@@ -220,7 +220,7 @@ The `A^T` loop is already strength-reduced by LLVM in sysl (an `add` per column 
 `mul`). A hand-written form that advances the denominator by addition and divides `v[j] / d` measured
 0.74x, but the speed comes from computing `v[j] / d` in place of `(1 / d) * v[j]`, one rounding fewer
 and different arithmetic from C's, not from anything the compiler missed. There is no compiler item
-here. Rust's 0.37x is its two-columns-per-step form. `sysl-fast` writes the same arithmetic: each
+here. Rust's 0.37x is its two-columns-per-step form. `sysl-tuned` writes the same arithmetic: each
 step loads two elements as a `<2>real` and divides them by the two columns' denominators in one
 two-lane `fdiv`, and runs at 0.40x C. The denominators stay scalar integer arithmetic, as Rust's do:
 its `usizex2` is a struct of two `usize`, which LLVM keeps in general registers. Computing them as a
@@ -238,7 +238,7 @@ is the form, not the compiler.
 
 sysl builds with `--cpu native` (or `--cpu <llvm-name>`, from 0.11.3), the counterpart of C's
 `-march=native`; against the generic-target build the geometric mean of `sysl-idiomatic` went from
-1.01 to 1.00 and `sysl-fast` from 0.96 to 0.88 (that includes the spectralnorm form above; revcomp
+1.01 to 1.00 and `sysl-tuned` from 0.96 to 0.88 (that includes the spectralnorm form above; revcomp
 moved from 2.08 to 1.92).
 
 ## 7. fannkuchredux — a flip is one shuffle, if the shuffle can be chosen at run time

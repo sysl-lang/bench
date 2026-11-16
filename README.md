@@ -15,11 +15,11 @@ Each program is written once per language. sysl has two versions:
 - **`sysl-idiomatic`** is what a sysl programmer writes by default: the pleasant form, with no type,
   suffix or cast the compiler can infer, standard-library containers, and vectors (`<N>T`) only where
   they are the natural tool, as in mandelbrot. **This is the form that counts.**
-- **`sysl-fast`** may use any documented sysl feature that trades pleasantness for speed: vectors
+- **`sysl-tuned`** may use any documented sysl feature that trades pleasantness for speed: vectors
   everywhere, fixed-size arrays, unchecked indexing, explicit layouts, manual unrolling. It may not
   work around the compiler: a change that would be pointless once the compiler does its job (hoisting
   fields into locals by hand, calling an intrinsic by hand, hand strength reduction) is a finding in
-  [FINDINGS.md](FINDINGS.md), not code. Where no such feature beats the idiomatic program, `sysl-fast`
+  [FINDINGS.md](FINDINGS.md), not code. Where no such feature beats the idiomatic program, `sysl-tuned`
   is a copy of it.
 
 Both sysl forms use the same algorithm as C.
@@ -31,7 +31,7 @@ names the origin of every file and says exactly what was changed.
 ## The rules
 
 1. **Single-threaded, in every language.** One core, no thread, task queue or `rayon`.
-2. **The idiomatic form counts.** `sysl-fast` is reported beside it, never instead of it.
+2. **The idiomatic form counts.** `sysl-tuned` is reported beside it, never instead of it.
 3. **Every program does the same work.** The algorithm is fixed per program (SOURCES.md lists it): the
    same generator, the same data structure, the same per-element operation. In particular trees are
    built from individually allocated nodes, k-mers are counted in a hash table, and fasta picks each
@@ -63,7 +63,7 @@ names the origin of every file and says exactly what was changed.
 ## Groups
 
 The tables group the languages. **Systems**: c, cpp, rust, zig, d, odin, c3, nim, swift, sysl-idiomatic,
-sysl-fast. **Managed**: go, java, eiffel, eiffel-contracts, julia. The criterion: a systems language can run with no tracing GC and no
+sysl-tuned. **Managed**: go, java, eiffel, eiffel-contracts, julia. The criterion: a systems language can run with no tracing GC and no
 required runtime, with deterministic destruction and control over layout (Swift via Embedded Swift, Nim
 via `--os:standalone`, D via `-betterC`); every program here runs in the language's normal hosted mode.
 The report gives the geometric mean of each group as well as overall.
@@ -71,7 +71,7 @@ The report gives the geometric mean of each group as well as overall.
 ## Layout
 
 ```
-programs/<name>/{sysl-idiomatic,sysl-fast,c,rust,cpp,swift,zig,nim,julia,go,d,odin,c3,java,eiffel}/   one source file per directory
+programs/<name>/{sysl-idiomatic,sysl-tuned,c,rust,cpp,swift,zig,nim,julia,go,d,odin,c3,java,eiffel}/   one source file per directory
                    (Eiffel adds its .ecf project file, and a second class file where a program needs one;
                    `eiffel-contracts` is built from the `eiffel` directory)
 expected/ref/      the Benchmarks Game's published output (and input) at a small size

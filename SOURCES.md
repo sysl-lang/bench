@@ -142,15 +142,15 @@ Both sysl forms use C's algorithm: the same work, the same arithmetic on the sam
 language offers for writing it pleasantly. That includes vectors (`<N>T`) where they are the natural
 tool: mandelbrot computes the eight pixels of one output byte as one `<8>real`.
 
-**`sysl-fast`** may use any documented feature that trades pleasantness for speed: vectors everywhere,
+**`sysl-tuned`** may use any documented feature that trades pleasantness for speed: vectors everywhere,
 fixed-size arrays, unchecked indexing, explicit layouts, manual unrolling. It may not carry a
 workaround for a compiler gap. The test is whether the change would be pointless once the compiler
 does its job; if so, it is an entry in FINDINGS.md and not code. Hand-hoisting fields into locals,
 calling `llvm.sqrt` by hand, hand strength reduction and keeping generator state in a local by hand
 are all workarounds in this sense. Where no legitimate feature beats the idiomatic program,
-`sysl-fast` is a copy of it.
+`sysl-tuned` is a copy of it.
 
-What each `sysl-fast` program does differently from `sysl-idiomatic`:
+What each `sysl-tuned` program does differently from `sysl-idiomatic`:
 
 - **nbody**: a body's position and velocity are `<3>real`, so a pair's distance, its squared length
   and both velocity updates are vector operations.
