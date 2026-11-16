@@ -12,37 +12,36 @@ compiler does its job) is recorded here and not written into `sysl-fast`. Figure
 | binarytrees | 1.42 |
 | fasta | 1.17 |
 
-## 1. revcomp — the buffer's header is reloaded and stored on every push
+## 1. revcomp — `read_all` and `Buf.extend` copy byte by byte
 
-`Buf.push` is already inlined in an optimised build: a store, a length bump and a cold out-of-line
-`grow_store`. But the loop in `write_reversed` costs about 10 instructions and 4 memory operations per
-byte (`ldp cap,len` / cmp / `ldr data` / `strb` / `str len` / `ldr cap` / cmp + branch), where C keeps
-a pointer in a register.
+On sysl 0.11.5 (`--release -O3 --cpu native`, one `marshal run --exclusive`, 10 runs): **sysl-fast
+39.6 ms** (Rust 38.8, C 81.7), **sysl-idiomatic 148.7 ms** (1.82x C).
 
-- **Cause:** LLVM is not told that the byte store through the element storage cannot alias the
-  `BufCore` header, so data, len and cap are reloaded and len is stored back for every byte. The
-  `count <= elems.len` re-check after each store (deliberate, `library/sysl/buf/buf.sysl`) cannot fold
-  away for the same reason. There is also a bounds check on `seq[i-1-j]`.
-- **Fix:** alias information (scoped `!alias.scope`/`!noalias`, or TBAA) that separates a
-  container's slot storage from struct-field accesses. This is the same cause as finding 2.
-- Writing the output by index into one preallocated array measured 1.65x. It would be pointless once
-  `push` keeps its header in registers, so it is a workaround and is not in `sysl-fast`.
-- **Done for 0.11 (branch `buf-alias-scope`):** the header and element scopes already marked every
-  `BufCore` field and `b[i]`, but the store `push` makes (`slot_place`) carried none. It now carries
-  the element scope, so the capacity is no longer read again after each store, and where nothing
-  else in the loop branches out, the count and capacity stay in registers. The data pointer is still
-  loaded once per element, because LLVM will not reload it after the growth call. Timed under
-  `--exclusive`: 295.0 ms before, 289.9 ms after (-1.7%). With the source read `@unchecked` the times
-  are 180.1 ms and 162.6 ms (-10%). None of the other seven programs got slower.
-- **What is left is the bounds check on `seq[i-1-j]`.** With the same compiler, checked takes 305 ms
-  and unchecked 180 ms. The check is a branch out of the loop on every byte. It also stops GVN's load
-  PRE from carrying the header across iterations, so the count, capacity and data pointer are read
-  again for every byte. Even a check LLVM can prove (`seq[seq.len - 1 - j]`) is folded only after
-  GVN has run. This needs its own item: subscript checks folded or hoisted before GVN.
-- **Measured on sysl 0.11.0** (`results/2026-11-14.md`): idiomatic revcomp takes 172 ms, against 305 ms
-  on 0.10.7 (3.67x C down to 2.07x), which is the unchecked figure above. The 0.11 bounds hoist (P4)
-  together with the element scope removed the per-byte check. What remains against C is the
-  output loop's data-pointer reload.
+**sysl-fast is Rust's algorithm**: the input is read straight into one `Buf` (`reserve`, `spare`,
+`set_len`), each sequence is reverse-complemented in place by swapping a run from the front with a run
+from the back so the newlines never move, and the whole buffer goes out in one `putbytes`. It does the
+same work as Rust and runs at Rust's speed. **sysl-idiomatic** reads with `read_all`, finds lines with
+`index_of_byte_from`, gathers a sequence with `extend`, then `reverse`, a table loop and `extend` per
+60-byte output line. Its time is library code:
+
+| part (idiomatic, `sample`) | share | what the code does |
+|---|---:|---|
+| `Buf.extend` | 42% | copies a 60-byte run one byte at a time |
+| `read_all` and its growth | 32% | pushes every byte of each 4096-byte chunk one at a time |
+| `reverse` + complement loop | 24% | scalar; the complement lookup is scalar in C and Rust too |
+
+- **`read_all` pushes byte by byte** (`library/sysl/io/read.sysl`, `for b in got do out.push(b)`): a
+  `ldrb`/`strb` loop with the push's capacity test per byte, plus a doubling `grow` that copies element
+  by element. sysl-fast with `read_all` in place of its own read loop takes 85.6 ms against 51.2 ms (a
+  loaded-machine pair), so the library read costs about 35 ms of 100 MB. **Fix item:** read into the
+  buffer's spare room (`reserve` + `read(spare)` + `set_len`), as sysl-fast does.
+- **`Buf.extend` does not become a `memcpy` for a short run.** `BufCore.extend` copies with
+  `slot_place` per element. LLVM vectorises that loop in 64-byte blocks but always leaves 1 to 64 bytes
+  for a scalar tail, so a run under 64 bytes (every FASTA line) is copied entirely one byte at a time.
+  The loop also bumps and drops the storage's count on every call. **Fix item:** an element type with
+  no count (`AnyBits`) should extend and grow with one `memcpy`.
+- **`sysl.slices.reverse` is not vectorised**: one `ldrb`/`strb` pair per end per step.
+- `putbytes` is one `fwrite` and costs nothing measurable here.
 
 ## 2. fasta — generator state goes through memory every symbol
 

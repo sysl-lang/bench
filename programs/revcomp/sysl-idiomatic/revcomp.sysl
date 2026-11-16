@@ -1,5 +1,8 @@
 import sysl.buf.{Buf, buf}
 import sysl.io.{read_all, stdin}
+import sysl.math.min
+import sysl.slices.reverse
+import sysl.text.Search
 
 const line_len: usize = 60
 
@@ -15,39 +18,42 @@ complements() -> [256]u8
 
     table
 
-write_reversed(seq: []const u8, out: Buf[u8])
-    var i = seq.len
+val complement = complements()
 
-    while i > 0
-        val width = if i > line_len then line_len else i
+// Writes the reverse complement of bases to out in lines of line_len.
+write_reversed(bases: []u8, out: Buf[u8])
+    reverse(bases)
 
-        for j in 0..<width do out.push(seq[i - 1 - j])
+    for i in 0..<bases.len do bases[i] = complement[bases[i]]
 
+    var i = 0
+
+    while i < bases.len
+        val end = min(i + line_len, bases.len)
+
+        out.extend(bases[i..<end])
         out.push(u8('\n'))
-        i -= width
+        i = end
 
 main()
     var input = stdin()
-    val data = read_all(&input)
-    val table = complements()
+    val input_bytes = read_all(&input)
+    val data = input_bytes.view()
     val out: Buf[u8] = buf()
-    val seq: Buf[u8] = buf()
+    var seq: Buf[u8] = buf()
     var i = 0
 
-    while i < data.len()
-        var end = i
-
-        while end < data.len() && data[end] != u8('\n') do end += 1
+    while i < data.len
+        val end = data.index_of_byte_from(u8('\n'), i).unwrap_or(data.len - 1)
 
         if data[i] == u8('>')
-            write_reversed(seq.view(), out)
+            write_reversed(seq.view_mut(), out)
             seq.clear()
-
-            for j in i..<end + 1 do out.push(data[j])
+            out.extend(data[i..end])
         else
-            for j in i..<end do seq.push(table[data[j]])
+            seq.extend(data[i..<end])
 
         i = end + 1
 
-    write_reversed(seq.view(), out)
+    write_reversed(seq.view_mut(), out)
     putbytes(out.view())
