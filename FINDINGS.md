@@ -116,20 +116,31 @@ win is in instructions on that chain and in calls per line.
 - `map_with_capacity` made no difference.
 - The newtype key would be pointless with a cheaper library mixer.
 
-**sysl-tuned, sysl 0.11.5** (exclusive run): 1411 → **413 ms**, 0.41x C (Rust 0.85x). Still a hash
-table per k, as rule 3 requires.
+**sysl-tuned, sysl 0.11.5** (exclusive run, marshal job 4873, 10 runs): 1411 → **849 ms**, 0.83x C
+(C 1027 ms; Rust 874 ms, 0.85x). The table is the library `Map`, as README rule 3 requires (the
+Benchmarks Game's rule: the language's built-in or library hash table).
 
-- **Tuned: the program's own open-addressing table** (`Counts`: a `[]u64` of keys with an
-  all-ones empty marker, a `[]int` of counts, linear probing, doubled at half full), probed inline
-  in the counting loop, with the slot taken from the top bits of `key *% 0x9E3779B97F4A7C15`
-  (Rust's k-mer hasher). This is nearly all of the 3.4x. **Items:** (a) `Map`'s probe is out of line
-  (`MapCore.get…`/`put…`, now `upsert`), where khash's and this one are inlined into the loop;
-  (b) the library's integer mixer is expensive and spreads dense keys badly, where one multiply and
-  the top bits do; (c) `Map` keeps a separate occupancy representation where an integer key with a
-  spare value could mark empties itself.
+- **Tuned: a key type of the program's own** (`struct Kmer derives Eq` around the `u64` code) whose
+  `impl Hash` is one multiply, `code *% 0x9E3779B97F4A7C15` (Rust's k-mer hasher), counted with
+  `upsert(Kmer(key), 0, _ + 1)`. **Item:** the library's integer hash mixes expensively and spreads
+  dense keys badly; the earlier measurement put the newtype alone at 2.68x → 1.67x.
+- **Tuned: `map_with_capacity(min(4^k, 2^20))`.** For k = 12 and 18 most positions are new keys, so
+  the map otherwise rehashes over and over: a 2^16 cap measured 1.43 s, 2^18 1.12 s, 2^20 1.01 s,
+  2^21 and 2^22 slower again (more memory to touch), in one loaded dev run. In `sample`, insertion
+  (`MapCore.upsert_slow`/`put_slow`) was a third of the samples with the small cap. **Item:** `Map`'s
+  growth and slow insert path; a grown table re-places every slot (`Slot` is a 32-byte enum carrying
+  the stored hash), where a khash-shaped table moves a key array and a value array.
 - **Tuned: the input is read into `realloc` storage** and decoded by index into a preallocated
-  `[]u8` (`@unchecked`), in place of `read_all` and `Buf.push` per base. Peak memory 231 → 161 MiB.
-  **Items:** finding 1's `read_all` and `grow`.
+  `[]u8` (`@unchecked`), in place of `read_all` and `Buf.push` per base. **Items:** finding 1's
+  `read_all` and `grow`.
+- **What a better `Map` could reach: 413 ms (0.41x C)**, measured in the same exclusive run as the
+  other programs (marshal job 4858) with the program's own open-addressing table: a `[]u64` of keys
+  with an all-ones empty marker and a `[]int` of counts, linear probing, doubled at half full, the
+  slot from the top bits of the same multiply, the probe inlined into the counting loop. Rule 3 rules
+  it out of the program; it is the target for the library. The 2x between it and the `Map` form is
+  `Map`'s: (a) its slot is a tagged enum with a stored hash, 32 bytes, where the table's key and
+  count arrays are 16 bytes a slot and the empty test is the key itself; (b) `upsert` leaves the
+  insert as an out-of-line slow path through a closure; (c) growth re-places 32-byte slots.
 
 ## 4. binarytrees — a 48-byte node, and two hook calls and a thread-local read per freed object
 
@@ -238,11 +249,12 @@ moved from 2.08 to 1.92).
   built by a `const` function `reversal(K)` and reached through `flip(p, k)`, a 15-arm `match` on k
   to `flipped[K]`. Flips run until 0 leads (one more reversal per permutation than the scalar trick
   of counting the last flip without making it, since a lane cannot be read at a computed index), and
-  the counting loop is `@unchecked`. Bought 12%. **Items:** (a) **a run-time lane selection** (AArch64
-  `tbl`, x86 `pshufb`): the fastest form indexes a table of 16 reversal masks with k and does one
-  `tbl`, where the `match` is an indirect branch per flip. `vectors.md` says it is deliberately absent
-  ("keep the values in an array and index it"); this program is the case for it. (b) A lane read at a
-  computed index (`v[k]`) is refused for the same reason.
+  the counting loop is `@unchecked`. Bought 12%. **Next:** the fastest form indexes a table of 16
+  reversal masks with k and does one run-time lane selection (AArch64 `tbl`, x86 `pshufb`), where the
+  `match` is an indirect branch per flip. sysl 0.11.5 has no run-time selection, so this program
+  keeps the `match`; **sysl dev already has it** (`table.lookup(idx)`, landed for 0.12), and the
+  program moves to it once 0.12 ships. A lane read at a computed index (`v[k]`) is still refused, so
+  the scalar trick of counting the last flip without making it stays out of reach of the vector form.
 
 ## 8. mandelbrot — the escape test
 

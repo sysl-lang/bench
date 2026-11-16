@@ -37,6 +37,9 @@ names the origin of every file and says exactly what was changed.
    built from individually allocated nodes, k-mers are counted in a hash table, and fasta picks each
    symbol by scanning the cumulative probabilities. A version that changes the algorithm, such as an
    arena for binary-trees or a direct-indexed array for k-nucleotide, is not allowed in either sysl form.
+   As in the Benchmarks Game, k-nucleotide's hash table must be the language's built-in or standard
+   library one (a custom key type, hasher and capacity hint are allowed); a table the program writes
+   itself is not.
 4. **Output is verified before anything is timed.** A wrong answer fails the run.
 5. **Release flags**: C and C++ `-O3 -march=native`; Rust `-C opt-level=3 -C target-cpu=native`; Swift
    `-O`; Zig `-O ReleaseFast -mcpu=native`; Nim `-d:danger --opt:speed`; Go `go build` with default flags

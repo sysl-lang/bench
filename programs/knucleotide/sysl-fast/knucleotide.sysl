@@ -1,4 +1,6 @@
 import sysl.buf.{Buf, buf}
+import sysl.container.{Map, map_with_capacity}
+import sysl.math.min
 import sysl.slices.sort_by
 import sysl.text.{Search, from_utf8_lossy}
 
@@ -9,56 +11,21 @@ extern read(fd: i32, into: *u8, n: usize) -> isize
 
 const letters = "ACGT"
 
-// No k-mer key reaches this: an 18-mer is 36 bits.
-const empty: u64 = 0xFFFFFFFFFFFFFFFF
-
 struct Entry
     key: u64
     count: int
 end Entry
 
-// Tuned: the counts live in a table of the program's own (FINDINGS 3), the open-addressing table
-// with linear probing that khash is, where `Map` makes an out-of-line call per position and mixes
-// the key expensively. The slot is the top bits of the key times the 64-bit golden ratio, Rust's
-// own k-mer hasher, and the table doubles when it is half full.
-struct Counts
-    keys: []u64
-    counts: []int
-    len: usize
-    shift: u64
-end Counts
+// A k-mer's 2k-bit code as a map key.
+//
+// Tuned: a key type of the program's own whose hash is one multiply by the 64-bit golden ratio,
+// Rust's k-mer hasher, where the library's integer hash mixes expensively and spreads dense keys
+// badly (FINDINGS 3).
+struct Kmer derives Eq
+    code: u64
 
-slot_of(key: u64, shift: u64) -> usize = usize((key *% 0x9E3779B97F4A7C15) >> shift)
-
-new_counts(bits: u64) -> Counts = Counts([empty; 1 << bits], [0; 1 << bits], 0, 64 - bits)
-
-// The same entries in a table twice the size.
-grown(t: Counts) -> Counts
-    var bigger = new_counts(64 - t.shift + 1)
-
-    @unchecked
-        for i in 0..<t.keys.len
-            val key = t.keys[i]
-
-            if key != empty
-                var at = slot_of(key, bigger.shift)
-
-                while bigger.keys[at] != empty do at = (at + 1) & (bigger.keys.len - 1)
-
-                bigger.keys[at] = key
-                bigger.counts[at] = t.counts[i]
-
-    bigger.len = t.len
-    bigger
-
-count_of(t: Counts, key: u64) -> int
-    var at = slot_of(key, t.shift)
-
-    loop
-        if t.keys[at] == key then return t.counts[at]
-        if t.keys[at] == empty then return 0
-
-        at = (at + 1) & (t.keys.len - 1)
+impl Hash for Kmer
+    hash(self) -> u64 = self.code *% 0x9E3779B97F4A7C15
 
 // A base's code, in A C G T order, whatever its case.
 code_of(base: u8) -> u8
@@ -114,8 +81,10 @@ read_sequence() -> []u8
     free(storage)
     seq[0..<n]
 
-count_kmers(seq: []const u8, k: usize) -> Counts
-    var t = new_counts(12)
+// Tuned: the map is sized up front for as many keys as k can make, up to 2^20, so it rehashes
+// little or not at all while counting. A larger cap measured slower (more memory to touch).
+count_kmers(seq: []const u8, k: usize) -> Map[Kmer, int]
+    val counts: Map[Kmer, int] = map_with_capacity(min(usize(1) << (2 * k), 1 << 20))
     val mask = (u64(1) << (2 * k)) - 1
     var key: u64 = 0
 
@@ -123,26 +92,9 @@ count_kmers(seq: []const u8, k: usize) -> Counts
         for i in 0..<seq.len
             key = (key << 2 | u64(seq[i])) & mask
 
-            if i + 1 >= k
-                var at = slot_of(key, t.shift)
+            if i + 1 >= k then counts.upsert(Kmer(key), 0, _ + 1)
 
-                loop
-                    if t.keys[at] == key
-                        t.counts[at] += 1
-                        break
-
-                    if t.keys[at] == empty
-                        t.keys[at] = key
-                        t.counts[at] = 1
-                        t.len += 1
-
-                        if 2 * t.len > t.keys.len then t = grown(t)
-
-                        break
-
-                    at = (at + 1) & (t.keys.len - 1)
-
-    t
+    counts
 
 name_of(key: u64, k: usize) -> string
     var chars: Buf[u8] = buf()
@@ -157,8 +109,7 @@ print_frequencies(seq: []const u8, k: usize)
     var entries: Buf[Entry] = buf()
     val total = seq.len - k + 1
 
-    for i in 0..<counts.keys.len
-        if counts.keys[i] != empty then entries.push(Entry(counts.keys[i], counts.counts[i]))
+    for (key, count) in counts do entries.push(Entry(key.code, count))
 
     sort_by(entries.view_mut(), (a, b) -> a.count > b.count || a.count == b.count && name_of(a.key, k) < name_of(b.key, k))
 
@@ -173,7 +124,7 @@ print_count(seq: []const u8, pattern: string)
     for b in pattern.bytes
         key = key << 2 | u64(code_of(b))
 
-    print(f"${count_of(count_kmers(seq, pattern.len), key)}\t$pattern")
+    print(f"${count_kmers(seq, pattern.len).get_or(Kmer(key), 0)}\t$pattern")
 
 main()
     val seq = read_sequence()
