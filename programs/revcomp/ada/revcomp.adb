@@ -5,12 +5,76 @@
 --  a line at a time, complemented through a table into a buffer filled from
 --  its end, and written back out in lines of 60.
 
-with Ada.Text_IO;
+with GNAT.OS_Lib;
 with Ada.Unchecked_Deallocation;
 
 procedure Revcomp is
    type String_Access is access String;
    procedure Free is new Ada.Unchecked_Deallocation (String, String_Access);
+
+   --  Input is read from fd 0 in large blocks and output written to fd 1 in
+   --  large blocks.
+   In_Buf  : String (1 .. 65536);
+   In_Pos  : Natural := 1;
+   In_Len  : Natural := 0;
+   Out_Buf : String (1 .. 65536);
+   Out_Len : Natural := 0;
+
+   function End_Of_File return Boolean is
+   begin
+      if In_Pos > In_Len then
+         declare
+            Got : constant Integer :=
+              GNAT.OS_Lib.Read (GNAT.OS_Lib.Standin, In_Buf'Address, In_Buf'Length);
+         begin
+            In_Pos := 1;
+            In_Len := Natural'Max (Got, 0);
+         end;
+      end if;
+      return In_Pos > In_Len;
+   end End_Of_File;
+
+   --  Reads up to one line (at most Item'Length characters) into Item.
+   procedure Get_Line (Item : out String; Last : out Natural) is
+   begin
+      Last := Item'First - 1;
+      while Last < Item'Last and then not End_Of_File loop
+         declare
+            C : constant Character := In_Buf (In_Pos);
+         begin
+            In_Pos := In_Pos + 1;
+            exit when C = ASCII.LF;
+            Last := Last + 1;
+            Item (Last) := C;
+         end;
+      end loop;
+   end Get_Line;
+
+   procedure Flush is
+      Pos : Natural := 1;
+      Got : Integer;
+   begin
+      while Pos <= Out_Len loop
+         Got := GNAT.OS_Lib.Write (GNAT.OS_Lib.Standout, Out_Buf (Pos)'Address, Out_Len - Pos + 1);
+         exit when Got <= 0;
+         Pos := Pos + Got;
+      end loop;
+      Out_Len := 0;
+   end Flush;
+
+   procedure Put (S : String) is
+   begin
+      if Out_Len + S'Length > Out_Buf'Length then
+         Flush;
+      end if;
+      Out_Buf (Out_Len + 1 .. Out_Len + S'Length) := S;
+      Out_Len := Out_Len + S'Length;
+   end Put;
+
+   procedure New_Line is
+   begin
+      Put ((1 => ASCII.LF));
+   end New_Line;
 
    Growth : constant := 12_777_888;
 
@@ -61,24 +125,25 @@ begin
    Map ('W', 'W');
    Map ('Y', 'R');
 
-   if Ada.Text_IO.End_Of_File then
+   if End_Of_File then
       raise Program_Error with "No input data";
    end if;
-   Ada.Text_IO.Get_Line (Line, Last);
+   Get_Line (Line, Last);
    if Last = 0 or else Line (1) /= '>' then
       raise Program_Error with "1st char not '>'";
    end if;
 
    while More loop
-      Ada.Text_IO.Put_Line (Line (1 .. Last));
+      Put (Line (1 .. Last));
+      New_Line;
       Pr := Cap + 1;
 
       loop
-         if Ada.Text_IO.End_Of_File then
+         if End_Of_File then
             More := False;
             exit;
          end if;
-         Ada.Text_IO.Get_Line (Line, Last);
+         Get_Line (Line, Last);
          exit when Last > 0 and then Line (1) = '>';
 
          if Pr - 1 <= Last + 1 then
@@ -100,10 +165,11 @@ begin
          declare
             X : constant Natural := Natural'Min (Cap - Pr + 1, 60);
          begin
-            Ada.Text_IO.Put (Buf (Pr .. Pr + X - 1));
-            Ada.Text_IO.New_Line;
+            Put (Buf (Pr .. Pr + X - 1));
+            New_Line;
             Pr := Pr + X;
          end;
       end loop;
    end loop;
+   Flush;
 end Revcomp;

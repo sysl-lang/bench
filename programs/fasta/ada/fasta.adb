@@ -4,11 +4,41 @@
 --  A port to Ada of the C program by Drake Diedrich.
 
 with Ada.Command_Line;
-with Ada.Text_IO;
+with GNAT.OS_Lib;
 with Interfaces;
 
 procedure Fasta is
    use Interfaces;
+
+   --  Output is collected in a large buffer and written to fd 1 in bulk.
+   Out_Buf : String (1 .. 65536);
+   Out_Len : Natural := 0;
+
+   procedure Flush is
+      Pos : Natural := 1;
+      Got : Integer;
+   begin
+      while Pos <= Out_Len loop
+         Got := GNAT.OS_Lib.Write (GNAT.OS_Lib.Standout, Out_Buf (Pos)'Address, Out_Len - Pos + 1);
+         exit when Got <= 0;
+         Pos := Pos + Got;
+      end loop;
+      Out_Len := 0;
+   end Flush;
+
+   procedure Put (S : String) is
+   begin
+      if Out_Len + S'Length > Out_Buf'Length then
+         Flush;
+      end if;
+      Out_Buf (Out_Len + 1 .. Out_Len + S'Length) := S;
+      Out_Len := Out_Len + S'Length;
+   end Put;
+
+   procedure New_Line is
+   begin
+      Put ((1 => ASCII.LF));
+   end New_Line;
 
    IM   : constant := 139968;
    IA   : constant := 3877;
@@ -54,8 +84,8 @@ procedure Fasta is
          declare
             Start : constant Natural := T mod Len + 1;
          begin
-            Ada.Text_IO.Put (Buffer (Start .. Start + Linelen - 1));
-            Ada.Text_IO.New_Line;
+            Put (Buffer (Start .. Start + Linelen - 1));
+            New_Line;
             T := T + Linelen;
          end;
       end loop;
@@ -63,11 +93,11 @@ procedure Fasta is
          declare
             Start : constant Natural := T mod Len + 1;
          begin
-            Ada.Text_IO.Put (Buffer (Start .. Start + (N - T) - 1));
+            Put (Buffer (Start .. Start + (N - T) - 1));
          end;
       end if;
       if N mod Linelen /= 0 then
-         Ada.Text_IO.New_Line;
+         New_Line;
       end if;
    end Repeat_Fasta;
 
@@ -101,17 +131,17 @@ procedure Fasta is
             V := Fasta_Rand;
             Buffer (K) := Symb (Symb'First + Linear_Lookup (P, V) - 1);
          end loop;
-         Ada.Text_IO.Put (Buffer);
-         Ada.Text_IO.New_Line;
+         Put (Buffer);
+         New_Line;
       end loop;
       Remainder := N - (N / Linelen) * Linelen;
       for K in 1 .. Remainder loop
          V := Fasta_Rand;
          Buffer (K) := Symb (Symb'First + Linear_Lookup (P, V) - 1);
       end loop;
-      Ada.Text_IO.Put (Buffer (1 .. Remainder));
+      Put (Buffer (1 .. Remainder));
       if N mod Linelen /= 0 then
-         Ada.Text_IO.New_Line;
+         New_Line;
       end if;
    end Random_Fasta;
 
@@ -119,12 +149,16 @@ procedure Fasta is
      (if Ada.Command_Line.Argument_Count > 0
       then Natural'Value (Ada.Command_Line.Argument (1)) else 1000);
 begin
-   Ada.Text_IO.Put_Line (">ONE Homo sapiens alu");
+   Put (">ONE Homo sapiens alu");
+   New_Line;
    Repeat_Fasta (Alu, N * 2);
 
-   Ada.Text_IO.Put_Line (">TWO IUB ambiguity codes");
+   Put (">TWO IUB ambiguity codes");
+   New_Line;
    Random_Fasta (Iub, Iub_P, N * 3);
 
-   Ada.Text_IO.Put_Line (">THREE Homo sapiens frequency");
+   Put (">THREE Homo sapiens frequency");
+   New_Line;
    Random_Fasta (Homosapiens, Homosapiens_P, N * 5);
+   Flush;
 end Fasta;
