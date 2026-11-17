@@ -158,6 +158,30 @@ and C++ are mostly this. The fannkuch programs generate the permutations in the 
 rotation schemes (C: Ledrug's; C++: Branimir Maksimovic's; Rust: a factorial-number scheme; Swift and
 sysl: Rex Kerr's count array).
 
+## The tuned C and Rust columns
+
+`c-tuned` and `rust-tuned` follow `sysl-tuned`'s rules (README): single-threaded, the reference
+algorithm above, any speed technique the language offers. Rust uses std only; its SIMD is
+`core::arch::aarch64` (NEON), since `std::simd` is unstable. Each file keeps the header of the plain
+program it starts from (BSD-3) and says in its own header what it changes. The fastest Benchmarks Game
+entries were surveyed first: every C (`*.gcc`) and Rust (`*.rust`) entry of the eight programs that
+builds on arm64 without crates was built, run single-threaded (OpenMP pragmas left inactive) and
+verified; the techniques below are theirs where they apply, ported from SSE/AVX to NEON. Entries that
+change the algorithm were not used: `fasta.gcc-3`'s symbol table indexed by the generator state (a
+direct-indexed array), the arenas of `binarytrees.rust`-`rust-5`, and the custom hash tables of the
+k-nucleotide entries.
+
+| program | C and Rust tuned: what they do |
+|---|---|
+| nbody | the bodies as fixed arrays, one per field; each step computes the ten pairwise differences into fixed arrays, then distances and magnitudes as NEON two-lane vectors (five `fsqrt` and five `fdiv` instead of ten each), then the velocity updates. The fastest entries (`nbody.gcc-4`/`-5`/`-9`) use an approximate reciprocal square root refined by Newton steps; that replaces the per-pair sqrt and divide, so it is not used |
+| spectralnorm | eight columns per step in four NEON two-lane vectors, each denominator computed exactly in double from the column vector, four independent sums so the divides overlap (the form of `spectralnorm.gcc-7` and `rust-6`, whose SSE `div_pd` becomes NEON `fdiv`) |
+| fannkuchredux | the permutation is one 16-byte NEON register; a flip is one `TBL` through a reversal mask chosen at run time by the first element, the step to the next permutation one `TBL` through a rotation mask (the `pshufb` form of `fannkuchredux.gcc-4`, `gcc-6` and `rust-6`, ported to NEON); the same count-array order |
+| binarytrees | each tree checked and freed in one walk (count the node, walk its children, free it), where the plain programs walk twice; every node is still its own `malloc`/`Box` and its own free |
+| mandelbrot | two output bytes (sixteen pixels) per pass as eight independent NEON two-lane chains; the escape test every fifth iteration, as `sysl-tuned` does (an escaped pixel only grows, or overflows to inf/NaN, which fail `<= 4` too, so the image is the same); the image written in one call |
+| fasta | the generator step's remainder by Lemire's fastmod with the multiply-add folded in (one multiply-add and one high multiply per step on the critical path, the same state sequence); the cumulative-probability scan over the whole table, branch-free, against the least integer state exceeding each probability (computed once from the C program's double comparison, so every symbol is the reference's), four per NEON compare; output in large buffers |
+| k-nucleotide | khash (C) and std `HashMap` (Rust), as the plain programs, with the same hashes; 32-bit keys for k <= 16; each table sized once up front; input read whole and encoded in one pass |
+| revcomp | input read whole; each record's lines joined, then reverse-complemented sixteen bytes at a time from both ends (the complement table indexed by the low five bits with one two-register `TBL`, the reversal a `REV64` plus a swap of halves), re-wrapped at 60, written in one call |
+
 ## The two sysl forms
 
 Both sysl forms use C's algorithm: the same work, the same arithmetic on the same data.
