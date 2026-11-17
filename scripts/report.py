@@ -13,7 +13,7 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 programs = ["nbody", "spectralnorm", "fannkuchredux", "binarytrees",
             "mandelbrot", "fasta", "knucleotide", "revcomp"]
-systems = ["c", "rust", "cpp", "zig", "d", "odin", "c3", "ada", "nim", "swift", "sysl-idiomatic", "sysl-tuned"]
+systems = ["c", "c-tuned", "rust", "rust-tuned", "cpp", "zig", "d", "odin", "c3", "ada", "nim", "swift", "sysl-idiomatic", "sysl-tuned"]
 managed = ["go", "java", "eiffel", "eiffel-contracts", "julia"]
 columns = systems + managed
 
@@ -58,9 +58,9 @@ toolchains = {
 }
 flags = {
     "sysl": "sysl build --release -O3 --cpu native",
-    "c": "clang -std=gnu17 -O3 -march=native",
+    "c": "clang -std=gnu17 -O3 -march=native (c-tuned the same)",
     "cpp": "clang++ -std=c++20 -O3 -march=native",
-    "rust": "rustc --edition 2021 -C opt-level=3 -C target-cpu=native",
+    "rust": "rustc --edition 2021 -C opt-level=3 -C target-cpu=native (rust-tuned the same)",
     "swift": "swiftc -O",
     "zig": "zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded",
     "nim": "nim c -d:danger --opt:speed --mm:orc --cc:clang --passC:-march=native --threads:off",

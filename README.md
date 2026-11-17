@@ -24,6 +24,14 @@ Each program is written once per language. sysl has two versions:
 
 Both sysl forms use the same algorithm as C.
 
+C and Rust also have a tuned column each, **`c-tuned`** and **`rust-tuned`**, under the same rules as
+`sysl-tuned`: single-threaded, the same algorithm (rule 3), but any speed technique the language offers —
+NEON intrinsics (`arm_neon.h`, `core::arch::aarch64`), unchecked indexing, fixed arrays, explicit
+layouts, manual unrolling, faster I/O. Rust stays std-only. They start from the fastest Benchmarks Game
+entries; where no technique beats the plain program, the tuned file is a copy of it. SOURCES.md lists
+what each one does. The plain `c` and `rust` columns are unchanged, and C remains the baseline of
+every ratio.
+
 The C, Rust, C++ and Swift programs are Benchmarks Game sources (BSD-3). Where the site publishes only
 a threaded or crate-dependent program, it is adapted to what the rules below require. [SOURCES.md](SOURCES.md)
 names the origin of every file and says exactly what was changed.
@@ -48,7 +56,8 @@ names the origin of every file and says exactly what was changed.
    flags (the JIT already targets the host CPU); Eiffel `ec -finalize -c_compile` (EiffelStudio's
    optimised build with Eiffel-level inlining on, `inlining_size` 100, set in each .ecf; without it
    every `ARRAY.item` is an out-of-line call with GC bookkeeping; no native-CPU option); sysl `--release -O3 --cpu native`.
-6. **Checks that remain.** Rust, Go, Odin and Java keep their bounds checks. C, C++, Zig ReleaseFast, Nim
+6. **Checks that remain.** Rust, Go, Odin and Java keep their bounds checks (`rust-tuned` drops them
+   where it reads through `get_unchecked` or raw-pointer NEON loads). C, C++, Zig ReleaseFast, Nim
    `danger`, C3 `-O3` (c3c's unsafe mode, which turns off bounds checks and contracts) and Ada `-gnatp`
    (which suppresses every run-time check) have none, and D
    with `-release` drops the bounds checks of `@system` code, which is what these D programs are. Eiffel's
@@ -64,7 +73,7 @@ names the origin of every file and says exactly what was changed.
 
 ## Groups
 
-The tables group the languages. **Systems**: c, cpp, rust, zig, d, odin, c3, ada, nim, swift, sysl-idiomatic,
+The tables group the languages. **Systems**: c, c-tuned, rust, rust-tuned, cpp, zig, d, odin, c3, ada, nim, swift, sysl-idiomatic,
 sysl-tuned. **Managed**: go, java, eiffel, eiffel-contracts, julia. The criterion: a systems language can run with no tracing GC and no
 required runtime, with deterministic destruction and control over layout (Swift via Embedded Swift, Nim
 via `--os:standalone`, D via `-betterC`); every program here runs in the language's normal hosted mode.
@@ -73,7 +82,7 @@ The report gives the geometric mean of each group as well as overall.
 ## Layout
 
 ```
-programs/<name>/{sysl-idiomatic,sysl-tuned,c,rust,cpp,swift,zig,nim,julia,go,d,odin,c3,ada,java,eiffel}/   one source file per directory
+programs/<name>/{sysl-idiomatic,sysl-tuned,c,c-tuned,rust,rust-tuned,cpp,swift,zig,nim,julia,go,d,odin,c3,ada,java,eiffel}/   one source file per directory
                    (Eiffel adds its .ecf project file, and a second class file where a program needs one;
                    `eiffel-contracts` is built from the `eiffel` directory)
 expected/ref/      the Benchmarks Game's published output (and input) at a small size

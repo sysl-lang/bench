@@ -20,9 +20,11 @@ for prog in $PROGRAMS; do
     rm -f $out
     case $lang in
       sysl-*) sysl build --release -O3 --cpu native -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
-      c)      clang -std=gnu17 -O3 -march=native -w -I$dir $dir/$prog.c -o $out -lm >$out.log 2>&1 ;;
+      c|c-tuned)
+              clang -std=gnu17 -O3 -march=native -w -I$dir $dir/$prog.c -o $out -lm >$out.log 2>&1 ;;
       cpp)    clang++ -std=c++20 -O3 -march=native -w $dir/$prog.cpp -o $out >$out.log 2>&1 ;;
-      rust)   rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native $dir/$prog.rs -o $out >$out.log 2>&1 ;;
+      rust|rust-tuned)
+              rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native $dir/$prog.rs -o $out >$out.log 2>&1 ;;
       swift)  swiftc -O $dir/$prog.swift -o $out >$out.log 2>&1 ;;
       zig)    (cd $dir && zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded -lc --cache-dir $BUILD/.zig-cache --global-cache-dir $BUILD/.zig-global -femit-bin=$out $prog.zig) >$out.log 2>&1 ;;
       nim)    nim c -d:danger --opt:speed --mm:orc --cc:clang --passC:-march=native --threads:off --hints:off --warnings:off --nimcache:$BUILD/.nimcache/$prog -o:$out $dir/$prog.nim >$out.log 2>&1 ;;
