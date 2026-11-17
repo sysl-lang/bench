@@ -148,6 +148,45 @@ program it ports, so **the licence is the Benchmarks Game's BSD-3-Clause** as fo
   `Unsigned_32`) keyed by the 2k-bit code, with the C program's `key xor key >> 7` hash, and sorts the
   elements with `Ada.Containers.Generic_Array_Sort`.
 
+### Fortran
+
+Fortran's programs start from the archive's Fortran entries (`*.ifc`, written for Intel Fortran; BSD-3,
+headers kept), compiled with gfortran (GCC 16.2). Where the archive has several entries, the start is the
+single-threaded one that is the C program's algorithm; OpenMP entries (`fannkuchredux.ifc-3`,
+`mandelbrot.ifc-4`/`-6`/`-7`, `spectralnorm.ifc-3`, `binarytrees.ifc-2`) were passed over or had their
+directives removed. `fannkuchredux.ifc-3` was also passed over because it caches blocks of permutations
+and composes them, which is not the fixed algorithm. Every program reads its argument with
+`get_command_argument`. LLVM `flang` 23 built the same sources as a check: it was faster on mandelbrot,
+nbody and fasta and over four times slower on binarytrees, slower overall, and cannot use the gfortran-built
+stdlib, so the column is gfortran.
+
+| program | Fortran archive file | changes |
+|---|---|---|
+| nbody | `nbody.ifc-6.ifc` | the single-precision reciprocal square root with one Newton step replaced by the C program's `dt / (d2 * sqrt(d2))` in double precision; the argument buffer widened to 12 characters |
+| spectralnorm | `spectralnorm.ifc-2.ifc` | `MultiplyAv`, `MultiplyAtv` and `MultiplyAtAv` are subroutines writing into preallocated arrays, where they were functions returning a fresh array, and each row is summed in a scalar |
+| fannkuchredux | `fannkuchredux.ifc` | unchanged |
+| binarytrees | `binarytrees.ifc` | `NewTreeNode` takes its children as pointer dummies and points the new node at them, where it passed possibly null pointers to non-pointer `target` dummies and copied a structure constructor (invalid when a child is null). A node per `allocate`, freed by `deallocate` as `ItemCheck` walks it, as in the archive |
+| mandelbrot | `mandelbrot.ifc-6.ifc` | rewritten around the archive's idea (a vector of pixels iterated together until all escape): OpenMP removed; eight pixels, one output byte, per vector; the C program's coordinates `2*x/w - 1.5` and its `<= 4` test, which `NaN` fails; the image written in one unformatted stream write to `/dev/stdout` instead of a formatted `a1` per byte |
+| fasta | `fasta.ifc-4.ifc` | double precision where the archive used `real` (the C program's arithmetic, so the output matches at the timed size); the C program's lookup, counting the cumulative probabilities below the random value; output lines gathered in a 64 KB buffer written by unformatted stream writes to `/dev/stdout`, where the archive called C's `puts` per line |
+| knucleotide | none | **written for this suite after the C program** (the archive's `knucleotide.ifc` is a comment that there is no Fortran library hash table): see below |
+| revcomp | `revcomp.ifc` | rewritten in the archive's shape (the whole input read, each record complemented through a table into a buffer from its end, re-wrapped at 60): input read with POSIX `read` through `ISO_C_BINDING` (below), output through an unformatted stream on `/dev/stdout` |
+
+- **Reading standard input.** fasta-derived input of unknown length cannot be read in blocks by a
+  conforming Fortran program: an end of file during a `READ` leaves every input item undefined, so the
+  last, partial block is lost (gfortran happens to keep it; flang drops it). Line-at-a-time formatted
+  reads are conforming but made revcomp five times slower than C, which is Fortran's formatted I/O
+  library rather than the algorithm. revcomp and knucleotide therefore call POSIX `read(2)` through
+  `ISO_C_BINDING`, as Ada's programs use `GNAT.OS_Lib`.
+- **knucleotide** counts into the `open_hashmap_type` of [fortran-lang
+  stdlib](https://stdlib.fortran-lang.org) 0.8.1 (`brew install fortran-stdlib`, MIT licence), keyed by
+  the 2k-bit code as eight bytes, with the C program's `key xor key >> 7` as the hasher (README rule 3:
+  a custom hasher is allowed). Fortran has no hash table in the language or its ISO library, and stdlib
+  is the community's de facto standard library, so this is the analogue of the C program's klib
+  `khash.h`. The map stores an index into parallel key and count arrays, because its values are `class(*)`;
+  each lookup allocates and frees the key's copy and the value it returns, which is where the time goes
+  (about 16 times the C program). The at most sixteen frequency entries are ordered by a selection sort,
+  and percentages are divided in single precision, as in the C program.
+
 ## Implementation variants of one algorithm
 
 Some programs differ in how the same arithmetic is laid out, as they do on the Benchmarks Game. The
