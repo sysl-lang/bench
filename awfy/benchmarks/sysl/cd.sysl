@@ -1,0 +1,720 @@
+// CD, the collision detector of the CDx real-time Java benchmark, by way of the Java version of the
+// suite.
+
+import som.{Vector, vector}
+
+const min_x = 0.0
+const min_y = 0.0
+const max_x = 1000.0
+const max_y = 1000.0
+const min_z = 0.0
+const max_z = 10.0
+const proximity_radius = 1.0
+const good_voxel_size = proximity_radius * 2.0
+
+// What a red-black tree key provides: an order.
+trait CompareTo
+    compare_to(self, other: Self) -> int
+
+struct Vector2D
+    x: real
+    y: real
+
+    plus(self, other: Vector2D) -> Vector2D = Vector2D(self.x + other.x, self.y + other.y)
+
+    minus(self, other: Vector2D) -> Vector2D = Vector2D(self.x - other.x, self.y - other.y)
+end Vector2D
+
+impl CompareTo for Vector2D
+    compare_to(self, other: Vector2D) -> int
+        val result = compare_numbers(self.x, other.x)
+
+        if result != 0 then return result
+        compare_numbers(self.y, other.y)
+
+private compare_numbers(a: real, b: real) -> int
+    if a == b then return 0
+    if a < b then return -1
+    if a > b then return 1
+
+    // We say that NaN is smaller than non-NaN.
+    if a == a then return 1
+    -1
+
+struct Vector3D
+    x: real
+    y: real
+    z: real
+
+    plus(self, other: Vector3D) -> Vector3D = Vector3D(self.x + other.x, self.y + other.y, self.z + other.z)
+
+    minus(self, other: Vector3D) -> Vector3D = Vector3D(self.x - other.x, self.y - other.y, self.z - other.z)
+
+    dot(self, other: Vector3D) -> real = self.x * other.x + self.y * other.y + self.z * other.z
+
+    squared_magnitude(self) -> real = self.dot(self)
+
+    magnitude(self) -> real = self.squared_magnitude().sqrt()
+
+    times(self, amount: real) -> Vector3D = Vector3D(self.x * amount, self.y * amount, self.z * amount)
+end Vector3D
+
+enum Color
+    Red
+    Black
+
+struct Node[K, V]
+    key: K
+    value: V
+    left: Option[&Node[K, V]]
+    right: Option[&Node[K, V]]
+    parent: Option[&Node[K, V]]
+    color: Color
+
+    successor(&self) -> Option[&Node[K, V]]
+        var x = self
+
+        if x.right is Some(r) then return Some(tree_minimum(r))
+
+        var y = x.parent
+
+        while y is Some(yy) && holds(x, yy.right)
+            x = yy
+            y = yy.parent
+
+        y
+end Node
+
+struct Entry[K, V]
+    key: K
+    value: V
+end Entry
+
+private tree_minimum[K, V](x: &Node[K, V]) -> &Node[K, V]
+    var current = x
+
+    while current.left is Some(l) do current = l
+
+    current
+
+// Whether n is the node an optional link holds.
+private holds[K, V](n: &Node[K, V], link: Option[&Node[K, V]]) -> bool =
+    link match
+        Some(l) -> l === n
+        None -> false
+
+private is_black[K, V](n: Option[&Node[K, V]]) -> bool =
+    n match
+        Some(x) -> x.color == Black
+        None -> true
+
+struct RedBlackTree[K: CompareTo, V]
+    root: Option[&Node[K, V]]
+
+    put(*self, key: K, value: V) -> Option[V]
+        var y: Option[&Node[K, V]] = None
+        var x = self.root
+
+        while x is Some(n)
+            y = x
+
+            val comparison_result = key.compare_to(n.key)
+
+            if comparison_result < 0 then x = n.left
+            else if comparison_result > 0 then x = n.right
+            else
+                val old_value = n.value
+                n.value = value
+                return Some(old_value)
+
+        val z: &Node[K, V] = Node(key, value, None, None, y, Red)
+
+        y match
+            None -> self.root = Some(z)
+            Some(yy) ->
+                if key.compare_to(yy.key) < 0 then yy.left = Some(z)
+                else yy.right = Some(z)
+
+        var x2 = z
+
+        while !holds(x2, self.root) && x2.parent.unwrap().color == Red
+            val p = x2.parent.unwrap()
+            val gp = p.parent.unwrap()
+
+            if holds(p, gp.left)
+                val uncle = gp.right
+
+                if !is_black(uncle)
+                    // Case 1
+                    p.color = Black
+                    uncle.unwrap().color = Black
+                    gp.color = Red
+                    x2 = gp
+                else
+                    if holds(x2, p.right)
+                        // Case 2
+                        x2 = p
+                        self.left_rotate(x2)
+
+                    // Case 3
+                    val p3 = x2.parent.unwrap()
+
+                    p3.color = Black
+                    p3.parent.unwrap().color = Red
+                    self.right_rotate(p3.parent.unwrap())
+            else
+                // Same as "then" clause with "right" and "left" exchanged.
+                val uncle = gp.left
+
+                if !is_black(uncle)
+                    // Case 1
+                    p.color = Black
+                    uncle.unwrap().color = Black
+                    gp.color = Red
+                    x2 = gp
+                else
+                    if holds(x2, p.left)
+                        // Case 2
+                        x2 = p
+                        self.right_rotate(x2)
+
+                    // Case 3
+                    val p3 = x2.parent.unwrap()
+
+                    p3.color = Black
+                    p3.parent.unwrap().color = Red
+                    self.left_rotate(p3.parent.unwrap())
+
+        self.root.unwrap().color = Black
+        None
+
+    remove(*self, key: K) -> Option[V]
+        val z = self.find_node(key) match
+            Some(n) -> n
+            None -> return None
+
+        // Y is the node to be unlinked from the tree.
+        val y = if z.left is None || z.right is None then z else z.successor().unwrap()
+
+        // X is the child of y which might potentially replace y in the tree. X might be null at
+        // this point.
+        val x = if y.left is Some(_) then y.left else y.right
+        var x_parent: Option[&Node[K, V]] = None
+
+        x match
+            Some(xx) ->
+                xx.parent = y.parent
+                x_parent = xx.parent
+            None -> x_parent = y.parent
+
+        y.parent match
+            None -> self.root = x
+            Some(yp) ->
+                if holds(y, yp.left) then yp.left = x
+                else yp.right = x
+
+        if y !== z
+            if y.color == Black then self.remove_fixup(x, x_parent)
+
+            y.parent = z.parent
+            y.color = z.color
+            y.left = z.left
+            y.right = z.right
+
+            z.left match
+                Some(l) -> l.parent = Some(y)
+                None -> ()
+
+            z.right match
+                Some(r) -> r.parent = Some(y)
+                None -> ()
+
+            z.parent match
+                Some(zp) ->
+                    if holds(z, zp.left) then zp.left = Some(y)
+                    else zp.right = Some(y)
+                None -> self.root = Some(y)
+        else if y.color == Black
+            self.remove_fixup(x, x_parent)
+
+        Some(z.value)
+
+    get(*self, key: K) -> Option[V] =
+        self.find_node(key) match
+            Some(node) -> Some(node.value)
+            None -> None
+
+    for_each(*self, f: Entry[K, V] -> unit)
+        var current = self.root match
+            Some(r) -> Some(tree_minimum(r))
+            None -> return
+
+        while current is Some(n)
+            f(Entry(n.key, n.value))
+            current = n.successor()
+
+    find_node(*self, key: K) -> Option[&Node[K, V]]
+        var current = self.root
+
+        while current is Some(n)
+            val comparison_result = key.compare_to(n.key)
+
+            if comparison_result == 0 then return current
+            current = if comparison_result < 0 then n.left else n.right
+
+        None
+
+    private left_rotate(*self, x: &Node[K, V]) -> &Node[K, V]
+        val y = x.right.unwrap()
+
+        // Turn y's left subtree into x's right subtree.
+        x.right = y.left
+        y.left match
+            Some(yl) -> yl.parent = Some(x)
+            None -> ()
+
+        // Link x's parent to y
+        y.parent = x.parent
+        x.parent match
+            None -> self.root = Some(y)
+            Some(xp) ->
+                if holds(x, xp.left) then xp.left = Some(y)
+                else xp.right = Some(y)
+
+        // Put x on y's left.
+        y.left = Some(x)
+        x.parent = Some(y)
+
+        y
+
+    private right_rotate(*self, y: &Node[K, V]) -> &Node[K, V]
+        val x = y.left.unwrap()
+
+        // Turn x's right subtree into y's left subtree.
+        y.left = x.right
+        x.right match
+            Some(xr) -> xr.parent = Some(y)
+            None -> ()
+
+        // Link y's parent to x;
+        x.parent = y.parent
+        y.parent match
+            None -> self.root = Some(x)
+            Some(yp) ->
+                if holds(y, yp.left) then yp.left = Some(x)
+                else yp.right = Some(x)
+
+        x.right = Some(y)
+        y.parent = Some(x)
+
+        x
+
+    private remove_fixup(*self, x_in: Option[&Node[K, V]], x_parent_in: Option[&Node[K, V]])
+        var x = x_in
+        var x_parent = x_parent_in
+
+        while !is_root(x, self.root) && is_black(x)
+            val xp = x_parent.unwrap()
+
+            if is_link(x, xp.left)
+                // Note: the text points out that w cannot be null. The reason is not obvious from
+                // simply looking at the code; it comes about from the properties of the red-black
+                // tree.
+                var w = xp.right.unwrap()
+
+                if w.color == Red
+                    // Case 1
+                    w.color = Black
+                    xp.color = Red
+                    self.left_rotate(xp)
+                    w = xp.right.unwrap()
+
+                if is_black(w.left) && is_black(w.right)
+                    // Case 2
+                    w.color = Red
+                    x = Some(xp)
+                    x_parent = xp.parent
+                else
+                    if is_black(w.right)
+                        // Case 3
+                        w.left.unwrap().color = Black
+                        w.color = Red
+                        self.right_rotate(w)
+                        w = xp.right.unwrap()
+
+                    // Case 4
+                    w.color = xp.color
+                    xp.color = Black
+                    w.right match
+                        Some(wr) -> wr.color = Black
+                        None -> ()
+                    self.left_rotate(xp)
+                    x = self.root
+                    x_parent = x.unwrap().parent
+            else
+                // Same as "then" clause with "right" and "left" exchanged.
+                var w = xp.left.unwrap()
+
+                if w.color == Red
+                    // Case 1
+                    w.color = Black
+                    xp.color = Red
+                    self.right_rotate(xp)
+                    w = xp.left.unwrap()
+
+                if is_black(w.right) && is_black(w.left)
+                    // Case 2
+                    w.color = Red
+                    x = Some(xp)
+                    x_parent = xp.parent
+                else
+                    if is_black(w.left)
+                        // Case 3
+                        w.right.unwrap().color = Black
+                        w.color = Red
+                        self.left_rotate(w)
+                        w = xp.left.unwrap()
+
+                    // Case 4
+                    w.color = xp.color
+                    xp.color = Black
+                    w.left match
+                        Some(wl) -> wl.color = Black
+                        None -> ()
+                    self.right_rotate(xp)
+                    x = self.root
+                    x_parent = x.unwrap().parent
+
+        x match
+            Some(xx) -> xx.color = Black
+            None -> ()
+end RedBlackTree
+
+// The tree owns its nodes, each of which points at its parent: letting go of the parent links
+// lets the nodes go.
+impl[K: CompareTo, V] Drop for RedBlackTree[K, V]
+    drop(self)
+        self.root match
+            Some(r) -> clear_parents(r)
+            None -> ()
+
+private clear_parents[K, V](n: &Node[K, V])
+    n.parent = None
+    n.left match
+        Some(l) -> clear_parents(l)
+        None -> ()
+    n.right match
+        Some(r) -> clear_parents(r)
+        None -> ()
+
+// Whether two optional links name the same node, or are both empty.
+private is_link[K, V](a: Option[&Node[K, V]], b: Option[&Node[K, V]]) -> bool =
+    a match
+        Some(n) -> holds(n, b)
+        None -> b is None
+
+private is_root[K, V](x: Option[&Node[K, V]], root: Option[&Node[K, V]]) -> bool = is_link(x, root)
+
+red_black_tree[K: CompareTo, V]() -> &RedBlackTree[K, V] = RedBlackTree(None)
+
+struct CallSign
+    value: int
+end CallSign
+
+impl CompareTo for CallSign
+    compare_to(self, other: CallSign) -> int =
+        if self.value == other.value then 0 else if self.value < other.value then -1 else 1
+
+struct Collision
+    aircraft_a: CallSign
+    aircraft_b: CallSign
+    position: Vector3D
+end Collision
+
+struct Motion
+    callsign: CallSign
+    pos_one: Vector3D
+    pos_two: Vector3D
+
+    private delta(self) -> Vector3D = self.pos_two.minus(self.pos_one)
+
+    find_intersection(self, other: Motion) -> Option[Vector3D]
+        val init1 = self.pos_one
+        val init2 = other.pos_one
+        val vec1 = self.delta()
+        val vec2 = other.delta()
+        val radius = proximity_radius
+
+        // this test is not geometrical 3-d intersection test, it takes the fact that the aircraft
+        // move into account ; so it is more like a 4d test (it assumes that both of the aircraft
+        // have a constant speed over the tested interval)
+
+        // we thus have two points, each of them moving on its line segment at constant speed ; we
+        // are looking for times when the distance between these two points is smaller than r
+
+        // vec1 is vector of aircraft 1
+        // vec2 is vector of aircraft 2
+
+        // a = (V2 - V1)^T * (V2 - V1)
+        val a = vec2.minus(vec1).squared_magnitude()
+
+        if a != 0.0
+            // we are first looking for instances of time when the planes are exactly r from each
+            // other at least one plane is moving ; if the planes are moving in parallel, they do
+            // not have constant speed
+
+            // if the planes are moving in parallel, then
+            //   if the faster starts behind the slower, we can have 2, 1, or 0 solutions
+            //   if the faster plane starts in front of the slower, we can have 0 or 1 solutions
+
+            // if the planes are not moving in parallel, then
+
+            // point P1 = I1 + vV1
+            // point P2 = I2 + vV2
+            //   - looking for v, such that dist(P1,P2) = || P1 - P2 || = r
+
+            // it follows that || P1 - P2 || = sqrt( < P1-P2, P1-P2 > )
+            //   0 = -r^2 + < P1 - P2, P1 - P2 >
+            //  from properties of dot product
+            //   0 = -r^2 + <I1-I2,I1-I2> + v * 2<I1-I2, V1-V2> + v^2 *<V1-V2,V1-V2>
+            //   so we calculate a, b, c - and solve the quadratic equation
+            //   0 = c + bv + av^2
+
+            // b = 2 * <I1-I2, V1-V2>
+            val b = 2.0 * init1.minus(init2).dot(vec1.minus(vec2))
+
+            // c = -r^2 + (I2 - I1)^T * (I2 - I1)
+            val c = -radius * radius + init2.minus(init1).squared_magnitude()
+
+            val discr = b * b - 4.0 * a * c
+            if discr < 0.0 then return None
+
+            val v1 = (-b - discr.sqrt()) / (2.0 * a)
+            val v2 = (-b + discr.sqrt()) / (2.0 * a)
+
+            if v1 <= v2 && (v1 <= 1.0 && 1.0 <= v2 || v1 <= 0.0 && 0.0 <= v2 || 0.0 <= v1 && v2 <= 1.0)
+                // Pick a good "time" at which to report the collision.
+                // The collision started before this frame: report it at the start of the frame.
+                // Otherwise it started during this frame: report it at that moment.
+                val v = if v1 <= 0.0 then 0.0 else v1
+
+                val result1 = init1.plus(vec1.times(v))
+                val result2 = init2.plus(vec2.times(v))
+
+                val result = result1.plus(result2).times(0.5)
+
+                if result.x >= min_x && result.x <= max_x && result.y >= min_y && result.y <= max_y &&
+                   result.z >= min_z && result.z <= max_z
+                    return Some(result)
+
+            return None
+
+        // the planes have the same speeds and are moving in parallel (or they are not moving at
+        // all) they  thus have the same distance all the time ; we calculate it from the initial
+        // point
+
+        // dist = || i2 - i1 || = sqrt(  ( i2 - i1 )^T * ( i2 - i1 ) )
+        val dist = init2.minus(init1).magnitude()
+        if dist <= radius then return Some(init1.plus(init2).times(0.5))
+
+        None
+end Motion
+
+struct Aircraft
+    callsign: CallSign
+    position: Vector3D
+end Aircraft
+
+val horizontal = Vector2D(good_voxel_size, 0.0)
+val vertical = Vector2D(0.0, good_voxel_size)
+
+struct CollisionDetector
+    state: &RedBlackTree[CallSign, Vector3D]
+
+    handle_new_frame(*self, frame: &Vector[Aircraft]) -> &Vector[Collision]
+        val motions: &Vector[Motion] = vector()
+        val seen: &RedBlackTree[CallSign, bool] = red_black_tree()
+
+        frame.for_each(aircraft ->
+            val old_position = self.state.put(aircraft.callsign, aircraft.position)
+            val new_position = aircraft.position
+
+            seen.put(aircraft.callsign, true)
+
+            // Treat newly introduced aircraft as if they were stationary.
+            motions.append(Motion(aircraft.callsign, old_position.unwrap_or(new_position), new_position)))
+
+        val to_remove: &Vector[CallSign] = vector()
+
+        self.state.for_each(e ->
+            if !seen.get(e.key).unwrap_or(false) then to_remove.append(e.key))
+
+        to_remove.for_each(e -> self.state.remove(e))
+
+        val all_reduced = reduce_collision_set(motions)
+        val collisions: &Vector[Collision] = vector()
+
+        all_reduced.for_each(reduced ->
+            for i in 0..<reduced.size()
+                val motion1 = reduced.at(i).unwrap()
+
+                for j in i + 1..<reduced.size()
+                    val motion2 = reduced.at(j).unwrap()
+
+                    motion1.find_intersection(motion2) match
+                        Some(collision) -> collisions.append(Collision(motion1.callsign, motion2.callsign, collision))
+                        None -> ())
+
+        collisions
+end CollisionDetector
+
+collision_detector() -> CollisionDetector = CollisionDetector(red_black_tree())
+
+private is_in_voxel(voxel: Vector2D, motion: Motion) -> bool
+    if voxel.x > max_x || voxel.x < min_x || voxel.y > max_y || voxel.y < min_y then return false
+
+    val init = motion.pos_one
+    val fin = motion.pos_two
+
+    val v_s = good_voxel_size
+    val r = proximity_radius / 2.0
+
+    val v_x = voxel.x
+    val x0 = init.x
+    val xv = fin.x - init.x
+
+    val v_y = voxel.y
+    val y0 = init.y
+    val yv = fin.y - init.y
+
+    var low_x = (v_x - r - x0) / xv
+    var high_x = (v_x + v_s + r - x0) / xv
+
+    if xv < 0.0
+        val tmp = low_x
+        low_x = high_x
+        high_x = tmp
+
+    var low_y = (v_y - r - y0) / yv
+    var high_y = (v_y + v_s + r - y0) / yv
+
+    if yv < 0.0
+        val tmp = low_y
+        low_y = high_y
+        high_y = tmp
+
+    // The first two terms allow no motion in x, then in y; the third, no motion in x or y or both.
+    (xv == 0.0 && v_x <= x0 + r && x0 - r <= v_x + v_s ||
+     low_x <= 1.0 && 1.0 <= high_x || low_x <= 0.0 && 0.0 <= high_x || 0.0 <= low_x && high_x <= 1.0) &&
+    (yv == 0.0 && v_y <= y0 + r && y0 - r <= v_y + v_s ||
+     low_y <= 1.0 && 1.0 <= high_y || low_y <= 0.0 && 0.0 <= high_y || 0.0 <= low_y && high_y <= 1.0) &&
+    (xv == 0.0 || yv == 0.0 ||
+     low_y <= high_x && high_x <= high_y || low_y <= low_x && low_x <= high_y || low_x <= low_y && high_y <= high_x)
+
+private put_into_map(voxel_map: &RedBlackTree[Vector2D, &Vector[Motion]], voxel: Vector2D, motion: Motion)
+    voxel_map.get(voxel) match
+        Some(array) -> array.append(motion)
+        None ->
+            val arr: &Vector[Motion] = vector()
+            arr.append(motion)
+            voxel_map.put(voxel, arr)
+
+private recurse(voxel_map: &RedBlackTree[Vector2D, &Vector[Motion]], seen: &RedBlackTree[Vector2D, bool],
+                next_voxel: Vector2D, motion: Motion)
+    if !is_in_voxel(next_voxel, motion) then return
+    if seen.put(next_voxel, true) == Some(true) then return
+
+    put_into_map(voxel_map, next_voxel, motion)
+
+    recurse(voxel_map, seen, next_voxel.minus(horizontal), motion)
+    recurse(voxel_map, seen, next_voxel.plus(horizontal), motion)
+    recurse(voxel_map, seen, next_voxel.minus(vertical), motion)
+    recurse(voxel_map, seen, next_voxel.plus(vertical), motion)
+    recurse(voxel_map, seen, next_voxel.minus(horizontal).minus(vertical), motion)
+    recurse(voxel_map, seen, next_voxel.minus(horizontal).plus(vertical), motion)
+    recurse(voxel_map, seen, next_voxel.plus(horizontal).minus(vertical), motion)
+    recurse(voxel_map, seen, next_voxel.plus(horizontal).plus(vertical), motion)
+
+private reduce_collision_set(motions: &Vector[Motion]) -> &Vector[&Vector[Motion]]
+    val voxel_map: &RedBlackTree[Vector2D, &Vector[Motion]] = red_black_tree()
+
+    motions.for_each(motion -> draw_motion_on_voxel_map(voxel_map, motion))
+
+    val result: &Vector[&Vector[Motion]] = vector()
+
+    voxel_map.for_each(e -> if e.value.size() > 1 then result.append(e.value))
+    result
+
+private voxel_hash(position: Vector3D) -> Vector2D
+    val x_div = int(position.x / good_voxel_size)
+    val y_div = int(position.y / good_voxel_size)
+
+    var x = good_voxel_size * real(x_div)
+    var y = good_voxel_size * real(y_div)
+
+    if position.x < 0.0 then x -= good_voxel_size
+    if position.y < 0.0 then y -= good_voxel_size
+
+    Vector2D(x, y)
+
+private draw_motion_on_voxel_map(voxel_map: &RedBlackTree[Vector2D, &Vector[Motion]], motion: Motion) =
+    recurse(voxel_map, red_black_tree(), voxel_hash(motion.pos_one), motion)
+
+struct Simulator
+    aircraft: &Vector[CallSign]
+
+    simulate(*self, time: real) -> &Vector[Aircraft]
+        val frame: &Vector[Aircraft] = vector()
+
+        for var i: usize = 0; i < self.aircraft.size(); i += 2
+            frame.append(Aircraft(self.aircraft.at(i).unwrap(), Vector3D(time, time.cos() * 2.0 + real(i) * 3.0, 10.0)))
+            frame.append(Aircraft(self.aircraft.at(i + 1).unwrap(), Vector3D(time, time.sin() * 2.0 + real(i) * 3.0, 10.0)))
+
+        frame
+end Simulator
+
+simulator(num_aircraft: int) -> Simulator
+    val aircraft: &Vector[CallSign] = vector()
+
+    for i in 0..<num_aircraft do aircraft.append(CallSign(i))
+    Simulator(aircraft)
+
+struct CD
+end CD
+
+impl Benchmark for CD
+    type Result = bool
+
+    benchmark(*self) -> bool = panic("Should never be reached")
+
+    verify_result(*self, result: bool) -> bool = panic("Should never be reached")
+
+    override inner_benchmark_loop(*self, inner_iterations: int) -> bool =
+        verify_cd(run_cd(inner_iterations), inner_iterations)
+
+private run_cd(num_aircrafts: int) -> usize
+    val num_frames = 200
+    var simulator = simulator(num_aircrafts)
+    var detector = collision_detector()
+    var actual_collisions: usize = 0
+
+    for i in 0..<num_frames
+        val time = real(i) / 10.0
+        val collisions = detector.handle_new_frame(simulator.simulate(time))
+
+        actual_collisions += collisions.size()
+
+    actual_collisions
+
+private verify_cd(actual_collisions: usize, num_aircrafts: int) -> bool
+    if num_aircrafts == 1000 then return actual_collisions == 14484
+    if num_aircrafts == 500 then return actual_collisions == 14484
+    if num_aircrafts == 250 then return actual_collisions == 10830
+    if num_aircrafts == 200 then return actual_collisions == 8655
+    if num_aircrafts == 100 then return actual_collisions == 4305
+    if num_aircrafts == 10 then return actual_collisions == 390
+    if num_aircrafts == 2 then return actual_collisions == 42
+
+    print(f"No verification result for $num_aircrafts found")
+    print(f"Result is: $actual_collisions")
+    false

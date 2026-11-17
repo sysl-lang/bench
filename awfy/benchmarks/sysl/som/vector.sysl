@@ -1,0 +1,156 @@
+module som
+
+import sysl.math.max
+
+const initial_size = 10
+
+// The suite's growable array: storage of a fixed size that doubles when it is full. removeFirst
+// moves the first index forward rather than shifting the elements down.
+struct Vector[E]
+    storage: []E
+    first_idx: usize
+    last_idx: usize
+
+    // The element at idx, or None past the end.
+    at(*self, idx: usize) -> Option[E]
+        if idx >= self.last_idx - self.first_idx then return None
+        Some(self.storage[self.first_idx + idx])
+
+    // Stores value at idx, growing the storage as needed. idx may be at most the size: a slot left
+    // between the last element and idx would hold no element, so storing further on traps.
+    at_put(*self, idx: usize, value: E)
+        if self.storage.len == 0
+            self.storage = slot_storage(max(idx + 1, initial_size))
+        else if idx >= self.last_idx - self.first_idx
+            var new_length = self.storage.len
+            while new_length <= idx + self.first_idx do new_length *= 2
+            self.grow_to(new_length)
+
+        val i = self.first_idx + idx
+
+        if i < self.last_idx then self.storage[i] = value
+        else
+            slot_place(self.storage, i, value)
+            self.last_idx = i + 1
+
+    append(*self, elem: E)
+        if self.storage.len == 0
+            self.storage = slot_storage(initial_size)
+        else if self.last_idx >= self.storage.len
+            self.grow_to(self.storage.len * 2)
+
+        slot_place(self.storage, self.last_idx, elem)
+        self.last_idx += 1
+
+    is_empty(*self) -> bool = self.last_idx == self.first_idx
+
+    for_each(*self, f: E -> unit)
+        for i in self.first_idx..<self.last_idx do f(self.storage[i])
+
+    has_some(*self, f: E -> bool) -> bool
+        for i in self.first_idx..<self.last_idx
+            if f(self.storage[i]) then return true
+        false
+
+    get_one(*self, f: E -> bool) -> Option[E]
+        for i in self.first_idx..<self.last_idx
+            val e = self.storage[i]
+            if f(e) then return Some(e)
+        None
+
+    first(*self) -> Option[E] = if self.is_empty() then None else Some(self.storage[self.first_idx])
+
+    remove_first(*self) -> Option[E]
+        if self.is_empty() then return None
+        self.first_idx += 1
+        Some(self.storage[self.first_idx - 1])
+
+    // Removes every element `same` says is obj, keeping the order of the rest.
+    remove(*self, obj: E, same: (E, E) -> bool) -> bool
+        if self.is_empty() then return false
+
+        var found = false
+        var new_last = self.first_idx
+
+        for i in self.first_idx..<self.last_idx
+            if same(self.storage[i], obj) then found = true
+            else
+                self.storage[new_last] = self.storage[i]
+                new_last += 1
+
+        slot_vacate(self.storage, new_last)
+        self.last_idx = new_last
+        found
+
+    remove_all(*self)
+        self.first_idx = 0
+        self.last_idx = 0
+        self.storage = slot_storage(self.storage.len)
+
+    size(*self) -> usize = self.last_idx - self.first_idx
+
+    capacity(*self) -> usize = self.storage.len
+
+    sort(*self, c: (E, E) -> int)
+        if self.size() > 0 then self.sort_range(self.first_idx, self.last_idx - 1, c)
+
+    private sort_range(*self, i: usize, j: usize, c: (E, E) -> int)
+        val n = j + 1 - i
+        if n <= 1 then return
+
+        var di = self.storage[i]
+        var dj = self.storage[j]
+
+        if c(di, dj) > 0
+            self.swap(i, j)
+            val tt = di
+            di = dj
+            dj = tt
+
+        if n > 2
+            val ij = (i + j) / 2
+            var dij = self.storage[ij]
+
+            if c(di, dij) <= 0
+                if c(dij, dj) > 0
+                    self.swap(j, ij)
+                    dij = dj
+            else
+                self.swap(i, ij)
+                dij = di
+
+            if n > 3
+                var k = i
+                var l = j - 1
+
+                loop
+                    while k <= l && c(dij, self.storage[l]) <= 0 do l -= 1
+
+                    k += 1
+                    while k <= l && c(self.storage[k], dij) <= 0 do k += 1
+
+                    if k > l then break
+                    self.swap(k, l)
+
+                self.sort_range(i, l, c)
+                self.sort_range(k, j, c)
+
+    private swap(*self, i: usize, j: usize)
+        val tmp = self.storage[i]
+        self.storage[i] = self.storage[j]
+        self.storage[j] = tmp
+
+    private grow_to(*self, new_length: usize)
+        var new_storage: []E = slot_storage(new_length)
+        for i in 0..<self.last_idx do slot_place(new_storage, i, self.storage[i])
+        self.storage = new_storage
+end Vector
+
+vector[E]() -> &Vector[E] = Vector(slot_storage(0), 0, 0)
+
+vector_of_size[E](size: usize) -> &Vector[E] = Vector(slot_storage(size), 0, 0)
+
+vector_with[E](elem: E) -> &Vector[E]
+    val v: &Vector[E] = vector_of_size(1)
+    v.append(elem)
+    v

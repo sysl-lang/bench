@@ -1,0 +1,14 @@
+// What every benchmark provides: one run that answers a result, a check of that result, and the
+// inner loop the harness times, which by default runs and checks the benchmark that many times.
+trait Benchmark
+    type Result
+
+    benchmark(*self) -> Self::Result
+
+    verify_result(*self, result: Self::Result) -> bool
+
+    inner_benchmark_loop(*self, inner_iterations: int) -> bool
+        for _ in 0..<inner_iterations
+            if !self.verify_result(self.benchmark()) then return false
+        true
+end Benchmark

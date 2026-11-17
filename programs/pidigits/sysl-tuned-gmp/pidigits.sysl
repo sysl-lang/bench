@@ -1,0 +1,55 @@
+import sh.sysl.gmp.Int
+import sh.sysl.gmp.c.mpz_tdiv_qr
+import sysl.text.{parse_int, str_builder}
+
+// Gibbons' unbounded spigot in Mr Ledrug's form, over GMP through the sysl-lang/gmp package, written
+// in place. One division per candidate digit: q = (3·num + acc)/den with remainder r, and the
+// (4·num + acc)/den digit is the same one exactly when r + num < den.
+main(args: []string)
+    val n = parse_int(args[1]).unwrap()
+    val acc = Int.of(0)
+    val den = Int.of(1)
+    val num = Int.of(1)
+    val tmp = Int.of(0)
+    val q = Int.of(0)
+    val r = Int.of(0)
+    var line = str_builder()
+    var i = 0
+    var k: long = 0
+
+    while i < n
+        k += 1
+
+        val k2 = k * 2 + 1
+
+        acc.add_mul(num, 2)
+        acc.mul_assign(k2)
+        den.mul_assign(k2)
+        num.mul_assign(k)
+
+        if num > acc then continue
+
+        tmp.set_mul(num, 3)
+        tmp.add_assign(acc)
+        mpz_tdiv_qr(q.as_mpz(), r.as_mpz(), tmp.as_mpz(), den.as_mpz())
+        r.add_assign(num)
+
+        if r >= den then continue
+
+        val d = q.low_ulong()
+
+        line.push_uint(d)
+        i += 1
+
+        if i % 10 == 0
+            print(s"${line.finish()}\t:$i")
+            line = str_builder()
+
+        acc.sub_mul(den, long(d))
+        acc.mul_assign(10)
+        num.mul_assign(10)
+    end while
+
+    if i % 10 != 0
+        for _ in i % 10..<10 do line.push(" ")
+        print(s"${line.finish()}\t:$i")

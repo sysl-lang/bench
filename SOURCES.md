@@ -26,6 +26,7 @@ included, must do (README rule 3).
 | fasta | the 139968-state generator, each symbol chosen by scanning the cumulative probabilities |
 | k-nucleotide | every k-mer counted into a hash table keyed by its 2k-bit code |
 | reverse-complement | each record read whole, complemented through a table, reversed and re-wrapped at 60 |
+| pidigits | Mr Ledrug's form of Gibbons' unbounded spigot: per term `acc = (acc + 2num)(2k+1)`, `den *= 2k+1`, `num *= k`; a digit when `(3num + acc)/den` and `(4num + acc)/den` agree, then `acc = 10(acc - d·den)`, `num *= 10` |
 
 ## Programs
 
@@ -186,6 +187,34 @@ stdlib, so the column is gfortran.
   each lookup allocates and frees the key's copy and the value it returns, which is where the time goes
   (about 16 times the C program). The at most sixteen frequency entries are ordered by a selection sort,
   and percentages are divided in single precision, as in the C program.
+
+### pidigits
+
+pidigits computes with a big-integer library (README, the rules): the language's standard one where
+it has one, otherwise GMP 6.3.0 (`brew install gmp`, LGPL), found with `pkg-config gmp` by
+build.zsh. Every version is the reference algorithm above; the archive's `pidigits.gcc-2` (the
+`lua-5` arrangement, two numerators and no `acc`), `pidigits.java` (composes 2x2 matrices of
+`BigInteger`) and `pidigits.gpp-4` (`gmpxx` temporaries) do different work and were passed over.
+Several archive entries print no padded last line when the count is not a multiple of ten (the
+27-digit reference output has one); those gained the C++ entry's padding, noted as "padding".
+
+| language | library | archive file | changes |
+|---|---|---|---|
+| C | GMP | `pidigits.gcc` | padding |
+| C++ | GMP (C API) | `pidigits.gpp-5.gpp` | `using ulong = unsigned long` (a glibc name macOS lacks) |
+| Rust | GMP (`#[link]` FFI, no crate) | `pidigits.rust-3.rust` | unchanged. `pidigits.rust-4` uses the `rug` crate, which the bench's crate-free `rustc` build cannot take; `-3` binds the same library directly |
+| Swift | GMP (`import gmp`) | `pidigits.swift-2.swift` | unchanged; the `gmp` module is `module.modulemap` and `gmp-shim.h` beside it |
+| Go | `math/big` | `pidigits.go-7.go` | unchanged. The archive's fastest Go entries (`-3`, `-4`) bind GMP through cgo; Go has a standard big integer, so it uses that |
+| Java | `java.math.BigInteger` | `pidigits.java-3.java` | the archive program calls GMP through a JNI wrapper library; its operations rewritten as `BigInteger` ones, the structure and output buffer kept; padding |
+| Julia | `BigInt` (GMP inside) | `pidigits.julia-2.julia` | the padded last line printed `\t<i>` where it should print `\t:<n>` |
+| Ada | GMP (`pragma Import`) | `pidigits.gnat-2.gnat` | `mpz_addmul_ui`/`mpz_submul_ui` take `unsigned_long` (the archive passed a 32-bit `unsigned` for a C `unsigned long`); `printf` imported as `C_Variadic_1`, since arm64 macOS passes variadic arguments on the stack |
+| Fortran | GMP (`bind(C)`) | `pidigits.ifc-4.ifc` | unchanged |
+| Zig, Nim, D, Odin, C3 | GMP (extern declarations of the `__gmpz_*` symbols) | none | **ports of the C program, written for this suite**; output through C stdio (Zig, D, C3), `stdout` (Nim) or a `bufio` writer (Odin) |
+| Eiffel | GMP (`C inline` externals over `gmp.h`) | none | **a port of the C program, written for this suite**: each `mpz_t` a `malloc`ed block held as a `POINTER`; preconditions on the digit and the term, a loop invariant on the count. The `.ecf` names GMP's directories through `$GMP_INCLUDE` and `$GMP_LIB`, which build.zsh exports |
+| c-tuned, rust-tuned | GMP | `pidigits.gcc`, `pidigits.rust-3.rust` | one division per candidate digit (`mpz_tdiv_qr`: the 4num digit agrees exactly when the remainder plus `num` is below `den`); C writes its output in one call |
+| sysl-idiomatic | `sysl.math.bigint` | none | written for this suite: operators between `BigInt`s, the `_long` family (`mul_long`) for a small operand |
+| sysl-tuned | `sysl.math.bigint` | none | as idiomatic, with the tuned columns' one division (`div_rem`, both halves at once); `BigInt` has no in-place arithmetic, so that is the whole difference |
+| `sysl-tuned-gmp` (not built) | GMP through [sysl-lang/gmp](https://github.com/sysl-lang/gmp) 0.1.0 | none | the tuned spigot on the package's in-place `Int` methods and its C layer's `mpz_tdiv_qr`; kept beside the column for the measurement of `BigInt` against GMP, and not in LANGS |
 
 ## Implementation variants of one algorithm
 

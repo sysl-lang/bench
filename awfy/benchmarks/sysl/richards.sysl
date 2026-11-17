@@ -1,0 +1,360 @@
+// Mario Wolczko's Richards, by way of the SOM and Java versions of the suite.
+
+const idler = 0
+const worker = 1
+const handler_a = 2
+const handler_b = 3
+const device_a = 4
+const device_b = 5
+const num_types = 6
+
+const device_packet_kind = 0
+const work_packet_kind = 1
+
+const data_size = 4
+
+const tracing = false
+
+struct TaskState
+    packet_pending: bool
+    task_waiting: bool
+    task_holding: bool
+
+    packet_pending_now(*self)
+        self.packet_pending = true
+        self.task_waiting = false
+        self.task_holding = false
+
+    running(*self)
+        self.packet_pending = false
+        self.task_waiting = false
+        self.task_holding = false
+
+    waiting(*self)
+        self.packet_pending = false
+        self.task_holding = false
+        self.task_waiting = true
+
+    waiting_with_packet(*self)
+        self.task_holding = false
+        self.task_waiting = true
+        self.packet_pending = true
+
+    is_task_holding_or_waiting(*self) -> bool = self.task_holding || !self.packet_pending && self.task_waiting
+
+    is_waiting_with_packet(*self) -> bool = self.packet_pending && self.task_waiting && !self.task_holding
+end TaskState
+
+create_running() -> TaskState = TaskState(false, false, false)
+
+create_waiting() -> TaskState = TaskState(false, true, false)
+
+create_waiting_with_packet() -> TaskState = TaskState(true, true, false)
+
+struct Packet
+    link: Option[&Packet]
+    identity: int
+    kind: int
+    datum: int
+    data: [4]int
+end Packet
+
+create_packet(link: Option[&Packet], identity: int, kind: int) -> &Packet = Packet(link, identity, kind, 0, [0; 4])
+
+// Appends packet to the queue whose head is queue_head, and answers the queue's head.
+append(packet: &Packet, queue_head: Option[&Packet]) -> &Packet
+    packet.link = None
+
+    val head = queue_head match
+        Some(h) -> h
+        None -> return packet
+
+    var mouse = head
+
+    while mouse.link is Some(link) do mouse = link
+
+    mouse.link = Some(packet)
+    head
+
+struct DeviceTaskDataRecord
+    pending: Option[&Packet]
+end DeviceTaskDataRecord
+
+struct HandlerTaskDataRecord
+    work_in: Option[&Packet]
+    device_in: Option[&Packet]
+
+    device_in_add(*self, packet: &Packet) = self.device_in = Some(append(packet, self.device_in))
+
+    work_in_add(*self, packet: &Packet) = self.work_in = Some(append(packet, self.work_in))
+end HandlerTaskDataRecord
+
+struct IdleTaskDataRecord
+    control: int
+    count: int
+end IdleTaskDataRecord
+
+struct WorkerTaskDataRecord
+    destination: int
+    count: int
+end WorkerTaskDataRecord
+
+// The private data a task's function is handed, one variant per kind of task.
+enum TaskData
+    Device(record: &DeviceTaskDataRecord)
+    Handler(record: &HandlerTaskDataRecord)
+    Idle(record: &IdleTaskDataRecord)
+    Work(record: &WorkerTaskDataRecord)
+
+// What a task does when it runs: given its input packet, if any, and its private data, it answers
+// the task to run next.
+type TaskFunction = &Fn(Option[&Packet], TaskData) -> Option[&TaskControlBlock]
+
+struct TaskControlBlock
+    link: Option[&TaskControlBlock]
+    identity: int
+    priority: int
+    input: Option[&Packet]
+    state: TaskState
+    function: TaskFunction
+    handle: TaskData
+
+    add_input_and_check_priority(&self, packet: &Packet, old_task: &TaskControlBlock) -> &TaskControlBlock
+        if self.input is None
+            self.input = Some(packet)
+            self.state.packet_pending = true
+            if self.priority > old_task.priority then return self
+        else
+            self.input = Some(append(packet, self.input))
+
+        old_task
+
+    run_task(*self) -> Option[&TaskControlBlock]
+        var message: Option[&Packet] = None
+
+        if self.state.is_waiting_with_packet()
+            message = self.input
+            self.input = message.unwrap().link
+
+            if self.input is None then self.state.running() else self.state.packet_pending_now()
+
+        self.function(message, self.handle)
+end TaskControlBlock
+
+struct Scheduler
+    task_list: Option[&TaskControlBlock]
+    current_task: Option[&TaskControlBlock]
+    current_task_identity: int
+    task_table: [6]Option[&TaskControlBlock]
+    queue_packet_count: int
+    hold_count: int
+    layout: int
+
+    create_device(&self, identity: int, priority: int, work_packet: Option[&Packet], state: TaskState)
+        val data: &DeviceTaskDataRecord = DeviceTaskDataRecord(None)
+
+        val function: TaskFunction = (work_arg, word_arg) ->
+            val data_record = word_arg match
+                Device(d) -> d
+                _ -> panic("a device task is handed a device record")
+
+            work_arg match
+                None ->
+                    val function_work = data_record.pending match
+                        Some(p) -> p
+                        None -> return self.mark_waiting()
+
+                    data_record.pending = None
+                    self.queue_packet(function_work)
+                Some(function_work) ->
+                    data_record.pending = Some(function_work)
+                    if tracing then self.trace(function_work.datum)
+                    self.hold_self()
+
+        self.create_task(identity, priority, work_packet, state, function, Device(data))
+
+    create_handler(&self, identity: int, priority: int, work_packet: Option[&Packet], state: TaskState)
+        val data: &HandlerTaskDataRecord = HandlerTaskDataRecord(None, None)
+
+        val function: TaskFunction = (work, word) ->
+            val data_record = word match
+                Handler(d) -> d
+                _ -> panic("a handler task is handed a handler record")
+
+            work match
+                Some(w) -> if w.kind == work_packet_kind then data_record.work_in_add(w) else data_record.device_in_add(w)
+                None -> ()
+
+            val work_packet = data_record.work_in match
+                Some(p) -> p
+                None -> return self.mark_waiting()
+
+            val count = work_packet.datum
+
+            if count >= data_size
+                data_record.work_in = work_packet.link
+                return self.queue_packet(work_packet)
+
+            val device_packet = data_record.device_in match
+                Some(p) -> p
+                None -> return self.mark_waiting()
+
+            data_record.device_in = device_packet.link
+            device_packet.datum = work_packet.data[count]
+            work_packet.datum = count + 1
+            self.queue_packet(device_packet)
+
+        self.create_task(identity, priority, work_packet, state, function, Handler(data))
+
+    create_idler(&self, identity: int, priority: int, work: Option[&Packet], state: TaskState)
+        val data: &IdleTaskDataRecord = IdleTaskDataRecord(1, 10000)
+
+        val function: TaskFunction = (_, word_arg) ->
+            val data_record = word_arg match
+                Idle(d) -> d
+                _ -> panic("an idle task is handed an idle record")
+
+            data_record.count -= 1
+
+            if data_record.count == 0 then return self.hold_self()
+
+            if data_record.control & 1 == 0
+                data_record.control /= 2
+                return self.release(device_a)
+
+            data_record.control = (data_record.control / 2) ^ 53256
+            self.release(device_b)
+
+        self.create_task(identity, priority, work, state, function, Idle(data))
+
+    create_task(&self, identity: int, priority: int, work: Option[&Packet], state: TaskState, a_block: TaskFunction,
+                data: TaskData)
+        val t: &TaskControlBlock = TaskControlBlock(self.task_list, identity, priority, work, state, a_block, data)
+
+        self.task_list = Some(t)
+        self.task_table[identity] = Some(t)
+
+    create_worker(&self, identity: int, priority: int, work_packet: Option[&Packet], state: TaskState)
+        val data_record: &WorkerTaskDataRecord = WorkerTaskDataRecord(handler_a, 0)
+
+        val function: TaskFunction = (work_arg, word) ->
+            val data = word match
+                Work(d) -> d
+                _ -> panic("a worker task is handed a worker record")
+
+            val work = work_arg match
+                Some(w) -> w
+                None -> return self.mark_waiting()
+
+            data.destination = if handler_a == data.destination then handler_b else handler_a
+            work.identity = data.destination
+            work.datum = 0
+
+            for i in 0..<data_size
+                data.count += 1
+                if data.count > 26 then data.count = 1
+                work.data[i] = 65 + data.count - 1
+
+            self.queue_packet(work)
+
+        self.create_task(identity, priority, work_packet, state, function, Work(data_record))
+
+    start(&self) -> bool
+        self.create_idler(idler, 0, None, create_running())
+
+        var work_q = create_packet(None, worker, work_packet_kind)
+        work_q = create_packet(Some(work_q), worker, work_packet_kind)
+        self.create_worker(worker, 1000, Some(work_q), create_waiting_with_packet())
+
+        work_q = create_packet(None, device_a, device_packet_kind)
+        work_q = create_packet(Some(work_q), device_a, device_packet_kind)
+        work_q = create_packet(Some(work_q), device_a, device_packet_kind)
+        self.create_handler(handler_a, 2000, Some(work_q), create_waiting_with_packet())
+
+        work_q = create_packet(None, device_b, device_packet_kind)
+        work_q = create_packet(Some(work_q), device_b, device_packet_kind)
+        work_q = create_packet(Some(work_q), device_b, device_packet_kind)
+        self.create_handler(handler_b, 3000, Some(work_q), create_waiting_with_packet())
+
+        self.create_device(device_a, 4000, None, create_waiting())
+        self.create_device(device_b, 5000, None, create_waiting())
+
+        self.schedule()
+
+        self.queue_packet_count == 23246 && self.hold_count == 9297
+
+    find_task(&self, identity: int) -> &TaskControlBlock =
+        self.task_table[identity] match
+            Some(t) -> t
+            None -> panic("findTask failed")
+
+    hold_self(&self) -> Option[&TaskControlBlock]
+        val current = self.current_task.unwrap()
+
+        self.hold_count += 1
+        current.state.task_holding = true
+        current.link
+
+    queue_packet(&self, packet: &Packet) -> Option[&TaskControlBlock]
+        val t = self.find_task(packet.identity)
+
+        self.queue_packet_count += 1
+        packet.link = None
+        packet.identity = self.current_task_identity
+        Some(t.add_input_and_check_priority(packet, self.current_task.unwrap()))
+
+    release(&self, identity: int) -> Option[&TaskControlBlock]
+        val t = self.find_task(identity)
+        val current = self.current_task.unwrap()
+
+        t.state.task_holding = false
+        Some(if t.priority > current.priority then t else current)
+
+    trace(&self, id: int)
+        self.layout -= 1
+
+        if self.layout <= 0
+            print("")
+            self.layout = 50
+
+        print(id)
+
+    mark_waiting(&self) -> Option[&TaskControlBlock]
+        val current = self.current_task.unwrap()
+
+        current.state.task_waiting = true
+        Some(current)
+
+    schedule(&self)
+        self.current_task = self.task_list
+
+        while self.current_task is Some(current)
+            if current.state.is_task_holding_or_waiting()
+                self.current_task = current.link
+            else
+                self.current_task_identity = current.identity
+                if tracing then self.trace(self.current_task_identity)
+                self.current_task = current.run_task()
+
+    // Lets go of every task, so the tasks' functions and the scheduler they reach stop holding
+    // one another.
+    release_all(&self)
+        self.task_list = None
+        self.current_task = None
+        self.task_table = [None; 6]
+end Scheduler
+
+struct Richards
+end Richards
+
+impl Benchmark for Richards
+    type Result = bool
+
+    benchmark(*self) -> bool
+        val scheduler: &Scheduler = Scheduler(None, None, 0, [None; 6], 0, 0, 0)
+        val result = scheduler.start()
+
+        scheduler.release_all()
+        result
+
+    verify_result(*self, result: bool) -> bool = result

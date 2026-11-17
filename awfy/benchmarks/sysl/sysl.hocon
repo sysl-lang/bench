@@ -1,0 +1,7 @@
+// The Are We Fast Yet benchmarks in sysl: the harness (harness.sysl, run.sysl, benchmark.sysl), the
+// benchmarks, and the suite's own collections in `som/`. Built by awfy/scripts/run.zsh.
+package { name = "awfy", version = "0.1.0", sysl = "0.11.10" }
+
+requires {
+  heap = true
+}

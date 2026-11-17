@@ -1,0 +1,11 @@
+// pidigits computes with GMP through the sysl-lang/gmp package, as the Benchmarks Game's entries
+// compute with GMP (README, the rules).
+
+package {
+  name    = "pidigits"
+  version = "0.1.0"
+}
+
+dependencies {
+  gmp { git = "github.com/sysl-lang/gmp", version = "0.1.0" }
+}

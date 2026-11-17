@@ -1,0 +1,446 @@
+// Havlak's loop finder, by way of Robert Hundt's "Loop Recognition in C++/Java/Go/Scala" and the
+// Java version of the suite.
+
+import sysl.math.max
+import som.{CustomHash, IdentityDictionary, IdentitySet, Set, Vector, identity_dictionary, identity_set, set,
+            vector, vector_of_size}
+
+struct BasicBlock
+    in_edges: &Vector[&BasicBlock]
+    out_edges: &Vector[&BasicBlock]
+    name: int
+
+    num_pred(*self) -> int = int(self.in_edges.size())
+
+    add_out_edge(*self, to: &BasicBlock) = self.out_edges.append(to)
+
+    add_in_edge(*self, from: &BasicBlock) = self.in_edges.append(from)
+end BasicBlock
+
+impl CustomHash for BasicBlock
+    custom_hash(*self) -> int = self.name
+
+basic_block(name: int) -> &BasicBlock = BasicBlock(vector_of_size(2), vector_of_size(2), name)
+
+struct BasicBlockEdge
+    from: &BasicBlock
+    to: &BasicBlock
+end BasicBlockEdge
+
+basic_block_edge(cfg: &ControlFlowGraph, from_name: int, to_name: int) -> &BasicBlockEdge
+    val e: &BasicBlockEdge = BasicBlockEdge(cfg.create_node(from_name), cfg.create_node(to_name))
+
+    e.from.add_out_edge(e.to)
+    e.to.add_in_edge(e.from)
+    cfg.add_edge(e)
+    e
+
+struct ControlFlowGraph
+    basic_block_map: &Vector[&BasicBlock]
+    start_node: Option[&BasicBlock]
+    edge_list: &Vector[&BasicBlockEdge]
+
+    create_node(*self, name: int) -> &BasicBlock
+        val node = self.basic_block_map.at(usize(name)) match
+            Some(n) -> n
+            None ->
+                val n = basic_block(name)
+                self.basic_block_map.at_put(usize(name), n)
+                n
+
+        if self.num_nodes() == 1 then self.start_node = Some(node)
+        node
+
+    add_edge(*self, edge: &BasicBlockEdge) = self.edge_list.append(edge)
+
+    num_nodes(*self) -> int = int(self.basic_block_map.size())
+end ControlFlowGraph
+
+// The graph owns its blocks, whose edges point at one another: letting go of the edges lets the
+// blocks go.
+impl Drop for ControlFlowGraph
+    drop(self)
+        self.basic_block_map.for_each(bb ->
+            bb.in_edges.remove_all()
+            bb.out_edges.remove_all())
+
+control_flow_graph() -> &ControlFlowGraph = ControlFlowGraph(vector(), None, vector())
+
+struct SimpleLoop
+    basic_blocks: &IdentitySet[BasicBlock]
+    children: &IdentitySet[SimpleLoop]
+    parent: Option[&SimpleLoop]
+    header: Option[&BasicBlock]
+    is_reducible: bool
+    is_root: bool
+    nesting_level: int
+    counter: int
+    depth_level: int
+
+    add_node(*self, bb: &BasicBlock) = self.basic_blocks.add(bb)
+
+    set_parent(&self, parent: &SimpleLoop)
+        self.parent = Some(parent)
+        parent.children.add(self)
+
+    set_nesting_level(*self, level: int)
+        self.nesting_level = level
+        if level == 0 then self.is_root = true
+end SimpleLoop
+
+simple_loop(bb: Option[&BasicBlock], is_reducible: bool) -> &SimpleLoop
+    val l: &SimpleLoop = SimpleLoop(identity_set(), identity_set(), None, bb, is_reducible, false, 0, 0, 0)
+
+    bb match
+        Some(b) -> l.basic_blocks.add(b)
+        None -> ()
+
+    l
+
+struct LoopStructureGraph
+    root: &SimpleLoop
+    loops: &Vector[&SimpleLoop]
+    loop_counter: int
+
+    create_new_loop(*self, bb: &BasicBlock, is_reducible: bool) -> &SimpleLoop
+        val l = simple_loop(Some(bb), is_reducible)
+
+        l.counter = self.loop_counter
+        self.loop_counter += 1
+        self.loops.append(l)
+        l
+
+    calculate_nesting_level(*self)
+        // link up all 1st level loops to artificial root node.
+        self.loops.for_each(liter ->
+            if !liter.is_root && liter.parent is None then liter.set_parent(self.root))
+
+        // recursively traverse the tree and assign levels.
+        self.calculate_nesting_level_rec(self.root, 0)
+
+    calculate_nesting_level_rec(*self, l: &SimpleLoop, depth: int)
+        l.depth_level = depth
+        l.children.for_each(liter ->
+            self.calculate_nesting_level_rec(liter, depth + 1)
+            l.set_nesting_level(max(l.nesting_level, 1 + liter.nesting_level)))
+
+    num_loops(*self) -> int = int(self.loops.size())
+end LoopStructureGraph
+
+// The graph owns its loops, which point at their parents and their children: letting go of the
+// links lets the loops go.
+impl Drop for LoopStructureGraph
+    drop(self)
+        self.loops.for_each(l ->
+            l.parent = None
+            l.children.remove_all())
+
+loop_structure_graph() -> &LoopStructureGraph
+    val root = simple_loop(None, true)
+    val lsg: &LoopStructureGraph = LoopStructureGraph(root, vector(), 0)
+
+    root.set_nesting_level(0)
+    root.counter = lsg.loop_counter
+    lsg.loop_counter += 1
+    lsg.loops.append(root)
+    lsg
+
+struct UnionFindNode
+    parent: Option[&UnionFindNode]
+    bb: Option[&BasicBlock]
+    found_loop: Option[&SimpleLoop]
+    dfs_number: int
+
+    init_node(&self, bb: &BasicBlock, dfs_number: int)
+        self.parent = Some(self)
+        self.bb = Some(bb)
+        self.dfs_number = dfs_number
+        self.found_loop = None
+
+    find_set(&self) -> &UnionFindNode
+        val node_list: &Vector[&UnionFindNode] = vector()
+        var node = self
+
+        while node !== node.parent.unwrap()
+            val parent = node.parent.unwrap()
+            if parent !== parent.parent.unwrap() then node_list.append(node)
+            node = parent
+
+        // Path Compression, all nodes' parents point to the 1st level parent.
+        node_list.for_each(iter -> iter.union_set(self.parent.unwrap()))
+        node
+
+    union_set(*self, basic_block: &UnionFindNode) = self.parent = Some(basic_block)
+end UnionFindNode
+
+union_find_node() -> &UnionFindNode = UnionFindNode(None, None, None, 0)
+
+enum BasicBlockClass
+    BbTop           // uninitialized
+    BbNonheader     // a regular BB
+    BbReducible     // reducible loop
+    BbSelf          // single BB loop
+    BbIrreducible   // irreducible loop
+    BbDead          // a dead BB
+    BbLast          // Sentinel
+
+const unvisited = 2147483647
+const max_non_back_preds = 32 * 1024
+
+struct HavlakLoopFinder
+    cfg: &ControlFlowGraph
+    lsg: &LoopStructureGraph
+    non_back_preds: &Vector[&Set[int]]
+    back_preds: &Vector[&Vector[int]]
+    number: &IdentityDictionary[BasicBlock, int]
+    max_size: int
+    header: []int
+    types: []BasicBlockClass
+    last: []int
+    nodes: []&UnionFindNode
+
+    find_loops(*self)
+        if self.cfg.start_node is None then return
+
+        val size = self.cfg.num_nodes()
+
+        self.non_back_preds.remove_all()
+        self.back_preds.remove_all()
+        self.number.remove_all()
+
+        if size > self.max_size
+            self.header = [0; size]
+            self.types = [BbTop; size]
+            self.last = [0; size]
+            self.nodes = [union_find_node(); size]
+            self.max_size = size
+
+        for i in 0..<size
+            self.non_back_preds.append(set())
+            self.back_preds.append(vector())
+            self.nodes[i] = union_find_node()
+
+        self.init_all_nodes()
+        self.identify_edges(size)
+
+        // Start node is root of all other loops.
+        self.header[0] = 0
+
+        for var w = size - 1; w >= 0; w -= 1
+            // this is 'P' in Havlak's paper
+            val node_pool: &Vector[&UnionFindNode] = vector()
+
+            self.nodes[w].bb match
+                None -> ()
+                Some(node_w) ->
+                    self.step_d(w, node_pool)
+
+                    // Copy nodePool to workList.
+                    val work_list: &Vector[&UnionFindNode] = vector()
+
+                    node_pool.for_each(niter -> work_list.append(niter))
+
+                    if node_pool.size() != 0 then self.types[w] = BbReducible
+
+                    // work the list...
+                    while !work_list.is_empty()
+                        val x = work_list.remove_first().unwrap()
+                        val non_back_size = self.non_back_preds.at(usize(x.dfs_number)).unwrap().size()
+
+                        if non_back_size > max_non_back_preds then return
+
+                        self.step_e_process_non_back_preds(w, node_pool, work_list, x)
+
+                    if node_pool.size() > 0 || self.types[w] == BbSelf
+                        val l = self.lsg.create_new_loop(node_w, self.types[w] != BbIrreducible)
+                        self.set_loop_attributes(w, node_pool, l)
+
+    private is_ancestor(*self, w: int, v: int) -> bool = w <= v && v <= self.last[w]
+
+    private do_dfs(*self, current_node: &BasicBlock, current: int) -> int
+        self.nodes[current].init_node(current_node, current)
+        self.number.at_put(current_node, current)
+
+        var last_id = current
+        val outer_blocks = current_node.out_edges
+
+        for i in 0..<outer_blocks.size()
+            val target = outer_blocks.at(i).unwrap()
+            if self.number.at(target).unwrap() == unvisited then last_id = self.do_dfs(target, last_id + 1)
+
+        self.last[current] = last_id
+        last_id
+
+    private init_all_nodes(*self)
+        self.cfg.basic_block_map.for_each(bb -> self.number.at_put(bb, unvisited))
+        self.do_dfs(self.cfg.start_node.unwrap(), 0)
+
+    private identify_edges(*self, size: int)
+        for w in 0..<size
+            self.header[w] = 0
+            self.types[w] = BbNonheader
+
+            self.nodes[w].bb match
+                Some(node_w) -> self.process_edges(node_w, w)
+                None -> self.types[w] = BbDead
+
+    private process_edges(*self, node_w: &BasicBlock, w: int)
+        if node_w.num_pred() > 0
+            node_w.in_edges.for_each(node_v ->
+                val v = self.number.at(node_v).unwrap()
+                if v != unvisited
+                    if self.is_ancestor(w, v)
+                        self.back_preds.at(usize(w)).unwrap().append(v)
+                    else
+                        self.non_back_preds.at(usize(w)).unwrap().add(v))
+
+    private step_e_process_non_back_preds(*self, w: int, node_pool: &Vector[&UnionFindNode],
+                                          work_list: &Vector[&UnionFindNode], x: &UnionFindNode)
+        self.non_back_preds.at(usize(x.dfs_number)).unwrap().for_each(iter ->
+            val y = self.nodes[iter]
+            val ydash = y.find_set()
+
+            if !self.is_ancestor(w, ydash.dfs_number)
+                self.types[w] = BbIrreducible
+                self.non_back_preds.at(usize(w)).unwrap().add(ydash.dfs_number)
+            else if ydash.dfs_number != w
+                if !node_pool.has_some(e -> e === ydash)
+                    work_list.append(ydash)
+                    node_pool.append(ydash))
+
+    private set_loop_attributes(*self, w: int, node_pool: &Vector[&UnionFindNode], l: &SimpleLoop)
+        self.nodes[w].found_loop = Some(l)
+
+        node_pool.for_each(node ->
+            self.header[node.dfs_number] = w
+            node.union_set(self.nodes[w])
+
+            // Nested loops are not added, but linked together.
+            node.found_loop match
+                Some(node_loop) -> node_loop.set_parent(l)
+                None -> l.add_node(node.bb.unwrap()))
+
+    private step_d(*self, w: int, node_pool: &Vector[&UnionFindNode])
+        self.back_preds.at(usize(w)).unwrap().for_each(v ->
+            if v != w then node_pool.append(self.nodes[v].find_set())
+            else self.types[w] = BbSelf)
+end HavlakLoopFinder
+
+// The finder owns its union-find nodes, each of which points at its set's root, the roots at
+// themselves: letting go of the parents lets the nodes go.
+impl Drop for HavlakLoopFinder
+    drop(self)
+        for node in self.nodes do node.parent = None
+
+havlak_loop_finder(cfg: &ControlFlowGraph, lsg: &LoopStructureGraph) -> &HavlakLoopFinder =
+    HavlakLoopFinder(cfg, lsg, vector(), vector(), identity_dictionary(), 0, [], [], [], [])
+
+struct LoopTesterApp
+    cfg: &ControlFlowGraph
+    lsg: &LoopStructureGraph
+
+    private build_diamond(*self, start: int) -> int
+        val bb0 = start
+
+        basic_block_edge(self.cfg, bb0, bb0 + 1)
+        basic_block_edge(self.cfg, bb0, bb0 + 2)
+        basic_block_edge(self.cfg, bb0 + 1, bb0 + 3)
+        basic_block_edge(self.cfg, bb0 + 2, bb0 + 3)
+
+        bb0 + 3
+
+    private build_connect(*self, start: int, end: int) = basic_block_edge(self.cfg, start, end)
+
+    private build_straight(*self, start: int, n: int) -> int
+        for i in 0..<n do self.build_connect(start + i, start + i + 1)
+        start + n
+
+    private build_base_loop(*self, from: int) -> int
+        val header = self.build_straight(from, 1)
+        val diamond1 = self.build_diamond(header)
+        val d11 = self.build_straight(diamond1, 1)
+        val diamond2 = self.build_diamond(d11)
+        var footer = self.build_straight(diamond2, 1)
+
+        self.build_connect(diamond2, d11)
+        self.build_connect(diamond1, header)
+        self.build_connect(footer, from)
+        footer = self.build_straight(footer, 1)
+        footer
+
+    private construct_simple_cfg(*self)
+        self.cfg.create_node(0)
+        self.build_base_loop(0)
+        self.cfg.create_node(1)
+        basic_block_edge(self.cfg, 0, 2)
+
+    main(*self, num_dummy_loops: int, find_loop_iterations: int, par_loops: int, ppar_loops: int,
+         pppar_loops: int) -> (int, int)
+        self.construct_simple_cfg()
+        self.add_dummy_loops(num_dummy_loops)
+        self.construct_cfg(par_loops, ppar_loops, pppar_loops)
+        self.find_loops(self.lsg)
+
+        for _ in 0..<find_loop_iterations do self.find_loops(loop_structure_graph())
+
+        self.lsg.calculate_nesting_level()
+        (self.lsg.num_loops(), self.cfg.num_nodes())
+
+    construct_cfg(*self, par_loops: int, ppar_loops: int, pppar_loops: int)
+        var n = 2
+
+        for _ in 0..<par_loops
+            self.cfg.create_node(n + 1)
+            self.build_connect(2, n + 1)
+            n += 1
+
+            for _ in 0..<ppar_loops
+                val top = n
+
+                n = self.build_straight(n, 1)
+                for _ in 0..<pppar_loops do n = self.build_base_loop(n)
+
+                val bottom = self.build_straight(n, 1)
+
+                self.build_connect(n, top)
+                n = bottom
+
+            self.build_connect(n, 1)
+
+    add_dummy_loops(*self, num_dummy_loops: int)
+        for _ in 0..<num_dummy_loops do self.find_loops(self.lsg)
+
+    find_loops(*self, loop_structure: &LoopStructureGraph) = havlak_loop_finder(self.cfg, loop_structure).find_loops()
+end LoopTesterApp
+
+loop_tester_app() -> LoopTesterApp
+    val app = LoopTesterApp(control_flow_graph(), loop_structure_graph())
+
+    app.cfg.create_node(0)
+    app
+
+struct Havlak
+end Havlak
+
+impl Benchmark for Havlak
+    type Result = bool
+
+    benchmark(*self) -> bool = panic("Should never be reached")
+
+    verify_result(*self, result: bool) -> bool = panic("Should never be reached")
+
+    override inner_benchmark_loop(*self, inner_iterations: int) -> bool
+        var app = loop_tester_app()
+
+        verify_havlak(app.main(inner_iterations, 50, 10, 10, 5), inner_iterations)
+
+private verify_havlak(r: (int, int), inner_iterations: int) -> bool
+    if inner_iterations == 15000 then return r.0 == 46602 && r.1 == 5213
+    if inner_iterations == 1500 then return r.0 == 6102 && r.1 == 5213
+    if inner_iterations == 150 then return r.0 == 2052 && r.1 == 5213
+    if inner_iterations == 15 then return r.0 == 1647 && r.1 == 5213
+    if inner_iterations == 1 then return r.0 == 1605 && r.1 == 5213
+
+    print(f"No verification result for $inner_iterations found")
+    print(f"Result is: ${r.0}, ${r.1}")
+    false

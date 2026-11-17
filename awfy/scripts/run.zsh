@@ -1,0 +1,145 @@
+#!/bin/zsh
+# Are We Fast Yet: builds, verifies and times the suite in sysl, C++ and Java.
+#
+#   scripts/run.zsh build              build every language into build/ (and record the build times)
+#   scripts/run.zsh verify [names...]  run each benchmark once at its standard size; the harness checks
+#                                      its own result and exits non-zero on a wrong one
+#   scripts/run.zsh time [n]           n invocations (default 3) of every benchmark in every language,
+#                                      then results/<date>.{json,md}
+#
+# A run of the harness is `harness <Benchmark> <outer iterations> <inner iterations>`: the inner
+# iterations are the benchmark's size (rebench.conf upstream), and each outer iteration is timed by
+# the harness itself and printed as "<Benchmark>: iterations=1 runtime: <n>us". Those per-iteration
+# times are what is reported; see README.md for why.
+
+zmodload zsh/datetime
+
+ROOT=${0:A:h:h}
+BUILD=$ROOT/build
+export PATH=/opt/homebrew/opt/openjdk/bin:/opt/homebrew/bin:$PATH
+cd $ROOT
+
+LANGS=(sysl cpp java)
+
+# Each benchmark's inner iterations: upstream rebench.conf.
+typeset -A INNER
+INNER=(DeltaBlue 12000 Richards 100 Json 100 CD 250 Havlak 1500
+       Bounce 1500 List 1500 Mandelbrot 500 NBody 250000 Permute 1000 Queens 1000 Sieve 3000
+       Storage 1000 Towers 600)
+BENCHMARKS=(DeltaBlue Richards Json CD Havlak Bounce List Mandelbrot NBody Permute Queens Sieve Storage Towers)
+
+# Outer iterations per invocation, as upstream runs each executor: C++ (and so sysl) is a "slow VM"
+# with 10, the Java JIT a "fast VM" with 100, of which the first half is warm-up.
+typeset -A OUTER WARMUP
+OUTER=(sysl 10 cpp 10 java 100)
+WARMUP=(sysl 0 cpp 0 java 50)
+
+# The benchmarks a language cannot run yet, with the reason (README.md, "Gaps").
+typeset -A SKIP
+SKIP=(sysl:DeltaBlue "a trait object has no identity ('===') in sysl 0.11.10"
+      sysl:Mandelbrot "sysl always fuses a*b+c on AArch64 and has no way to turn it off; the check needs separate roundings"
+      sysl:NBody "sysl always fuses a*b+c on AArch64 and has no way to turn it off; the check needs separate roundings")
+
+harness() {  # <lang>
+  case $1 in
+    sysl) print -r -- $BUILD/harness-sysl ;;
+    cpp)  print -r -- $BUILD/harness-cpp ;;
+    java) print -r -- "java -cp $BUILD/java-classes Harness" ;;
+  esac
+}
+
+build() {
+  rm -rf $BUILD
+  mkdir -p $BUILD
+  local t0 failed=0
+
+  # SYSL_NO_CACHE: a build from the sources, not a replay of the run cache.
+  t0=$EPOCHREALTIME
+  if (cd benchmarks/sysl && SYSL_NO_CACHE=1 sysl build --release -O3 --cpu native -o $BUILD/harness-sysl .) >$BUILD/sysl.log 2>&1; then
+    print -r -- "$(( EPOCHREALTIME - t0 ))" > $BUILD/sysl.build-seconds
+    print "built  sysl ($(<$BUILD/sysl.build-seconds) s)"
+  else
+    print "FAILED sysl (see build/sysl.log)"; failed=1
+  fi
+
+  # Upstream build.sh: OPT='-O3 -flto -march=native', COMP_OPT='-ffp-contract=off -std=c++17'.
+  t0=$EPOCHREALTIME
+  if (cd benchmarks/C++ && clang++ -Wall -Wextra -Wno-unused-private-field -O3 -flto -march=native \
+        -ffp-contract=off -std=c++17 src/harness.cpp src/deltablue.cpp src/memory/object_tracker.cpp \
+        src/richards.cpp -o $BUILD/harness-cpp) >$BUILD/cpp.log 2>&1; then
+    print -r -- "$(( EPOCHREALTIME - t0 ))" > $BUILD/cpp.build-seconds
+    print "built  cpp ($(<$BUILD/cpp.build-seconds) s)"
+  else
+    print "FAILED cpp (see build/cpp.log)"; failed=1
+  fi
+
+  # Upstream builds with `ant jar`, which is javac over src/ with no options.
+  t0=$EPOCHREALTIME
+  if javac -d $BUILD/java-classes benchmarks/Java/src/**/*.java >$BUILD/java.log 2>&1; then
+    print -r -- "$(( EPOCHREALTIME - t0 ))" > $BUILD/java.build-seconds
+    print "built  java ($(<$BUILD/java.build-seconds) s)"
+  else
+    print "FAILED java (see build/java.log)"; failed=1
+  fi
+
+  return $failed
+}
+
+verify() {
+  local failures=0 names=($@)
+  (( $#names )) || names=($BENCHMARKS)
+  for bench in $names; do
+    for lang in $LANGS; do
+      if [[ -n ${SKIP[$lang:$bench]} ]]; then
+        print "skip     $bench/$lang (${SKIP[$lang:$bench]})"
+        continue
+      fi
+      local out=$BUILD/verify-$lang-$bench.log
+      if ${=$(harness $lang)} $bench 1 $INNER[$bench] >$out 2>&1; then
+        print "ok       $bench/$lang  $(grep -m1 'runtime:' $out | sed 's/.*runtime: //')"
+      else
+        print "WRONG    $bench/$lang (see ${out#$ROOT/})"
+        failures=$((failures + 1))
+      fi
+    done
+  done
+  (( failures == 0 ))
+}
+
+time_all() {
+  local invocations=${1:-3} stamp=$(date +%Y-%m-%d) raw
+  raw=$ROOT/results/.raw-$stamp
+  rm -rf $raw
+  mkdir -p $raw
+  uptime > $raw/load-start.txt
+  for lang in $LANGS; do
+    [[ -f $BUILD/$lang.build-seconds ]] && cp $BUILD/$lang.build-seconds $raw/
+  done
+  stat -f %z $BUILD/harness-sysl > $raw/sysl.binary-bytes
+  stat -f %z $BUILD/harness-cpp > $raw/cpp.binary-bytes
+  du -sk $BUILD/java-classes | cut -f1 > $raw/java.classes-kbytes
+
+  for bench in $BENCHMARKS; do
+    for lang in $LANGS; do
+      [[ -n ${SKIP[$lang:$bench]} ]] && continue
+      for i in {1..$invocations}; do
+        print -- "-- $bench/$lang #$i"
+        # /usr/bin/time -l adds the peak resident set size to stderr.
+        if ! /usr/bin/time -l ${=$(harness $lang)} $bench $OUTER[$lang] $INNER[$bench] \
+              >$raw/$lang-$bench-$i.out 2>$raw/$lang-$bench-$i.time; then
+          print "FAILED $bench/$lang"; return 1
+        fi
+      done
+    done
+  done
+
+  uptime > $raw/load-end.txt
+  python3 -I scripts/report.py $raw $stamp ${(kv)WARMUP} && rm -rf $raw
+}
+
+case $1 in
+  build)  build ;;
+  verify) verify ${@:2} ;;
+  time)   time_all $2 ;;
+  *)      sed -n '2,12p' $0; exit 1 ;;
+esac

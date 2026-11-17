@@ -1,0 +1,32 @@
+import som.{Random, random}
+
+struct ArrayTree
+    children: []ArrayTree
+end ArrayTree
+
+struct Storage
+    count: int
+
+    private build_tree_depth(*self, depth: int, random: *Random) -> []ArrayTree
+        self.count += 1
+
+        if depth == 1 then return [ArrayTree([]); random.next() % 10 + 1]
+
+        var arr: []ArrayTree = [ArrayTree([]); 4]
+
+        for i in 0..<4 do arr[i].children = self.build_tree_depth(depth - 1, random)
+
+        arr
+end Storage
+
+impl Benchmark for Storage
+    type Result = int
+
+    benchmark(*self) -> int
+        var random = random()
+
+        self.count = 0
+        self.build_tree_depth(7, &random)
+        self.count
+
+    verify_result(*self, result: int) -> bool = result == 5461
