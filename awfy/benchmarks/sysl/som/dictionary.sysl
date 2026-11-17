@@ -1,0 +1,156 @@
+module som
+
+const initial_capacity = 16
+
+// What a dictionary key provides: its own hash.
+trait CustomHash
+    custom_hash(*self) -> int
+
+struct Entry[K, V]
+    hash: int
+    key: &K
+    value: V
+    next: Option[&Entry[K, V]]
+end Entry
+
+// A hash table of chained entries, keyed by object identity: two keys are the same key only when
+// they are the same object. The table doubles when it holds more entries than buckets.
+struct IdentityDictionary[K: CustomHash, V]
+    buckets: []Option[&Entry[K, V]]
+    size: int
+
+    is_empty(*self) -> bool = self.size == 0
+
+    contains_key(*self, key: &K) -> bool
+        val h = hash(key)
+        var e = self.bucket(h)
+
+        while e is Some(entry)
+            if entry.hash == h && entry.key === key then return true
+            e = entry.next
+
+        false
+
+    at(*self, key: &K) -> Option[V]
+        val h = hash(key)
+        var e = self.bucket(h)
+
+        while e is Some(entry)
+            if entry.hash == h && entry.key === key then return Some(entry.value)
+            e = entry.next
+
+        None
+
+    at_put(*self, key: &K, value: V)
+        val h = hash(key)
+        val i = self.bucket_idx(h)
+
+        self.buckets[i] match
+            Some(current) -> self.insert_bucket_entry(key, value, h, current)
+            None ->
+                self.buckets[i] = Some(new_entry(key, value, h))
+                self.size += 1
+
+        if self.size > int(self.buckets.len) then self.resize()
+
+    remove_all(*self)
+        self.buckets = [None; self.buckets.len]
+        self.size = 0
+
+    keys(*self) -> &Vector[&K]
+        val keys: &Vector[&K] = vector_of_size(usize(self.size))
+
+        for i in 0..<self.buckets.len
+            var current = self.buckets[i]
+
+            while current is Some(entry)
+                keys.append(entry.key)
+                current = entry.next
+
+        keys
+
+    values(*self) -> &Vector[V]
+        val values: &Vector[V] = vector_of_size(usize(self.size))
+
+        for i in 0..<self.buckets.len
+            var current = self.buckets[i]
+
+            while current is Some(entry)
+                values.append(entry.value)
+                current = entry.next
+
+        values
+
+    private bucket_idx(*self, hash: int) -> usize = usize(int(self.buckets.len - 1) & hash)
+
+    private bucket(*self, hash: int) -> Option[&Entry[K, V]] = self.buckets[self.bucket_idx(hash)]
+
+    private insert_bucket_entry(*self, key: &K, value: V, hash: int, head: &Entry[K, V])
+        var current = head
+
+        loop
+            if current.hash == hash && current.key === key
+                current.value = value
+                return
+
+            current.next match
+                Some(next) -> current = next
+                None ->
+                    self.size += 1
+                    current.next = Some(new_entry(key, value, hash))
+                    return
+
+    private resize(*self)
+        val old_storage = self.buckets
+
+        self.buckets = [None; old_storage.len * 2]
+        self.transfer_entries(old_storage)
+
+    private transfer_entries(*self, old_storage: []Option[&Entry[K, V]])
+        for i in 0..<old_storage.len
+            if old_storage[i] is Some(current)
+                old_storage[i] = None
+
+                if current.next is None
+                    self.buckets[usize(current.hash & int(old_storage.len - 1))] = Some(current)
+                else
+                    self.split_bucket(old_storage.len, i, current)
+
+    private split_bucket(*self, old_capacity: usize, idx: usize, head: &Entry[K, V])
+        var lo_head: Option[&Entry[K, V]] = None
+        var lo_tail: Option[&Entry[K, V]] = None
+        var hi_head: Option[&Entry[K, V]] = None
+        var hi_tail: Option[&Entry[K, V]] = None
+        var current = Some(head)
+
+        while current is Some(entry)
+            if entry.hash & int(old_capacity) == 0
+                lo_tail match
+                    Some(tail) -> tail.next = Some(entry)
+                    None -> lo_head = Some(entry)
+                lo_tail = Some(entry)
+            else
+                hi_tail match
+                    Some(tail) -> tail.next = Some(entry)
+                    None -> hi_head = Some(entry)
+                hi_tail = Some(entry)
+
+            current = entry.next
+
+        if lo_tail is Some(tail)
+            tail.next = None
+            self.buckets[idx] = lo_head
+
+        if hi_tail is Some(tail)
+            tail.next = None
+            self.buckets[idx + old_capacity] = hi_head
+end IdentityDictionary
+
+identity_dictionary[K: CustomHash, V]() -> &IdentityDictionary[K, V] =
+    IdentityDictionary([None; initial_capacity], 0)
+
+private hash[K: CustomHash](key: &K) -> int
+    val h = key.custom_hash()
+    h ^ int(u32(h) >> 16)
+
+private new_entry[K, V](key: &K, value: V, hash: int) -> &Entry[K, V] = Entry(hash, key, value, None)

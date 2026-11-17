@@ -8,6 +8,11 @@ fannkuch-redux, binary-trees, mandelbrot, fasta, k-nucleotide and reverse-comple
 Its purpose is to find where sysl's generated code loses to the other compilers. Each slow program is
 traced to a cause in [FINDINGS.md](FINDINGS.md).
 
+A second suite, **[Are We Fast Yet](awfy/README.md)** (Marr, Daloze and Mössenböck, DLS 2016), lives
+in [`awfy/`](awfy/) with its own scripts and results: fourteen object-oriented benchmarks that every
+language writes with the same core language, collections and harness, timed against the suite's own
+C++ and Java ports.
+
 ## What it measures
 
 Each program is written once per language. sysl has two versions:

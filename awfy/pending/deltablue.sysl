@@ -1,0 +1,609 @@
+// DeltaBlue, the incremental constraint solver of Freeman-Benson and Maloney, by way of the Smalltalk,
+// SOM and Java versions of the suite.
+//
+// A DRAFT, not built: it compares constraints with '===', which sysl 0.11.10 refuses on a trait
+// object (awfy/README.md, "Gaps"). It has not been through the compiler past that refusal.
+
+import som.{CustomHash, IdentityDictionary, Vector, identity_dictionary, vector, vector_of_size, vector_with}
+
+enum Direction
+    Forward
+    Backward
+    Neither
+
+struct Sym
+    hash: int
+
+impl CustomHash for Sym
+    custom_hash(*self) -> int = self.hash
+
+val absolute_strongest: &Sym = Sym(0)
+val required: &Sym = Sym(1)
+val strong_preferred: &Sym = Sym(2)
+val preferred: &Sym = Sym(3)
+val strong_default: &Sym = Sym(4)
+val default: &Sym = Sym(5)
+val weak_default: &Sym = Sym(6)
+val absolute_weakest: &Sym = Sym(7)
+
+struct Strength
+    arithmetic_value: int
+    symbolic_value: &Sym
+
+    same_as(*self, s: &Strength) -> bool = self.arithmetic_value == s.arithmetic_value
+
+    stronger(*self, s: &Strength) -> bool = self.arithmetic_value < s.arithmetic_value
+
+    weaker(*self, s: &Strength) -> bool = self.arithmetic_value > s.arithmetic_value
+
+    strongest(&self, s: &Strength) -> &Strength = if s.stronger(self) then s else self
+
+    weakest(&self, s: &Strength) -> &Strength = if s.weaker(self) then s else self
+end Strength
+
+var strength_table: Option[&IdentityDictionary[Sym, int]] = None
+var strength_constant: Option[&IdentityDictionary[Sym, &Strength]] = None
+var absolute_weakest_strength: Option[&Strength] = None
+var required_strength: Option[&Strength] = None
+
+strength(symbolic_value: &Sym) -> &Strength =
+    Strength(strength_table.unwrap().at(symbolic_value).unwrap(), symbolic_value)
+
+strength_of(sym: &Sym) -> &Strength = strength_constant.unwrap().at(sym).unwrap()
+
+strength_absolute_weakest() -> &Strength = absolute_weakest_strength.unwrap()
+
+strength_required() -> &Strength = required_strength.unwrap()
+
+create_strength_table() -> &IdentityDictionary[Sym, int]
+    val table: &IdentityDictionary[Sym, int] = identity_dictionary()
+
+    table.at_put(absolute_strongest, -10000)
+    table.at_put(required, -800)
+    table.at_put(strong_preferred, -600)
+    table.at_put(preferred, -400)
+    table.at_put(strong_default, -200)
+    table.at_put(default, 0)
+    table.at_put(weak_default, 500)
+    table.at_put(absolute_weakest, 10000)
+    table
+
+create_strength_constants() -> &IdentityDictionary[Sym, &Strength]
+    val constants: &IdentityDictionary[Sym, &Strength] = identity_dictionary()
+
+    strength_table.unwrap().keys().for_each(key -> constants.at_put(key, strength(key)))
+    constants
+
+initialize_constants()
+    strength_table = Some(create_strength_table())
+    strength_constant = Some(create_strength_constants())
+    absolute_weakest_strength = Some(strength_of(absolute_weakest))
+    required_strength = Some(strength_of(required))
+
+release_constants()
+    strength_table = None
+    strength_constant = None
+    absolute_weakest_strength = None
+    required_strength = None
+
+// What the solver asks of every constraint. The members with bodies are the ones the Smalltalk
+// original defines once, on the abstract class.
+trait AbstractConstraint
+    strength -> &Strength
+
+    is_input(*self) -> bool = false
+
+    is_satisfied(*self) -> bool
+
+    add_to_graph(&self)
+
+    remove_from_graph(&self)
+
+    choose_method(*self, mark: int) -> Direction
+
+    execute(*self)
+
+    inputs_do(*self, f: &Fn(&Variable) -> unit)
+
+    inputs_has_one(*self, f: &Fn(&Variable) -> bool) -> bool
+
+    mark_unsatisfied(*self)
+
+    output -> &Variable
+
+    recalculate(*self)
+
+    add_constraint(&self, planner: &Planner)
+        self.add_to_graph()
+        planner.incremental_add(self)
+
+    destroy_constraint(&self, planner: &Planner)
+        if self.is_satisfied() then planner.incremental_remove(self)
+        self.remove_from_graph()
+
+    inputs_known(*self, mark: int) -> bool =
+        !self.inputs_has_one(v -> !(v.mark == mark || v.stay || v.determined_by is None))
+
+    satisfy(&self, mark: int, planner: &Planner) -> Option[&AbstractConstraint]
+        var overridden: Option[&AbstractConstraint] = None
+
+        self.choose_method(mark)
+
+        if self.is_satisfied()
+            self.inputs_do(input -> input.mark = mark)
+
+            val out = self.output
+
+            overridden = out.determined_by
+            overridden match
+                Some(o) -> o.mark_unsatisfied()
+                None -> {}
+
+            out.determined_by = Some(self)
+            if !planner.add_propagate(self, mark) then panic("Cycle encountered")
+            out.mark = mark
+        else
+            overridden = None
+            if self.strength.same_as(strength_required()) then panic("Could not satisfy a required constraint")
+
+        overridden
+end AbstractConstraint
+
+same(a: &AbstractConstraint, b: &AbstractConstraint) -> bool = a === b
+
+struct Variable
+    value: int
+    constraints: &Vector[&AbstractConstraint]
+    determined_by: Option[&AbstractConstraint]
+    mark: int
+    walk_strength: &Strength
+    stay: bool
+
+    add_constraint(*self, c: &AbstractConstraint) = self.constraints.append(c)
+
+    remove_constraint(*self, c: &AbstractConstraint)
+        self.constraints.remove(c, same)
+
+        self.determined_by match
+            Some(d) -> if d === c then self.determined_by = None
+            None -> {}
+end Variable
+
+// Every variable made, so that release_all can break the cycles between variables and the
+// constraints on them once a test is done.
+var tracked_variables: Option[&Vector[&Variable]] = None
+
+variable() -> &Variable
+    val v: &Variable = Variable(0, vector_of_size(2), None, 0, strength_absolute_weakest(), true)
+
+    tracked_variables match
+        Some(tracked) -> tracked.append(v)
+        None -> tracked_variables = Some(vector_with(v))
+
+    v
+
+variable_with_value(a_value: int) -> &Variable
+    val v = variable()
+
+    v.value = a_value
+    v
+
+release_all()
+    tracked_variables match
+        Some(tracked) ->
+            tracked.for_each(v ->
+                v.constraints.remove_all()
+                v.determined_by = None)
+        None -> {}
+
+    tracked_variables = None
+
+// What the two unary constraints share: one output variable, and whether they are satisfied.
+struct UnaryConstraint
+    strength: &Strength
+    output: &Variable
+    satisfied: bool
+
+    add_to_graph(*self, c: &AbstractConstraint)
+        self.output.add_constraint(c)
+        self.satisfied = false
+
+    remove_from_graph(*self, c: &AbstractConstraint)
+        self.output.remove_constraint(c)
+        self.satisfied = false
+
+    choose_method(*self, mark: int) -> Direction
+        self.satisfied = self.output.mark != mark && self.strength.stronger(self.output.walk_strength)
+        Neither
+
+    recalculate(*self, is_input: bool) -> bool
+        self.output.walk_strength = self.strength
+        self.output.stay = !is_input
+        self.output.stay
+end UnaryConstraint
+
+// A constraint the user edits through: it is an input, and executing it does nothing.
+struct EditConstraint
+    u: UnaryConstraint
+end EditConstraint
+
+impl AbstractConstraint for EditConstraint
+    strength -> &Strength = self.u.strength
+    override is_input(*self) -> bool = true
+    is_satisfied(*self) -> bool = self.u.satisfied
+    add_to_graph(&self) = self.u.add_to_graph(self)
+    remove_from_graph(&self) = self.u.remove_from_graph(self)
+    choose_method(*self, mark: int) -> Direction = self.u.choose_method(mark)
+    // Edit constraints do nothing.
+    execute(*self) = {}
+    inputs_do(*self, f: &Fn(&Variable) -> unit) = {}
+    inputs_has_one(*self, f: &Fn(&Variable) -> bool) -> bool = false
+    mark_unsatisfied(*self) = self.u.satisfied = false
+    output -> &Variable = self.u.output
+    recalculate(*self)
+        if self.u.recalculate(self.is_input()) then self.execute()
+
+edit_constraint(v: &Variable, strength: &Sym, planner: &Planner) -> &AbstractConstraint
+    val c: &AbstractConstraint = EditConstraint(UnaryConstraint(strength_of(strength), v, false))
+
+    c.add_constraint(planner)
+    c
+
+// A constraint that keeps its variable where it is: executing it does nothing.
+struct StayConstraint
+    u: UnaryConstraint
+end StayConstraint
+
+impl AbstractConstraint for StayConstraint
+    strength -> &Strength = self.u.strength
+    is_satisfied(*self) -> bool = self.u.satisfied
+    add_to_graph(&self) = self.u.add_to_graph(self)
+    remove_from_graph(&self) = self.u.remove_from_graph(self)
+    choose_method(*self, mark: int) -> Direction = self.u.choose_method(mark)
+    // Stay constraints do nothing.
+    execute(*self) = {}
+    inputs_do(*self, f: &Fn(&Variable) -> unit) = {}
+    inputs_has_one(*self, f: &Fn(&Variable) -> bool) -> bool = false
+    mark_unsatisfied(*self) = self.u.satisfied = false
+    output -> &Variable = self.u.output
+    recalculate(*self)
+        if self.u.recalculate(self.is_input()) then self.execute()
+
+stay_constraint(v: &Variable, strength: &Sym, planner: &Planner) -> &AbstractConstraint
+    val c: &AbstractConstraint = StayConstraint(UnaryConstraint(strength_of(strength), v, false))
+
+    c.add_constraint(planner)
+    c
+
+// What the two binary constraints share: two variables, and which way the constraint runs.
+struct BinaryConstraint
+    strength: &Strength
+    v1: &Variable
+    v2: &Variable
+    direction: Direction
+
+    add_to_graph(*self, c: &AbstractConstraint)
+        self.v1.add_constraint(c)
+        self.v2.add_constraint(c)
+        self.direction = Neither
+
+    remove_from_graph(*self, c: &AbstractConstraint)
+        self.v1.remove_constraint(c)
+        self.v2.remove_constraint(c)
+        self.direction = Neither
+
+    choose_method(*self, mark: int) -> Direction
+        if self.v1.mark == mark
+            self.direction = if self.v2.mark != mark && self.strength.stronger(self.v2.walk_strength) then Forward else Neither
+            return self.direction
+
+        if self.v2.mark == mark
+            self.direction = if self.v1.mark != mark && self.strength.stronger(self.v1.walk_strength) then Backward else Neither
+            return self.direction
+
+        if self.v1.walk_strength.weaker(self.v2.walk_strength)
+            self.direction = if self.strength.stronger(self.v1.walk_strength) then Backward else Neither
+            return self.direction
+
+        self.direction = if self.strength.stronger(self.v2.walk_strength) then Forward else Neither
+        self.direction
+
+    inputs_do(*self, f: &Fn(&Variable) -> unit) = if self.direction == Forward then f(self.v1) else f(self.v2)
+
+    inputs_has_one(*self, f: &Fn(&Variable) -> bool) -> bool =
+        if self.direction == Forward then f(self.v1) else f(self.v2)
+
+    output -> &Variable = if self.direction == Forward then self.v2 else self.v1
+
+    // Sets the output's walk strength and stay from the input, and answers whether the output stays.
+    recalculate(*self) -> bool
+        val input = if self.direction == Forward then self.v1 else self.v2
+        val out = if self.direction == Forward then self.v2 else self.v1
+
+        out.walk_strength = self.strength.weakest(input.walk_strength)
+        out.stay = input.stay
+        out.stay
+end BinaryConstraint
+
+// A constraint keeping two variables equal.
+struct EqualityConstraint
+    b: BinaryConstraint
+end EqualityConstraint
+
+impl AbstractConstraint for EqualityConstraint
+    strength -> &Strength = self.b.strength
+    is_satisfied(*self) -> bool = self.b.direction != Neither
+    add_to_graph(&self) = self.b.add_to_graph(self)
+    remove_from_graph(&self) = self.b.remove_from_graph(self)
+    choose_method(*self, mark: int) -> Direction = self.b.choose_method(mark)
+
+    execute(*self)
+        if self.b.direction == Forward then self.b.v2.value = self.b.v1.value
+        else self.b.v1.value = self.b.v2.value
+
+    inputs_do(*self, f: &Fn(&Variable) -> unit) = self.b.inputs_do(f)
+    inputs_has_one(*self, f: &Fn(&Variable) -> bool) -> bool = self.b.inputs_has_one(f)
+    mark_unsatisfied(*self) = self.b.direction = Neither
+    output -> &Variable = self.b.output
+
+    recalculate(*self)
+        if self.b.recalculate() then self.execute()
+
+equality_constraint(var1: &Variable, var2: &Variable, strength: &Sym, planner: &Planner) -> &AbstractConstraint
+    val c: &AbstractConstraint = EqualityConstraint(BinaryConstraint(strength_of(strength), var1, var2, Neither))
+
+    c.add_constraint(planner)
+    c
+
+// A constraint relating two variables by a scale and an offset: v2 = v1 * scale + offset.
+struct ScaleConstraint
+    b: BinaryConstraint
+    scale: &Variable
+    offset: &Variable
+end ScaleConstraint
+
+impl AbstractConstraint for ScaleConstraint
+    strength -> &Strength = self.b.strength
+    is_satisfied(*self) -> bool = self.b.direction != Neither
+
+    add_to_graph(&self)
+        self.b.v1.add_constraint(self)
+        self.b.v2.add_constraint(self)
+        self.scale.add_constraint(self)
+        self.offset.add_constraint(self)
+        self.b.direction = Neither
+
+    remove_from_graph(&self)
+        self.b.v1.remove_constraint(self)
+        self.b.v2.remove_constraint(self)
+        self.scale.remove_constraint(self)
+        self.offset.remove_constraint(self)
+        self.b.direction = Neither
+
+    choose_method(*self, mark: int) -> Direction = self.b.choose_method(mark)
+
+    execute(*self)
+        if self.b.direction == Forward
+            self.b.v2.value = self.b.v1.value * self.scale.value + self.offset.value
+        else
+            self.b.v1.value = (self.b.v2.value - self.offset.value) / self.scale.value
+
+    inputs_do(*self, f: &Fn(&Variable) -> unit)
+        if self.b.direction == Forward
+            f(self.b.v1)
+            f(self.scale)
+            f(self.offset)
+        else
+            f(self.b.v2)
+            f(self.scale)
+            f(self.offset)
+
+    inputs_has_one(*self, f: &Fn(&Variable) -> bool) -> bool = self.b.inputs_has_one(f)
+    mark_unsatisfied(*self) = self.b.direction = Neither
+    output -> &Variable = self.b.output
+
+    recalculate(*self)
+        val input = if self.b.direction == Forward then self.b.v1 else self.b.v2
+        val out = if self.b.direction == Forward then self.b.v2 else self.b.v1
+
+        out.walk_strength = self.b.strength.weakest(input.walk_strength)
+        out.stay = input.stay && self.scale.stay && self.offset.stay
+        // stay optimization
+        if out.stay then self.execute()
+
+scale_constraint(src: &Variable, scale: &Variable, offset: &Variable, dest: &Variable, strength: &Sym,
+                 planner: &Planner) -> &AbstractConstraint
+    val c: &AbstractConstraint =
+        ScaleConstraint(BinaryConstraint(strength_of(strength), src, dest, Neither), scale, offset)
+
+    c.add_constraint(planner)
+    c
+
+// The constraints to execute, in order, to propagate a change.
+struct Plan
+    constraints: &Vector[&AbstractConstraint]
+
+    execute(*self) = self.constraints.for_each(c -> c.execute())
+end Plan
+
+struct Planner
+    current_mark: int
+
+    incremental_add(&self, c: &AbstractConstraint)
+        val mark = self.new_mark()
+        var overridden = c.satisfy(mark, self)
+
+        loop
+            overridden match
+                Some(o) -> overridden = o.satisfy(mark, self)
+                None -> break
+
+    incremental_remove(&self, c: &AbstractConstraint)
+        val out = c.output
+
+        c.mark_unsatisfied()
+        c.remove_from_graph()
+
+        val unsatisfied = self.remove_propagate_from(out)
+
+        unsatisfied.for_each(u -> self.incremental_add(u))
+
+    extract_plan_from_constraints(&self, constraints: &Vector[&AbstractConstraint]) -> Plan
+        val sources: &Vector[&AbstractConstraint] = vector()
+
+        constraints.for_each(c -> if c.is_input() && c.is_satisfied() then sources.append(c))
+
+        self.make_plan(sources)
+
+    make_plan(&self, sources: &Vector[&AbstractConstraint]) -> Plan
+        val mark = self.new_mark()
+        val plan = Plan(vector_of_size(15))
+        val todo = sources
+
+        while !todo.is_empty()
+            val c = todo.remove_first().unwrap()
+
+            if c.output.mark != mark && c.inputs_known(mark)
+                plan.constraints.append(c)
+                c.output.mark = mark
+                self.add_constraints_consuming_to(c.output, todo)
+
+        plan
+
+    add_constraints_consuming_to(&self, v: &Variable, coll: &Vector[&AbstractConstraint])
+        val determining_c = v.determined_by
+
+        v.constraints.for_each(c -> if !is_determining(c, determining_c) && c.is_satisfied() then coll.append(c))
+
+    add_propagate(&self, c: &AbstractConstraint, mark: int) -> bool
+        val todo = vector_with(c)
+
+        while !todo.is_empty()
+            val d = todo.remove_first().unwrap()
+
+            if d.output.mark == mark
+                self.incremental_remove(c)
+                return false
+
+            d.recalculate()
+            self.add_constraints_consuming_to(d.output, todo)
+
+        true
+
+    change(&self, v: &Variable, new_value: int)
+        val edit_c = edit_constraint(v, preferred, self)
+        val plan = self.extract_plan_from_constraints(vector_with(edit_c))
+
+        for _ in 0..<10
+            v.value = new_value
+            plan.execute()
+
+        edit_c.destroy_constraint(self)
+
+    constraints_consuming(&self, v: &Variable, f: &Fn(&AbstractConstraint) -> unit)
+        val determining_c = v.determined_by
+
+        v.constraints.for_each(c -> if !is_determining(c, determining_c) && c.is_satisfied() then f(c))
+
+    new_mark(*self) -> int
+        self.current_mark += 1
+        self.current_mark
+
+    remove_propagate_from(&self, out: &Variable) -> &Vector[&AbstractConstraint]
+        val unsatisfied: &Vector[&AbstractConstraint] = vector()
+
+        out.determined_by = None
+        out.walk_strength = strength_absolute_weakest()
+        out.stay = true
+
+        val todo = vector_with(out)
+
+        while !todo.is_empty()
+            val v = todo.remove_first().unwrap()
+
+            v.constraints.for_each(c -> if !c.is_satisfied() then unsatisfied.append(c))
+
+            self.constraints_consuming(v, c ->
+                c.recalculate()
+                todo.append(c.output))
+
+        unsatisfied.sort((c1, c2) -> if c1.strength.stronger(c2.strength) then -1 else 1)
+        unsatisfied
+end Planner
+
+private is_determining(c: &AbstractConstraint, determining: Option[&AbstractConstraint]) -> bool =
+    determining match
+        Some(d) -> c === d
+        None -> false
+
+chain_test(n: int)
+    initialize_constants()
+
+    val planner: &Planner = Planner(1)
+    val vars: []&Variable = [variable(); n + 1]
+
+    for i in 1..n do vars[i] = variable()
+
+    for i in 0..<n do equality_constraint(vars[i], vars[i + 1], required, planner)
+
+    stay_constraint(vars[n], strong_default, planner)
+
+    val edit_c = edit_constraint(vars[0], preferred, planner)
+    val plan = planner.extract_plan_from_constraints(vector_with(edit_c))
+
+    for i in 0..<100
+        vars[0].value = i
+        plan.execute()
+        if vars[n].value != i then panic("Chain test failed!")
+
+    edit_c.destroy_constraint(planner)
+    release_all()
+
+projection_test(n: int)
+    val planner: &Planner = Planner(1)
+    val dests: &Vector[&Variable] = vector()
+    val scale = variable_with_value(10)
+    val offset = variable_with_value(1000)
+    var src = scale
+    var dst = scale
+
+    for i in 1..n
+        src = variable_with_value(i)
+        dst = variable_with_value(i)
+        dests.append(dst)
+        stay_constraint(src, default, planner)
+        scale_constraint(src, scale, offset, dst, required, planner)
+
+    planner.change(src, 17)
+    if dst.value != 1170 then panic("Projection test 1 failed!")
+
+    planner.change(dst, 1050)
+    if src.value != 5 then panic("Projection test 2 failed!")
+
+    planner.change(scale, 5)
+
+    for i in 0..<n - 1
+        if dests.at(usize(i)).unwrap().value != (i + 1) * 5 + 1000 then panic("Projection test 3 failed!")
+
+    planner.change(offset, 2000)
+
+    for i in 0..<n - 1
+        if dests.at(usize(i)).unwrap().value != (i + 1) * 5 + 2000 then panic("Projection test 4 failed!")
+
+    release_all()
+    release_constants()
+
+struct DeltaBlue
+end DeltaBlue
+
+impl Benchmark for DeltaBlue
+    type Result = bool
+
+    benchmark(*self) -> bool = panic("Should never be reached")
+
+    verify_result(*self, result: bool) -> bool = panic("Should never be reached")
+
+    override inner_benchmark_loop(*self, inner_iterations: int) -> bool
+        chain_test(inner_iterations)
+        projection_test(inner_iterations)
+        true

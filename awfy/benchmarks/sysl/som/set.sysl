@@ -1,0 +1,55 @@
+module som
+
+// A set kept as a Vector, its elements compared with ==.
+struct Set[E: Eq]
+    items: &Vector[E]
+
+    size(*self) -> usize = self.items.size()
+
+    for_each(*self, f: E -> unit) = self.items.for_each(f)
+
+    has_some(*self, f: E -> bool) -> bool = self.items.has_some(f)
+
+    get_one(*self, f: E -> bool) -> Option[E] = self.items.get_one(f)
+
+    add(*self, obj: E)
+        if !self.contains(obj) then self.items.append(obj)
+
+    collect[T](*self, f: E -> T) -> &Vector[T]
+        val coll: &Vector[T] = vector()
+        self.for_each(e -> coll.append(f(e)))
+        coll
+
+    contains(*self, obj: E) -> bool = self.has_some(e -> e == obj)
+
+    remove_all(*self) = self.items.remove_all()
+end Set
+
+set[E: Eq]() -> &Set[E] = Set(vector_of_size(initial_size))
+
+// A set of objects compared by identity.
+struct IdentitySet[E]
+    items: &Vector[&E]
+
+    size(*self) -> usize = self.items.size()
+
+    for_each(*self, f: &E -> unit) = self.items.for_each(f)
+
+    has_some(*self, f: &E -> bool) -> bool = self.items.has_some(f)
+
+    get_one(*self, f: &E -> bool) -> Option[&E] = self.items.get_one(f)
+
+    add(*self, obj: &E)
+        if !self.contains(obj) then self.items.append(obj)
+
+    collect[T](*self, f: &E -> T) -> &Vector[T]
+        val coll: &Vector[T] = vector()
+        self.for_each(e -> coll.append(f(e)))
+        coll
+
+    contains(*self, obj: &E) -> bool = self.has_some(e -> e === obj)
+
+    remove_all(*self) = self.items.remove_all()
+end IdentitySet
+
+identity_set[E]() -> &IdentitySet[E] = IdentitySet(vector_of_size(initial_size))

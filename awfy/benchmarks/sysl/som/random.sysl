@@ -1,0 +1,12 @@
+module som
+
+// The suite's portable pseudo-random generator.
+struct Random
+    seed: int
+
+    next(*self) -> int
+        self.seed = (self.seed * 1309 + 13849) & 65535
+        self.seed
+end Random
+
+random() -> Random = Random(74755)

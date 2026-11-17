@@ -1,0 +1,63 @@
+import som.{Random, random}
+
+struct Ball
+    x: int
+    y: int
+    x_vel: int
+    y_vel: int
+
+    bounce(*self) -> bool
+        val x_limit = 500
+        val y_limit = 500
+        var bounced = false
+
+        self.x += self.x_vel
+        self.y += self.y_vel
+
+        if self.x > x_limit
+            self.x = x_limit
+            self.x_vel = 0 - self.x_vel.abs()
+            bounced = true
+
+        if self.x < 0
+            self.x = 0
+            self.x_vel = self.x_vel.abs()
+            bounced = true
+
+        if self.y > y_limit
+            self.y = y_limit
+            self.y_vel = 0 - self.y_vel.abs()
+            bounced = true
+
+        if self.y < 0
+            self.y = 0
+            self.y_vel = self.y_vel.abs()
+            bounced = true
+
+        bounced
+end Ball
+
+ball(random: *Random) -> Ball =
+    Ball(random.next() % 500, random.next() % 500, random.next() % 300 - 150, random.next() % 300 - 150)
+
+struct Bounce
+end Bounce
+
+impl Benchmark for Bounce
+    type Result = int
+
+    benchmark(*self) -> int
+        var random = random()
+        val ball_count = 100
+        var bounces = 0
+        var balls: [100]Ball = [Ball(0, 0, 0, 0); 100]
+
+        for i in 0..<ball_count do balls[i] = ball(&random)
+
+        for _ in 0..<50
+            for i in 0..<ball_count
+                if balls[i].bounce() then bounces += 1
+
+        bounces
+
+    verify_result(*self, result: int) -> bool = result == 1331

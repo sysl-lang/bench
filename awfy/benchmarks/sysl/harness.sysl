@@ -1,0 +1,23 @@
+import sysl.text.parse_int
+
+print_usage()
+    print("./harness benchmark [num-iterations [inner-iter]]")
+    print("")
+    print("  benchmark      - benchmark class name")
+    print("  num-iterations - number of times to execute benchmark, default: 1")
+    print("  inner-iter     - number of times the benchmark is executed in an inner loop,")
+    print("                   which is measured in total, default: 1")
+
+main(args: []string)
+    if args.len < 2
+        print_usage()
+        exit(1)
+
+    var run = Run(args[1], 1, 1, 0)
+
+    if args.len > 2
+        run.num_iterations = parse_int(args[2]).unwrap()
+        if args.len > 3 then run.inner_iterations = parse_int(args[3]).unwrap()
+
+    run.run_benchmark()
+    run.print_total()
