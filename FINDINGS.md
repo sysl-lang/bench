@@ -11,6 +11,34 @@ columns is that list. The "bought" figures are from development runs on a loaded
 approximate; the program totals are from the one exclusive timing run named in the section.
 Figures in the older text are from `results/2026-11-13.md` (sysl 0.10.7, wall-clock ratio to C).
 
+## Where dev (0.12) stands
+
+One exclusive run, 2026-11-17: sysl `dev` at ce36f65b built with sysl 0.11.10, against the 0.11.7
+binaries in `results/2026-11-16-v0117.md` and freshly built C, C++, Rust and Odin. Every sysl and
+Odin binary's output matched `expected/`. Mean wall-clock seconds, hyperfine `-N --warmup 3 --runs 10`:
+
+| program | dev idiomatic | dev tuned | 0.11.7 idiomatic | 0.11.7 tuned | C | C++ | Rust | Odin |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| binarytrees | 0.658 | 0.617 | 0.741 | 0.618 | 0.633 | 0.676 | 0.738 | 0.871 |
+| fannkuchredux | 1.443 | 1.152 | 1.484 | 1.182 | 1.489 | 1.446 | 1.426 | 1.346 |
+| fasta | 0.685 | 0.556 | 0.682 | 0.559 | 0.653 | 0.640 | 1.105 | 0.607 |
+| knucleotide | 1.435 | 0.850 | 1.432 | 0.868 | 1.043 | 2.575 | 0.897 | 2.273 |
+| mandelbrot | 0.286 | 0.250 | 0.288 | 0.253 | 0.936 | 0.486 | 0.376 | 1.017 |
+| nbody | 0.822 | 0.917 | 1.372 | 0.909 | 1.517 | 1.074 | 0.883 | 2.631 |
+| revcomp | 0.073 | 0.032 | 0.113 | 0.033 | 0.082 | 0.083 | 0.041 | 0.134 |
+| spectralnorm | 0.881 | 0.361 | 0.881 | 0.358 | 0.896 | 0.684 | 0.334 | 0.726 |
+| **geomean / C** | **0.822** | **0.583** | **0.944** | **0.588** | 1.000 | 0.958 | 0.718 | 1.257 |
+
+- **nbody idiomatic 1.37 → 0.82 s**: an executable's own functions now get internal linkage, so
+  LLVM inlines `advance` into `main`; a function `main` runs only once, outside every loop, keeps
+  external linkage, which keeps fannkuch's shuffle masks in registers. Idiomatic nbody is now faster
+  than the `<3>real` tuned program (0.92 s).
+- **revcomp idiomatic 0.113 → 0.073 s** and **binarytrees 0.741 → 0.658 s**: in-place slot
+  construction and the other dev items filed under §1 and §4.
+- **The largest gaps left to the tuned column**: knucleotide (1.69x, the Map key and hash of §3),
+  spectralnorm (2.44x: the idiomatic source does not yet use dev's float reassociation forms) and
+  revcomp (2.3x).
+
 | program | sysl-idiomatic |
 |---|---:|
 | revcomp | 3.67 |
