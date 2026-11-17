@@ -31,6 +31,8 @@ for prog in $PROGRAMS; do
       odin)   odin build $dir/$prog.odin -file -o:speed -microarch:native -out:$out >$out.log 2>&1 ;;
       ada)    mkdir -p $BUILD/.adaobj/$prog
               gnatmake -q -O3 -gnatp -march=native -D $BUILD/.adaobj/$prog -o $out $dir/$prog.adb >$out.log 2>&1 ;;
+      fortran) mkdir -p $BUILD/.fmod/$prog   # fortran-stdlib's hash map, which knucleotide uses
+              gfortran -O3 -march=native -J $BUILD/.fmod/$prog -I$(pkg-config --variable=moduledir fortran_stdlib) -o $out $dir/$prog.f90 -L$(pkg-config --variable=libdir fortran_stdlib) -lfortran_stdlib_hashmaps -lfortran_stdlib_hash -lfortran_stdlib_core >$out.log 2>&1 ;;
       c3)     c3c compile -O3 --obj-out $BUILD/.c3obj/$prog -o $out $dir/$prog.c3 >$out.log 2>&1 ;;
       eiffel|eiffel-contracts)
               # EiffelStudio's finalized (optimised) build. The .ecf has a `release` target with
