@@ -16,6 +16,14 @@ BIG=(nbody 50000000 spectralnorm 5500 fannkuchredux 11 binarytrees 18
 SMALL=(nbody 1000 spectralnorm 100 fannkuchredux 7 binarytrees 10
        mandelbrot 200 fasta 1000 knucleotide - revcomp -)
 
+# pidigits: the Benchmarks Game's 10000 digits, and its 27-digit reference output.
+PROGRAMS+=(pidigits)
+BIG[pidigits]=10000
+SMALL[pidigits]=27
+
+# BENCH_PROGRAMS names a subset to build or verify (default: every program).
+(( ${+BENCH_PROGRAMS} )) && PROGRAMS=(${=BENCH_PROGRAMS})
+
 # The fasta size whose output is the standard input of knucleotide and revcomp.
 INPUT_N=10000000
 BUILD=$ROOT/build

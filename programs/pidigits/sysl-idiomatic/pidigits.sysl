@@ -1,0 +1,46 @@
+import sysl.math.bigint.{BigInt, from_int, mul_long}
+import sysl.text.{parse_int, str_builder}
+
+// Gibbons' unbounded spigot in Mr Ledrug's form, the Benchmarks Game C program's, over the standard
+// library's BigInt: each term widens the fraction, and a digit is emitted once (3·num + acc)/den and
+// (4·num + acc)/den agree. A small operand goes through the `_long` family, as the module asks.
+main(args: []string)
+    val n = parse_int(args[1]).unwrap()
+    var acc = from_int(0)
+    var den = from_int(1)
+    var num = from_int(1)
+    var line = str_builder()
+    var i = 0
+    var k: long = 0
+
+    while i < n
+        k += 1
+
+        val k2 = k * 2 + 1
+
+        acc = mul_long(acc + mul_long(num, 2), k2)
+        den = mul_long(den, k2)
+        num = mul_long(num, k)
+
+        if num > acc then continue
+
+        val d = (mul_long(num, 3) + acc) / den
+
+        if d != (mul_long(num, 4) + acc) / den then continue
+
+        val digit = d.to_long().unwrap()
+
+        line.push_int(digit)
+        i += 1
+
+        if i % 10 == 0
+            print(s"${line.finish()}\t:$i")
+            line = str_builder()
+
+        acc = mul_long(acc - mul_long(den, digit), 10)
+        num = mul_long(num, 10)
+    end while
+
+    if i % 10 != 0
+        for _ in i % 10..<10 do line.push(" ")
+        print(s"${line.finish()}\t:$i")

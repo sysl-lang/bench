@@ -73,6 +73,13 @@ names the origin of every file and says exactly what was changed.
    `build/<program>/java` is a launcher script that runs `java -cp` on the compiled classes, as the Julia
    one does. Eiffel and C3 compile to native executables.
 
+**pidigits is the one program that leans on a library**, as it does on the Benchmarks Game: its work
+is arbitrary-precision arithmetic. A language whose standard library has a big integer uses it (Go
+`math/big`, Java `BigInteger`, Julia `BigInt`, sysl `sysl.math.bigint`); every other language binds
+[GMP](https://gmplib.org) 6.3.0 through its own C interop, as the Game's entries do (C, C++, Rust,
+Swift, Zig, Nim, D, Odin, C3, Ada, Fortran, Eiffel). Every version runs Mr Ledrug's form of Gibbons'
+spigot; SOURCES.md says which library each uses.
+
 ## Groups
 
 The tables group the languages. **Systems**: c, cpp, rust, zig, d, odin, c3, ada, fortran, nim, swift, sysl-idiomatic,
@@ -86,7 +93,8 @@ The report gives the geometric mean of each group as well as overall.
 ```
 programs/<name>/{sysl-idiomatic,sysl-tuned,c,rust,cpp,swift,zig,nim,julia,go,d,odin,c3,ada,fortran,java,eiffel}/   one source file per directory
                    (Eiffel adds its .ecf project file, and a second class file where a program needs one;
-                   `eiffel-contracts` is built from the `eiffel` directory)
+                   `eiffel-contracts` is built from the `eiffel` directory; Swift's pidigits adds
+                   the module map that makes GMP `import gmp`)
 expected/ref/      the Benchmarks Game's published output (and input) at a small size
 expected/<name>.sha256   sha256 of the output at the timed size, from the C program
 scripts/build.zsh  builds everything into build/ and generates the shared input
