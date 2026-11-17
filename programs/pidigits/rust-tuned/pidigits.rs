@@ -5,16 +5,11 @@
 // Contributed by TeXitoi
 // Inspired by Mr Ledrug's C version and thestinger's rust-gmp
 // modified by Takumi Kato
-//
-// Tuned for this suite: one division per candidate digit. q = (3num + acc) / den
-// with remainder r by mpz_tdiv_qr, and the 4num digit is the same one exactly
-// when r + num < den, so the second division becomes an addition and a
-// comparison. MaybeUninit in place of the deprecated mem::uninitialized.
 
 #![allow(non_camel_case_types)]
 
 use std::os::raw::{c_int, c_ulong, c_void};
-use std::mem::MaybeUninit;
+use std::mem::uninitialized;
 use std::cmp::Ordering;
 use std::io::{stdout, BufWriter, Write};
 
@@ -42,9 +37,8 @@ fn main() {
 
 pub struct Context {
     k: c_ulong,
-    q: Mpz,
-    r: Mpz,
-    tmp: Mpz,
+    tmp1: Mpz,
+    tmp2: Mpz,
     acc: Mpz,
     den: Mpz,
     num: Mpz,
@@ -53,25 +47,18 @@ impl Context {
     pub fn new() -> Context {
         Context {
             k: 0,
-            q: Mpz::from_ui(0),
-            r: Mpz::from_ui(0),
-            tmp: Mpz::from_ui(0),
+            tmp1: Mpz::from_ui(0),
+            tmp2: Mpz::from_ui(0),
             acc: Mpz::from_ui(0),
             den: Mpz::from_ui(1),
             num: Mpz::from_ui(1),
         }
     }
-    // The digit (3num + acc) / den when (4num + acc) / den agrees with it.
-    fn extract_digit(&mut self) -> Option<c_ulong> {
-        self.tmp.mul_ui(&self.num, 3);
-        self.tmp.add_from(&self.acc);
-        self.q.tdiv_qr(&mut self.r, &self.tmp, &self.den);
-        self.r.add_from(&self.num);
-        if self.r >= self.den {
-            None
-        } else {
-            Some(self.q.as_ui())
-        }
+    fn extract_digit(&mut self, nth: c_ulong) -> c_ulong {
+        self.tmp1.mul_ui(&self.num, nth);
+        self.tmp2.add(&self.tmp1, &self.acc);
+        self.tmp1.tdiv_q(&self.tmp2, &self.den);
+        return self.tmp1.as_ui();
     }
     fn eliminate_digit(&mut self, d: c_ulong) {
         self.acc.submul_ui(&self.den, d);
@@ -95,10 +82,13 @@ impl Iterator for Context {
             if self.num > self.acc {
                 continue;
             }
-            if let Some(d) = self.extract_digit() {
-                self.eliminate_digit(d);
-                return Some(d);
+            let d = self.extract_digit(3);
+            if d != self.extract_digit(4) {
+                continue;
             }
+
+            self.eliminate_digit(d);
+            return Some(d);
         }
     }
 }
@@ -115,9 +105,9 @@ impl Drop for Mpz {
 impl Mpz {
     pub fn from_ui(i: c_ulong) -> Mpz {
         unsafe {
-            let mut mpz = MaybeUninit::uninit();
-            __gmpz_init_set_ui(mpz.as_mut_ptr(), i);
-            Mpz { mpz: mpz.assume_init() }
+            let mut mpz = uninitialized();
+            __gmpz_init_set_ui(&mut mpz, i);
+            Mpz { mpz: mpz }
         }
     }
     // self = a * b
@@ -142,18 +132,6 @@ impl Mpz {
     pub fn add(&mut self, a: &Mpz, b: &Mpz) {
         unsafe {
             __gmpz_add(&mut self.mpz, &a.mpz, &b.mpz);
-        }
-    }
-    // self += a
-    pub fn add_from(&mut self, a: &Mpz) {
-        unsafe {
-            __gmpz_add(&mut self.mpz, &self.mpz, &a.mpz);
-        }
-    }
-    // self = n / d, r = n % d, truncated
-    pub fn tdiv_qr(&mut self, r: &mut Mpz, n: &Mpz, d: &Mpz) {
-        unsafe {
-            __gmpz_tdiv_qr(&mut self.mpz, &mut r.mpz, &n.mpz, &d.mpz);
         }
     }
     // self += a * b
@@ -218,5 +196,4 @@ extern "C" {
     fn __gmpz_submul_ui(rop: mpz_ptr, op1: mpz_srcptr, op2: c_ulong);
     fn __gmpz_addmul_ui(rop: mpz_ptr, op1: mpz_srcptr, op2: c_ulong);
     fn __gmpz_tdiv_q(q: mpz_ptr, n: mpz_srcptr, d: mpz_srcptr);
-    fn __gmpz_tdiv_qr(q: mpz_ptr, r: mpz_ptr, n: mpz_srcptr, d: mpz_srcptr);
 }
