@@ -22,7 +22,7 @@ if (( verify_only && $# > 1 )); then LANGS=(${@:2}); fi
 run_program() {  # <program> <language> <small|big>
   local prog=$1 lang=$2 size=$3 exe=$(exe $1 $2)
 
-  if [[ $prog == knucleotide || $prog == revcomp ]]; then
+  if [[ $BIG[$prog] == - ]]; then
     if [[ $size == small ]]; then $exe < expected/ref/$prog.in; else $exe < $INPUT; fi
   elif [[ $size == small ]]; then
     $exe $SMALL[$prog]
@@ -76,7 +76,7 @@ for prog in $PROGRAMS; do
   args=(-N --warmup 3 --runs 10 --output null --export-json $raw/$prog.json)
   cmds=()
 
-  if [[ $prog == knucleotide || $prog == revcomp ]]; then
+  if [[ $BIG[$prog] == - ]]; then
     args+=(--input $INPUT)
     for lang in $LANGS; do cmds+=(-n $lang $(exe $prog $lang)); done
   else

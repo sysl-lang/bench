@@ -17,6 +17,9 @@ systems = ["c", "rust", "cpp", "zig", "d", "odin", "c3", "ada", "nim", "swift", 
 managed = ["go", "java", "eiffel", "eiffel-contracts", "julia"]
 columns = systems + managed
 
+# regex-redux, which reads the same fasta file as k-nucleotide and reverse-complement.
+programs.append("regexredux")
+
 
 def run(cmd):
     env = dict(os.environ)

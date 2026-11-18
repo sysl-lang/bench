@@ -10,6 +10,25 @@ cd $ROOT
 # for the knucleotide/revcomp input, so name it too when it is not already built.
 (( $# )) && LANGS=($@)
 
+# regex-redux's C, C++, Rust, Zig and sysl-tuned programs link PCRE2 (C++ also includes Boost). Homebrew's
+# copy is named outright: macOS has a libpcre2-8 of its own, built without the JIT. Answers 1 for
+# a language that builds as usual, so the case below takes it.
+PCRE2=/opt/homebrew/opt/pcre2
+build_regexredux() {  # <language> <dir> <out>
+  local lang=$1 dir=$2 out=$3
+  case $lang in
+    c|c-tuned) clang -std=gnu17 -O3 -march=native -w -I$PCRE2/include $dir/regexredux.c -o $out -L$PCRE2/lib -lpcre2-8 ;;
+    cpp)       clang++ -std=c++20 -O3 -march=native -w -I$PCRE2/include -I/opt/homebrew/opt/boost/include $dir/regexredux.cpp -o $out -L$PCRE2/lib -lpcre2-8 ;;
+    rust|rust-tuned)
+               rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native -L $PCRE2/lib $dir/regexredux.rs -o $out ;;
+    sysl-tuned)
+               LIBRARY_PATH=$PCRE2/lib sysl build --release -O3 --cpu native -o $out $dir/regexredux.sysl ;;
+    zig)       (cd $dir && zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded -lc -L$PCRE2/lib -lpcre2-8 --cache-dir $BUILD/.zig-cache --global-cache-dir $BUILD/.zig-global -femit-bin=$out regexredux.zig) ;;
+    *)         return 1 ;;
+  esac >$out.log 2>&1
+  return 0
+}
+
 failed=0
 for prog in $PROGRAMS; do
   mkdir -p $BUILD/$prog
@@ -18,6 +37,9 @@ for prog in $PROGRAMS; do
     out=$BUILD/$prog/$lang
     [[ $lang == eiffel-contracts ]] && dir=programs/$prog/eiffel   # the same source, built with assertions on
     rm -f $out
+    if [[ $prog == regexredux ]] && build_regexredux $lang $dir $out; then
+      :
+    else
     case $lang in
       sysl-*) sysl build --release -O3 --cpu native -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
       c)      clang -std=gnu17 -O3 -march=native -w -I$dir $dir/$prog.c -o $out -lm >$out.log 2>&1 ;;
@@ -53,6 +75,7 @@ for prog in $PROGRAMS; do
               printf '#!/bin/sh\nexec julia -O3 --check-bounds=no --startup-file=no %s "$@"\n' $ROOT/$dir/$prog.jl > $out
               chmod +x $out ;;
     esac
+    fi
     if [[ -x $out && -s $out ]]; then
       print "built  $prog/$lang"
     else

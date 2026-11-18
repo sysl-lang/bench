@@ -1,0 +1,119 @@
+// regex-redux over PCRE2 with its JIT, the library and the calls of the C program: each pattern is
+// JIT-compiled once and matched with pcre2_jit_match, which skips the interpreter's checks.
+//
+// The org's `pcre2` package binds the interpreter (`pcre2_match`) and allocates match data per
+// search, so this program declares the nine PCRE2 functions it needs itself.
+@link("pcre2-8")
+
+import sysl.buf.{Buf, buf}
+import sysl.io.{read_all, stdin}
+import sysl.slices.as_ptr
+
+
+opaque struct Code
+opaque struct MatchData
+opaque struct MatchContext
+opaque struct JitStack
+
+extern "pcre2_compile_8" pcre_compile(pattern: *u8, length: usize, options: u32, errorcode: *i32, erroroffset: *usize, ccontext: *u8) -> *Code
+extern "pcre2_jit_compile_8" jit_compile(code: *Code, options: u32) -> i32
+extern "pcre2_code_free_8" code_free(code: *Code)
+extern "pcre2_match_context_create_8" match_context_create(gcontext: *u8) -> *MatchContext
+extern "pcre2_jit_stack_create_8" jit_stack_create(startsize: usize, maxsize: usize, gcontext: *u8) -> *JitStack
+extern "pcre2_jit_stack_assign_8" jit_stack_assign(mcontext: *MatchContext, callback: *u8, data: *JitStack)
+extern "pcre2_match_data_create_8" match_data_create(ovecsize: u32, gcontext: *u8) -> *MatchData
+extern "pcre2_get_ovector_pointer_8" ovector(md: *MatchData) -> *usize
+extern "pcre2_jit_match_8" jit_match(code: *Code, subject: *u8, length: usize, startoffset: usize, options: u32, md: *MatchData, mcontext: *MatchContext) -> i32
+
+// PCRE2_JIT_COMPLETE
+const jit_complete: u32 = 1
+
+val variants = [
+    "agggtaaa|tttaccct",
+    "[cgt]gggtaaa|tttaccc[acg]",
+    "a[act]ggtaaa|tttacc[agt]t",
+    "ag[act]gtaaa|tttac[agt]ct",
+    "agg[act]taaa|ttta[agt]cct",
+    "aggg[acg]aaa|ttt[cgt]ccct",
+    "agggt[cgt]aa|tt[acg]accct",
+    "agggta[cgt]a|t[acg]taccct",
+    "agggtaa[cgt]|[acg]ttaccct",
+]
+
+val substitutions = [
+    ("tHa[Nt]", "<4>"),
+    ("aND|caN|Ha[DS]|WaS", "<3>"),
+    ("a[NSt]|BY", "<2>"),
+    ("<[^>]*>", "|"),
+    ("\\|[^|][^|]*\\|", "-"),
+]
+
+// One match context with its JIT stack, and one match data, shared by every search.
+struct Matcher
+    ctx: *MatchContext
+    md: *MatchData
+    ov: *usize
+
+compile(pattern: string) -> *Code
+    var err: i32 = 0
+    var at: usize = 0
+    val code = pcre_compile(as_ptr(pattern.bytes), pattern.len, 0, &err, &at, null)
+
+    jit_compile(code, jit_complete)
+    code
+
+// Every match of pattern in src replaced by with, appended to dst.
+replace(m: Matcher, pattern: string, with: string, src: []const u8, dst: Buf[u8])
+    val code = compile(pattern)
+    var pos: usize = 0
+
+    while jit_match(code, as_ptr(src), src.len, pos, 0, m.md, m.ctx) >= 0
+        dst.extend(src[pos..<m.ov[0]])
+        dst.extend(with.bytes)
+        pos = m.ov[1]
+
+    code_free(code)
+    dst.extend(src[pos..<src.len])
+
+count(m: Matcher, pattern: string, s: []const u8) -> int
+    val code = compile(pattern)
+    var n = 0
+    var pos: usize = 0
+
+    while jit_match(code, as_ptr(s), s.len, pos, 0, m.md, m.ctx) >= 0
+        n += 1
+        pos = m.ov[1]
+
+    code_free(code)
+    n
+
+main()
+    var input = stdin()
+    val data = read_all(&input)
+    val ctx = match_context_create(null)
+
+    jit_stack_assign(ctx, null, jit_stack_create(16384, 16384, null))
+
+    val md = match_data_create(16, null)
+    val m = Matcher(ctx, md, ovector(md))
+    val seq: Buf[u8] = buf()
+
+    replace(m, ">.*\n|\n", "", data.view(), seq)
+
+    for v in variants
+        print(v, count(m, v, seq.view()))
+
+    var pre: Buf[u8] = buf()
+
+    pre.extend(seq.view())
+
+    for (pattern, with) in substitutions
+        val post: Buf[u8] = buf()
+
+        replace(m, pattern, with, pre.view(), post)
+        pre = post
+
+    print("")
+    print(data.len())
+    print(seq.len())
+    print(pre.len())

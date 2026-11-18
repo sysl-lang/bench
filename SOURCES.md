@@ -26,6 +26,7 @@ included, must do (README rule 3).
 | fasta | the 139968-state generator, each symbol chosen by scanning the cumulative probabilities |
 | k-nucleotide | every k-mer counted into a hash table keyed by its 2k-bit code |
 | reverse-complement | each record read whole, complemented through a table, reversed and re-wrapped at 60 |
+| regex-redux | headers and newlines removed by a regex, nine alternation patterns counted, five substitutions applied in turn, each by a regular-expression library (see below) |
 
 ## Programs
 
@@ -148,6 +149,40 @@ program it ports, so **the licence is the Benchmarks Game's BSD-3-Clause** as fo
   `Unsigned_32`) keyed by the 2k-bit code, with the C program's `key xor key >> 7` hash, and sorts the
   elements with `Ada.Containers.Generic_Array_Sort`.
 
+### regex-redux
+
+regex-redux measures a regular-expression library more than a compiler, and the Benchmarks Game lets
+each language pick its library ("Contentious. Different libraries."). The rule here (README rule 3):
+**the language's standard regex library, unless the Game's entries for that language use a faster
+one, in which case that one, in the form of the Game's fastest entry, made single-threaded.** The
+Game's fastest entries all use PCRE2 with its JIT, so most languages here do. Every program reads the
+whole input, removes headers and newlines with `>.*\n|\n` (or an equivalent spelling where `.` matches
+a newline), counts the nine variants, then applies the five substitutions in turn. The archive's
+reference output for its 1000-line input is `expected/ref/regexredux.out` (archive file `1000_out`;
+the input, `regexredux-input1000.txt`, is the same file as `knucleotide.in`).
+
+**PCRE2 is Homebrew's** (10.49, built with the JIT). macOS has a `/usr/lib/libpcre2-8` of its own,
+built without the JIT; a program that finds that one either fails (`pcre2_jit_compile` answers
+`-45`, "bad JIT option") or silently runs PCRE2's interpreter, so every build and loader below names
+Homebrew's copy outright.
+
+| language | archive file | library | changes |
+|---|---|---|---|
+| C, `c-tuned` | `regexredux.gcc-5.gcc` (the Game's fastest C) | PCRE2, JIT | unchanged: the `#pragma omp` lines are ignored without `-fopenmp` (Apple clang has none), so it runs on one thread. `c-tuned` is a copy: nothing faster than PCRE2's JIT is known for C |
+| C++ | `regexredux.gpp-6.gpp` (the fastest C++) | PCRE2, JIT | `std::launch::async` changed to `std::launch::deferred`, so each task runs on the main thread when its result is asked for |
+| Rust, `rust-tuned` | `regexredux.rust-7.rust` (the Game's fastest program) | PCRE2, JIT | the `pcre2_sys` and `libc` crates replaced by the `extern "C"` declarations they provide (the build is a bare `rustc` with no crates); `rayon::scope`, the `mpsc` channels and `into_par_iter` replaced by sequential calls. `rust-tuned` is a copy. **The entries using the `regex` crate (`regexredux.rust`, `-2` to `-6`) were not used**: the crate cannot be built without cargo, and the PCRE2 entry is the Game's fastest |
+| Swift | `regexredux.swift-4.swift` | Foundation `NSRegularExpression` (every Swift entry's) | the `DispatchGroup` and its queues removed; the replacement chain and the counts run in turn |
+| Go | `regexredux.go-5.go` (the fastest Go) | PCRE2, JIT, through cgo | the archive program imports `github.com/GRbit/go-pcre`, a cgo binding to the retired PCRE1 (not installed, and a module fetch); it is replaced by a few dozen lines of cgo over PCRE2 making the same calls (`pcre2_jit_compile`, `pcre2_jit_match`). Goroutines and `GOMAXPROCS` removed. Go's own `regexp` (`regexredux.go`, `-3`) is about eight times slower on the Game |
+| Java | `regexredux.java-2.java` (the JVM form of the fastest Java, `graalvmaot-4`) | PCRE2, JIT, through `java.lang.foreign` | the jextract-generated `jextract_pcre2.pcre2_h` (not in the archive) replaced by a nested class of hand-written downcalls to the same seven functions; the executor's tasks called in turn. Run as every Java program here, on the JVM, so the time includes startup and JIT warm-up. The JVM warns on stderr that a restricted method was called; it does not affect the output |
+| Julia | `regexredux.julia-5.julia` (the fastest Julia) | Base's PCRE2 (Julia ships it, JIT on) | the `Threads.@spawn` around the substitutions and its `wait` removed |
+| Nim | none (not in the archive) | standard `std/re`, which is PCRE2 with the JIT | written for this suite. `std/re` opens `libpcre2-8.0.dylib` by name at run time, which finds macOS's JIT-less copy; `regexredux.nim.cfg` beside the source overrides that `dynlib` and links Homebrew's |
+| Zig | none | PCRE2, JIT | Zig has no regex library: **a port of the C program** above to Zig, same calls |
+| D | none | standard `std.regex`, every pattern compiled to native code at compile time with `ctRegex` | written for this suite |
+| Odin | none | standard `core:text/regex` (compiled to its own VM), walked with its match iterator | written for this suite. `.` matches a newline in Odin's regex, so the header pattern is spelled `>[^\n]*\n\|\n` |
+| C3 | none | standard `std::encoding::experimental::regex` (POSIX ERE, musl's TNFA matcher) | written for this suite. The header pattern is compiled with `NEWLINE`, so `.` stops at a newline as in Perl |
+| Ada | `regexredux.gnat-5.gnat` passed over | GNAT's `GNAT.Regpat` | written for this suite. **The Game's only working Ada entry (`gnat-5`) was not adapted**: it is not a regex program — it hand-translates each pattern into GNAT's SPITBOL pattern combinators (`BreakX`, `Any`, `Break`) — and it is five compilation units built on Ada tasks. `gnat-6` (PCRE, tasks) fails the Game's output check. A newline in the pattern is written `\n`, because `GNAT.Regpat.Compile` refuses a literal one ("junk on end") |
+| Eiffel | none | Gobo's `RX_PCRE_REGULAR_EXPRESSION` (a PCRE-syntax matcher written in Eiffel), which ships with EiffelStudio | written for this suite; `regexredux.ecf` adds `$ISE_LIBRARY/library/gobo/gobo_regexp.ecf`. EiffelStudio's own PCRE binding is in its `unstable` tree and was not used. **It does not finish at the timed size**: the substitutions from `<[^>]*>` on hold memory in proportion to the run of text a `[^…]*` crosses (1.87 GB at the 10 MB input with a full collection after every step, 70 MB through the first two), so the 100 MB input is killed for memory after printing the nine counts. It verifies at the small size and its 10 MB output matches C's |
+
 ## Implementation variants of one algorithm
 
 Some programs differ in how the same arithmetic is laid out, as they do on the Benchmarks Game. The
@@ -160,7 +195,8 @@ sysl: Rex Kerr's count array).
 
 ## The two sysl forms
 
-Both sysl forms use C's algorithm: the same work, the same arithmetic on the same data.
+Both sysl forms use C's algorithm: the same work, the same arithmetic on the same data. (regex-redux,
+whose work is a library's, is the exception: see its entry below.)
 
 **`sysl-idiomatic`** is what a sysl programmer writes by default: the pleasant form, using whatever the
 language offers for writing it pleasantly. That includes vectors (`<N>T`) where they are the natural
@@ -183,3 +219,9 @@ What each `sysl-tuned` program does differently from `sysl-idiomatic`:
 - **fannkuchredux**: a copy. Three `[16]usize` arrays in place of the heap slices measured no faster
   (1.351 s against 1.333 s).
 - **binarytrees, mandelbrot, fasta, knucleotide, revcomp**: copies.
+- **regexredux**: not the same library. `sysl-idiomatic` uses the standard `sysl.regex` (POSIX ERE,
+  a Pike VM; `.` matches a newline there, so the header pattern is `>[^\n]*\n|\n`) and its
+  `find_all` and `replace_all`. `sysl-tuned` is C's program: PCRE2 with the JIT, through nine `extern`
+  declarations of the PCRE2 functions in the file itself, because the org's `pcre2` package binds
+  only the interpreter (`pcre2_match`) and allocates match data on every search. Its build sets
+  `LIBRARY_PATH` to Homebrew's PCRE2 so that `@link("pcre2-8")` does not find macOS's JIT-less copy.

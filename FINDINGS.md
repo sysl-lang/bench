@@ -293,6 +293,24 @@ moved from 2.08 to 1.92).
   image is the same (verified). Bought 13%. **Item:** none; it is a choice of schedule no compiler
   makes, and the C++ entries make it by hand too.
 
+## 9. regexredux — `Regex.replace_all` is quadratic, and the Pike VM allocates per position
+
+**sysl-idiomatic, sysl 0.11.10**: it does not finish at the timed size (fasta 10,000,000, 102 MB).
+On fasta 100,000 (1.0 MB) it takes 4.3 s, on 300,000 (3.1 MB) 46.6 s (3x the input, 10.9x the time),
+and on 1,000,000 (10 MB) 365 s, where C takes 0.35 s and sysl-tuned 0.37 s. It verifies at the small
+size, and its 10 MB output hashes the same as C's.
+
+- **`replace_all` builds its answer with `out += …`** (`library/sysl/regex/regex.lsysl`,
+  `replace_all`), and `strings.md` says a `+=` copies everything built so far. The header-and-newline
+  pass makes one replacement per line, so it copies the growing output once per line: `sample` of
+  the 3 MB run puts 51% of the time in `_platform_memmove` under `Regex.replace_all`. **Item:**
+  `replace_all` (and `split`) gather into a `str_builder`. A library bug, by the page's own cost
+  model; the program cannot avoid it without writing its own replace, which rule 3 does not allow.
+- **The matching itself is slow too**: `exec_from`, `Vm.add` and `sysl.text.step_at` take most of
+  the remaining samples, with `malloc`/`free` beside them — each position starts a thread with a fresh
+  `[unset; slots]` capture array, and each character is decoded as UTF-8 on the way. **Item:** a
+  measured profile once `replace_all` is fixed.
+
 ## Language gaps and diagnostics found while writing the programs
 
 - **A scalar on the LEFT of a vector operator is refused where nothing gives the expression a type**

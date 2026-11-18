@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<system xmlns="http://www.eiffel.com/developers/xml/configuration-1-22-0" name="regexredux" uuid="6f2c1b0e-0007-4a1b-9c10-000000000009">
+	<target name="release">
+		<root class="REGEXREDUX" feature="make"/>
+		<file_rule>
+			<exclude>/EIFGENs$</exclude>
+		</file_rule>
+		<option warning="none" manifest_array_type="mismatch_warning">
+			<assertions precondition="false" postcondition="false" check="false" invariant="false" loop="false" supplier_precondition="false"/>
+		</option>
+		<setting name="console_application" value="true"/>
+		<setting name="executable_name" value="regexredux"/>
+		<setting name="exception_trace" value="false"/>
+		<setting name="inlining" value="true"/>
+		<setting name="inlining_size" value="100"/>
+		<capability>
+			<concurrency support="none"/>
+		</capability>
+		<library name="base" location="$ISE_LIBRARY/library/base/base.ecf"/>
+		<library name="gobo_regexp" location="$ISE_LIBRARY/library/gobo/gobo_regexp.ecf"/>
+		<cluster name="app" location="."/>
+	</target>
+	<target name="contracts" extends="release">
+		<option warning="none" manifest_array_type="mismatch_warning">
+			<assertions precondition="true" postcondition="true" check="true" invariant="true" loop="true" supplier_precondition="true"/>
+		</option>
+	</target>
+</system>

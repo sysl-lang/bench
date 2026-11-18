@@ -1,0 +1,44 @@
+import sysl.io.{read_all_text, stdin}
+import sysl.regex.regex
+
+// Each pattern and its reverse complement, with a wildcard in one position.
+val variants = [
+    "agggtaaa|tttaccct",
+    "[cgt]gggtaaa|tttaccc[acg]",
+    "a[act]ggtaaa|tttacc[agt]t",
+    "ag[act]gtaaa|tttac[agt]ct",
+    "agg[act]taaa|ttta[agt]cct",
+    "aggg[acg]aaa|ttt[cgt]ccct",
+    "agggt[cgt]aa|tt[acg]accct",
+    "agggta[cgt]a|t[acg]taccct",
+    "agggtaa[cgt]|[acg]ttaccct",
+]
+
+// The IUB codes, rewritten one pattern after another.
+val substitutions = [
+    ("tHa[Nt]", "<4>"),
+    ("aND|caN|Ha[DS]|WaS", "<3>"),
+    ("a[NSt]|BY", "<2>"),
+    ("<[^>]*>", "|"),
+    ("\\|[^|][^|]*\\|", "-"),
+]
+
+main()
+    var input = stdin()
+    val text = read_all_text(&input).unwrap()
+
+    // `.` matches a newline in an ERE, so a header line is `>` and every character up to its newline.
+    val seq = regex(">[^\n]*\n|\n").unwrap().replace_all(text, "")
+
+    for v in variants
+        print(v, regex(v).unwrap().find_all(seq).len())
+
+    var out = seq
+
+    for (pattern, with) in substitutions
+        out = regex(pattern).unwrap().replace_all(out, with)
+
+    print("")
+    print(text.len)
+    print(seq.len)
+    print(out.len)
