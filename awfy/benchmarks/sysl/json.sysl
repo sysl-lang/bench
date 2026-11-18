@@ -1,0 +1,372 @@
+// A JSON parser over a string, after minimal-json by Ralf Sternberg, by way of the Java version of the
+// suite.
+
+import som.{Vector, vector}
+
+struct HashIndexTable
+    hash_table: [32]int
+
+    add(*self, name: string, index: int)
+        val slot = hash_slot_for(name)
+
+        // increment by 1, 0 stands for empty
+        self.hash_table[slot] = if index < 0xff then (index + 1) & 0xff else 0
+
+    // subtract 1, 0 stands for empty
+    get(*self, name: string) -> int = (self.hash_table[hash_slot_for(name)] & 0xff) - 1
+end HashIndexTable
+
+// this is not a proper hash, but sufficient for the benchmark, and very portable!
+private string_hash(s: string) -> int = int(s.len) * 1402589
+
+private hash_slot_for(element: string) -> int = string_hash(element) & 31
+
+trait JsonValue
+    is_object(*self) -> bool = false
+    is_array(*self) -> bool = false
+    is_number(*self) -> bool = false
+    is_string(*self) -> bool = false
+    is_boolean(*self) -> bool = false
+    is_true(*self) -> bool = false
+    is_false(*self) -> bool = false
+    is_null(*self) -> bool = false
+
+    as_object(&self) -> &JsonObject = panic(f"Not an object: ${self.to_string()}")
+
+    as_array(&self) -> &JsonArray = panic(f"Not an array: ${self.to_string()}")
+
+    to_string(*self) -> string = ""
+end JsonValue
+
+struct JsonArray
+    values: &Vector[&JsonValue]
+
+    add(*self, value: &JsonValue) = self.values.append(value)
+
+    size(*self) -> usize = self.values.size()
+
+    get(*self, index: usize) -> &JsonValue = self.values.at(index).unwrap()
+end JsonArray
+
+impl JsonValue for JsonArray
+    override is_array(*self) -> bool = true
+    override as_array(&self) -> &JsonArray = self
+
+struct JsonLiteral
+    value: string
+    literal_null: bool
+    literal_true: bool
+    literal_false: bool
+end JsonLiteral
+
+impl JsonValue for JsonLiteral
+    override is_null(*self) -> bool = self.literal_null
+    override is_true(*self) -> bool = self.literal_true
+    override is_false(*self) -> bool = self.literal_false
+    override is_boolean(*self) -> bool = self.literal_true || self.literal_false
+    override to_string(*self) -> string = self.value
+
+create_null() -> &JsonValue = JsonLiteral("null", true, false, false)
+
+create_true() -> &JsonValue = JsonLiteral("true", false, true, false)
+
+create_false() -> &JsonValue = JsonLiteral("false", false, false, true)
+
+struct JsonNumber
+    string: string
+end JsonNumber
+
+impl JsonValue for JsonNumber
+    override to_string(*self) -> string = self.string
+    override is_number(*self) -> bool = true
+
+json_number(string: string) -> &JsonValue
+    if string.len == 0 then panic("value is null")
+    JsonNumber(string)
+
+struct JsonObject
+    names: &Vector[string]
+    values: &Vector[&JsonValue]
+    table: HashIndexTable
+
+    add(*self, name: string, value: &JsonValue)
+        if name.len == 0 then panic("name is null")
+
+        self.table.add(name, int(self.names.size()))
+        self.names.append(name)
+        self.values.append(value)
+
+    get(*self, name: string) -> Option[&JsonValue]
+        if name.len == 0 then panic("name is null")
+
+        val index = self.index_of(name)
+
+        if index == -1 then None else self.values.at(usize(index))
+
+    size(*self) -> usize = self.names.size()
+
+    is_empty(*self) -> bool = self.names.is_empty()
+
+    private index_of(*self, name: string) -> int
+        val index = self.table.get(name)
+
+        if index != -1 && name == self.names.at(usize(index)).unwrap() then return index
+        panic("not yet implemented, not relevant for the benchmark")
+end JsonObject
+
+impl JsonValue for JsonObject
+    override is_object(*self) -> bool = true
+    override as_object(&self) -> &JsonObject = self
+
+struct JsonString
+    string: string
+end JsonString
+
+impl JsonValue for JsonString
+    override is_string(*self) -> bool = true
+
+struct JsonPureStringParser
+    input: string
+    index: int
+    line: int
+    column: int
+    current: string
+    capture_buffer: string
+    capture_start: int
+
+    parse(*self) -> &JsonValue
+        self.read()
+        self.skip_white_space()
+
+        val result = self.read_value()
+
+        self.skip_white_space()
+        if !self.is_end_of_text() then panic("Unexpected character")
+        result
+
+    private read_value(*self) -> &JsonValue
+        self.current match
+            "n" -> self.read_null()
+            "t" -> self.read_true()
+            "f" -> self.read_false()
+            "\"" -> self.read_string()
+            "[" -> self.read_array()
+            "{" -> self.read_object()
+            "-" | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" -> self.read_number()
+            _ -> self.expected("value")
+
+    private read_object(*self) -> &JsonValue
+        self.read()
+
+        val object: &JsonObject = JsonObject(vector(), vector(), HashIndexTable([0; 32]))
+
+        self.skip_white_space()
+        if self.read_char("}") then return object
+
+        do
+            self.skip_white_space()
+
+            val name = self.read_name()
+
+            self.skip_white_space()
+            if !self.read_char(":") then self.expected("':'")
+            self.skip_white_space()
+
+            object.add(name, self.read_value())
+            self.skip_white_space()
+        while self.read_char(",")
+
+        if !self.read_char("}") then self.expected("',' or '}'")
+        object
+
+    private read_name(*self) -> string
+        if self.current != "\"" then self.expected("name")
+        self.read_string_internal()
+
+    private read_array(*self) -> &JsonValue
+        self.read()
+
+        val array: &JsonArray = JsonArray(vector())
+
+        self.skip_white_space()
+        if self.read_char("]") then return array
+
+        do
+            self.skip_white_space()
+            array.add(self.read_value())
+            self.skip_white_space()
+        while self.read_char(",")
+
+        if !self.read_char("]") then self.expected("',' or ']'")
+        array
+
+    private read_null(*self) -> &JsonValue
+        self.read()
+        self.read_required_char("u")
+        self.read_required_char("l")
+        self.read_required_char("l")
+        create_null()
+
+    private read_true(*self) -> &JsonValue
+        self.read()
+        self.read_required_char("r")
+        self.read_required_char("u")
+        self.read_required_char("e")
+        create_true()
+
+    private read_false(*self) -> &JsonValue
+        self.read()
+        self.read_required_char("a")
+        self.read_required_char("l")
+        self.read_required_char("s")
+        self.read_required_char("e")
+        create_false()
+
+    private read_required_char(*self, ch: string)
+        if !self.read_char(ch) then self.expected(f"'$ch'")
+
+    private read_string(*self) -> &JsonValue = JsonString(self.read_string_internal())
+
+    private read_string_internal(*self) -> string
+        self.read()
+        self.start_capture()
+
+        while self.current != "\""
+            if self.current == "\\"
+                self.pause_capture()
+                self.read_escape()
+                self.start_capture()
+            else
+                self.read()
+
+        val string = self.end_capture()
+
+        self.read()
+        string
+
+    private read_escape(*self)
+        self.read()
+
+        val escaped = self.current match
+            "\"" | "/" | "\\" -> self.current
+            "b" -> "\u{8}"
+            "f" -> "\u{c}"
+            "n" -> "\n"
+            "r" -> "\r"
+            "t" -> "\t"
+            _ -> self.expected("valid escape sequence")
+
+        self.capture_buffer = f"${self.capture_buffer}$escaped"
+        self.read()
+
+    private read_number(*self) -> &JsonValue
+        self.start_capture()
+        self.read_char("-")
+
+        val first_digit = self.current
+
+        if !self.read_digit() then self.expected("digit")
+        if first_digit != "0"
+            while self.read_digit() do ()
+
+        self.read_fraction()
+        self.read_exponent()
+        json_number(self.end_capture())
+
+    private read_fraction(*self) -> bool
+        if !self.read_char(".") then return false
+        if !self.read_digit() then self.expected("digit")
+
+        while self.read_digit() do ()
+        true
+
+    private read_exponent(*self) -> bool
+        if !self.read_char("e") && !self.read_char("E") then return false
+        if !self.read_char("+") then self.read_char("-")
+        if !self.read_digit() then self.expected("digit")
+
+        while self.read_digit() do ()
+        true
+
+    private read_char(*self, ch: string) -> bool
+        if self.current != ch then return false
+        self.read()
+        true
+
+    private read_digit(*self) -> bool
+        if !self.is_digit() then return false
+        self.read()
+        true
+
+    private skip_white_space(*self)
+        while self.is_white_space() do self.read()
+
+    private read(*self)
+        if self.current == "\n"
+            self.line += 1
+            self.column = 0
+
+        self.index += 1
+        self.current = if self.index < int(self.input.len) then self.input[self.index..<self.index + 1] else ""
+
+    private start_capture(*self) = self.capture_start = self.index
+
+    private pause_capture(*self)
+        val end = if self.current.len == 0 then self.index else self.index - 1
+
+        self.capture_buffer = f"${self.capture_buffer}${self.input[self.capture_start..end]}"
+        self.capture_start = -1
+
+    private end_capture(*self) -> string
+        val end = if self.current.len == 0 then self.index else self.index - 1
+        var captured = ""
+
+        if self.capture_buffer.len == 0
+            captured = self.input[self.capture_start..end]
+        else
+            self.capture_buffer = f"${self.capture_buffer}${self.input[self.capture_start..end]}"
+            captured = self.capture_buffer
+            self.capture_buffer = ""
+
+        self.capture_start = -1
+        captured
+
+    private expected(*self, expected: string) -> never
+        if self.is_end_of_text() then self.error("Unexpected end of input")
+        self.error(f"Expected $expected")
+
+    private error(*self, message: string) -> never =
+        panic(f"$message at ${self.line}:${self.column - 1} (offset ${self.index})")
+
+    private is_white_space(*self) -> bool =
+        self.current == " " || self.current == "\t" || self.current == "\n" || self.current == "\r"
+
+    private is_digit(*self) -> bool
+        self.current match
+            "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" -> true
+            _ -> false
+
+    private is_end_of_text(*self) -> bool = self.current.len == 0
+end JsonPureStringParser
+
+json_pure_string_parser(string: string) -> JsonPureStringParser = JsonPureStringParser(string, -1, 1, 0, "", "", -1)
+
+struct Json
+end Json
+
+impl Benchmark for Json
+    type Result = &JsonValue
+
+    benchmark(*self) -> &JsonValue
+        var parser = json_pure_string_parser(rap_benchmark_minified)
+        parser.parse()
+
+    verify_result(*self, result: &JsonValue) -> bool
+        if !result.is_object() then return false
+
+        val result_object = result.as_object()
+
+        if !result_object.get("head").unwrap().is_object() then return false
+        if !result_object.get("operations").unwrap().is_array() then return false
+
+        result_object.get("operations").unwrap().as_array().size() == 156

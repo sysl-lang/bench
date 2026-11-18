@@ -12,13 +12,10 @@ raw, stamp = sys.argv[1], sys.argv[2]
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 programs = ["nbody", "spectralnorm", "fannkuchredux", "binarytrees",
-            "mandelbrot", "fasta", "knucleotide", "revcomp"]
-systems = ["c", "rust", "cpp", "zig", "d", "odin", "c3", "ada", "nim", "swift", "sysl-idiomatic", "sysl-tuned"]
+            "mandelbrot", "fasta", "knucleotide", "revcomp", "regexredux", "pidigits"]
+systems = ["c", "c-tuned", "rust", "rust-tuned", "cpp", "zig", "d", "odin", "c3", "ada", "fortran", "nim", "swift", "sysl-idiomatic", "sysl-tuned"]
 managed = ["go", "java", "eiffel", "eiffel-contracts", "julia"]
 columns = systems + managed
-
-# regex-redux, which reads the same fasta file as k-nucleotide and reverse-complement.
-programs.append("regexredux")
 
 
 def run(cmd):
@@ -55,15 +52,18 @@ toolchains = {
            "llvm": run(["c3c", "--version"]).split("LLVM version:")[1].split("\n")[0].strip()},
     "ada": {"version": first_line(run(["gnat", "--version"])),
             "backend": "GCC's own back end (not LLVM)"},
+    "fortran": {"version": first_line(run(["gfortran", "--version"])),
+                "backend": "GCC's own back end (not LLVM); fortran-stdlib "
+                           + run(["pkg-config", "--modversion", "fortran_stdlib"])},
     "java": {"version": first_line(run(["java", "--version"]))},
     "eiffel": {"version": first_line(run(["ec", "-version"])), "llvm": clang_llvm},
     "hyperfine": {"version": first_line(run(["hyperfine", "--version"]))},
 }
 flags = {
     "sysl": "sysl build --release -O3 --cpu native",
-    "c": "clang -std=gnu17 -O3 -march=native",
+    "c": "clang -std=gnu17 -O3 -march=native (c-tuned the same)",
     "cpp": "clang++ -std=c++20 -O3 -march=native",
-    "rust": "rustc --edition 2021 -C opt-level=3 -C target-cpu=native",
+    "rust": "rustc --edition 2021 -C opt-level=3 -C target-cpu=native (rust-tuned the same)",
     "swift": "swiftc -O",
     "zig": "zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded",
     "nim": "nim c -d:danger --opt:speed --mm:orc --cc:clang --passC:-march=native --threads:off",
@@ -75,6 +75,9 @@ flags = {
     "ada": "gnatmake -O3 -gnatp -march=native (-gnatp suppresses every run-time check, "
            "bounds checks included, as C's -O3 has none; GNAT is GCC's Ada front end and "
            "uses GCC's back end)",
+    "fortran": "gfortran -O3 -march=native (no -ffast-math: IEEE semantics as in C; no bounds "
+               "checks, which gfortran adds only under -fcheck=bounds); knucleotide links "
+               "fortran-stdlib's hash map",
     "java": "javac, then java -cp (default JIT flags; bounds checks stay on; JVM startup and JIT "
             "warm-up are inside every timed run, as on the Benchmarks Game)",
     "eiffel": "ec -finalize -c_compile, ECF target `release`: every assertion off (precondition, "

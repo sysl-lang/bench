@@ -1,0 +1,47 @@
+struct Queens
+    free_maxs: []bool
+    free_rows: []bool
+    free_mins: []bool
+    queen_rows: []int
+
+    private queens(*self) -> bool
+        self.free_rows = [true; 8]
+        self.free_maxs = [true; 16]
+        self.free_mins = [true; 16]
+        self.queen_rows = [-1; 8]
+
+        self.place_queen(0)
+
+    private place_queen(*self, c: int) -> bool
+        for r in 0..<8
+            if self.get_row_column(r, c)
+                self.queen_rows[r] = c
+                self.set_row_column(r, c, false)
+
+                if c == 7 then return true
+                if self.place_queen(c + 1) then return true
+
+                self.set_row_column(r, c, true)
+
+        false
+
+    private get_row_column(*self, r: int, c: int) -> bool =
+        self.free_rows[r] && self.free_maxs[c + r] && self.free_mins[c - r + 7]
+
+    private set_row_column(*self, r: int, c: int, v: bool)
+        self.free_rows[r] = v
+        self.free_maxs[c + r] = v
+        self.free_mins[c - r + 7] = v
+end Queens
+
+impl Benchmark for Queens
+    type Result = bool
+
+    benchmark(*self) -> bool
+        var result = true
+
+        for _ in 0..<10 do result = result && self.queens()
+
+        result
+
+    verify_result(*self, result: bool) -> bool = result

@@ -4,8 +4,8 @@ ROOT=${0:A:h:h}
 export PATH=$HOME/.local/gnat-16.1.0/bin:/Users/work/.cargo/bin:/opt/homebrew/opt/openjdk/bin:/opt/homebrew/opt/eiffelstudio/bin:/opt/homebrew/bin:$PATH
 
 PROGRAMS=(nbody spectralnorm fannkuchredux binarytrees mandelbrot fasta knucleotide revcomp)
-LANGS=(sysl-idiomatic sysl-tuned c rust cpp swift zig nim julia go d odin c3 ada java eiffel eiffel-contracts)
-SYSTEMS=(c rust cpp zig d odin c3 ada nim swift sysl-idiomatic sysl-tuned)
+LANGS=(sysl-idiomatic sysl-tuned c c-tuned rust rust-tuned cpp swift zig nim julia go d odin c3 ada fortran java eiffel eiffel-contracts)
+SYSTEMS=(c c-tuned rust rust-tuned cpp zig d odin c3 ada fortran nim swift sysl-idiomatic sysl-tuned)
 MANAGED=(go java eiffel eiffel-contracts julia)
 
 # Size handed to each program as its one argument. A program whose size is -
@@ -21,6 +21,14 @@ SMALL=(nbody 1000 spectralnorm 100 fannkuchredux 7 binarytrees 10
 PROGRAMS+=(regexredux)
 BIG+=(regexredux -)
 SMALL+=(regexredux -)
+
+# pidigits: the Benchmarks Game's 10000 digits, and its 27-digit reference output.
+PROGRAMS+=(pidigits)
+BIG[pidigits]=10000
+SMALL[pidigits]=27
+
+# BENCH_PROGRAMS names a subset to build or verify (default: every program).
+(( ${+BENCH_PROGRAMS} )) && PROGRAMS=(${=BENCH_PROGRAMS})
 
 # The fasta size whose output is the standard input of knucleotide, revcomp and regexredux.
 INPUT_N=10000000

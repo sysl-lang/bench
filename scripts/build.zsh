@@ -10,24 +10,24 @@ cd $ROOT
 # for the knucleotide/revcomp input, so name it too when it is not already built.
 (( $# )) && LANGS=($@)
 
-# regex-redux's C, C++, Rust, Zig and sysl-tuned programs link PCRE2 (C++ also includes Boost). Homebrew's
-# copy is named outright: macOS has a libpcre2-8 of its own, built without the JIT. Answers 1 for
-# a language that builds as usual, so the case below takes it.
+# pidigits computes with GMP (README, the rules): its directories from pkg-config, and each compiler's
+# spelling of them. The Eiffel .ecf reads the two exported variables. No other program gets these.
+export GMP_INCLUDE=$(pkg-config --variable=includedir gmp) GMP_LIB=$(pkg-config --variable=libdir gmp)
+typeset -A GMP_FLAGS
+GMP_FLAGS=(c "-I$GMP_INCLUDE -L$GMP_LIB -lgmp" c-tuned "-I$GMP_INCLUDE -L$GMP_LIB -lgmp"
+           cpp "-I$GMP_INCLUDE -L$GMP_LIB -lgmp" rust "-L $GMP_LIB" rust-tuned "-L $GMP_LIB"
+           swift "-I programs/pidigits/swift -Xcc -I$GMP_INCLUDE -L $GMP_LIB" zig "-L$GMP_LIB -lgmp"
+           nim "--passL:-L$GMP_LIB" d "-L-L$GMP_LIB" odin "-extra-linker-flags:-L$GMP_LIB"
+           ada "-largs -L$GMP_LIB" fortran "-L$GMP_LIB -lgmp" c3 "-L $GMP_LIB -l gmp")
+
+# regex-redux's C, C++, Rust, Zig, Fortran and sysl-tuned programs link PCRE2 (C++ also includes Boost).
+# Homebrew's copy is named outright: macOS has a libpcre2-8 of its own, built without the JIT.
 PCRE2=/opt/homebrew/opt/pcre2
-build_regexredux() {  # <language> <dir> <out>
-  local lang=$1 dir=$2 out=$3
-  case $lang in
-    c|c-tuned) clang -std=gnu17 -O3 -march=native -w -I$PCRE2/include $dir/regexredux.c -o $out -L$PCRE2/lib -lpcre2-8 ;;
-    cpp)       clang++ -std=c++20 -O3 -march=native -w -I$PCRE2/include -I/opt/homebrew/opt/boost/include $dir/regexredux.cpp -o $out -L$PCRE2/lib -lpcre2-8 ;;
-    rust|rust-tuned)
-               rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native -L $PCRE2/lib $dir/regexredux.rs -o $out ;;
-    sysl-tuned)
-               LIBRARY_PATH=$PCRE2/lib sysl build --release -O3 --cpu native -o $out $dir/regexredux.sysl ;;
-    zig)       (cd $dir && zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded -lc -L$PCRE2/lib -lpcre2-8 --cache-dir $BUILD/.zig-cache --global-cache-dir $BUILD/.zig-global -femit-bin=$out regexredux.zig) ;;
-    *)         return 1 ;;
-  esac >$out.log 2>&1
-  return 0
-}
+typeset -A PCRE2_FLAGS
+PCRE2_FLAGS=(c "-I$PCRE2/include -L$PCRE2/lib -lpcre2-8" c-tuned "-I$PCRE2/include -L$PCRE2/lib -lpcre2-8"
+             cpp "-I$PCRE2/include -I/opt/homebrew/opt/boost/include -L$PCRE2/lib -lpcre2-8"
+             rust "-L $PCRE2/lib" rust-tuned "-L $PCRE2/lib" zig "-L$PCRE2/lib -lpcre2-8"
+             fortran "-L$PCRE2/lib -lpcre2-8" sysl-tuned "--link-path $PCRE2/lib")
 
 failed=0
 for prog in $PROGRAMS; do
@@ -37,23 +37,27 @@ for prog in $PROGRAMS; do
     out=$BUILD/$prog/$lang
     [[ $lang == eiffel-contracts ]] && dir=programs/$prog/eiffel   # the same source, built with assertions on
     rm -f $out
-    if [[ $prog == regexredux ]] && build_regexredux $lang $dir $out; then
-      :
-    else
+    libs=()
+    [[ $prog == pidigits ]] && libs=(${(z)GMP_FLAGS[$lang]})
+    [[ $prog == regexredux ]] && libs=(${(z)PCRE2_FLAGS[$lang]})
     case $lang in
-      sysl-*) sysl build --release -O3 --cpu native -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
-      c)      clang -std=gnu17 -O3 -march=native -w -I$dir $dir/$prog.c -o $out -lm >$out.log 2>&1 ;;
-      cpp)    clang++ -std=c++20 -O3 -march=native -w $dir/$prog.cpp -o $out >$out.log 2>&1 ;;
-      rust)   rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native $dir/$prog.rs -o $out >$out.log 2>&1 ;;
-      swift)  swiftc -O $dir/$prog.swift -o $out >$out.log 2>&1 ;;
-      zig)    (cd $dir && zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded -lc --cache-dir $BUILD/.zig-cache --global-cache-dir $BUILD/.zig-global -femit-bin=$out $prog.zig) >$out.log 2>&1 ;;
-      nim)    nim c -d:danger --opt:speed --mm:orc --cc:clang --passC:-march=native --threads:off --hints:off --warnings:off --nimcache:$BUILD/.nimcache/$prog -o:$out $dir/$prog.nim >$out.log 2>&1 ;;
+      sysl-*) sysl build --release -O3 --cpu native $libs -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
+      c|c-tuned)
+              clang -std=gnu17 -O3 -march=native -w -I$dir $dir/$prog.c -o $out -lm $libs >$out.log 2>&1 ;;
+      cpp)    clang++ -std=c++20 -O3 -march=native -w $dir/$prog.cpp -o $out $libs >$out.log 2>&1 ;;
+      rust|rust-tuned)
+              rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native $dir/$prog.rs -o $out $libs >$out.log 2>&1 ;;
+      swift)  swiftc -O $dir/$prog.swift -o $out $libs >$out.log 2>&1 ;;
+      zig)    (cd $dir && zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded -lc --cache-dir $BUILD/.zig-cache --global-cache-dir $BUILD/.zig-global -femit-bin=$out $libs $prog.zig) >$out.log 2>&1 ;;
+      nim)    nim c -d:danger --opt:speed --mm:orc --cc:clang --passC:-march=native --threads:off --hints:off --warnings:off --nimcache:$BUILD/.nimcache/$prog -o:$out $libs $dir/$prog.nim >$out.log 2>&1 ;;
       go)     go build -o $out $dir/$prog.go >$out.log 2>&1 ;;
-      d)      ldc2 -O3 -release -mcpu=native -of=$out -od=$BUILD/.dobj/$prog $dir/$prog.d >$out.log 2>&1 ;;
-      odin)   odin build $dir/$prog.odin -file -o:speed -microarch:native -out:$out >$out.log 2>&1 ;;
+      d)      ldc2 -O3 -release -mcpu=native -of=$out -od=$BUILD/.dobj/$prog $libs $dir/$prog.d >$out.log 2>&1 ;;
+      odin)   odin build $dir/$prog.odin -file -o:speed -microarch:native -out:$out $libs >$out.log 2>&1 ;;
       ada)    mkdir -p $BUILD/.adaobj/$prog
-              gnatmake -q -O3 -gnatp -march=native -D $BUILD/.adaobj/$prog -o $out $dir/$prog.adb >$out.log 2>&1 ;;
-      c3)     c3c compile -O3 --obj-out $BUILD/.c3obj/$prog -o $out $dir/$prog.c3 >$out.log 2>&1 ;;
+              gnatmake -q -O3 -gnatp -march=native -D $BUILD/.adaobj/$prog -o $out $dir/$prog.adb $libs >$out.log 2>&1 ;;
+      fortran) mkdir -p $BUILD/.fmod/$prog   # fortran-stdlib's hash map, which knucleotide uses
+              gfortran -O3 -march=native -J $BUILD/.fmod/$prog -I$(pkg-config --variable=moduledir fortran_stdlib) -o $out $dir/$prog.f90 -L$(pkg-config --variable=libdir fortran_stdlib) -lfortran_stdlib_hashmaps -lfortran_stdlib_hash -lfortran_stdlib_core $libs >$out.log 2>&1 ;;
+      c3)     c3c compile -O3 --obj-out $BUILD/.c3obj/$prog -o $out $libs $dir/$prog.c3 >$out.log 2>&1 ;;
       eiffel|eiffel-contracts)
               # EiffelStudio's finalized (optimised) build. The .ecf has a `release` target with
               # every assertion off and a `contracts` target with them all on; both inline
@@ -75,7 +79,6 @@ for prog in $PROGRAMS; do
               printf '#!/bin/sh\nexec julia -O3 --check-bounds=no --startup-file=no %s "$@"\n' $ROOT/$dir/$prog.jl > $out
               chmod +x $out ;;
     esac
-    fi
     if [[ -x $out && -s $out ]]; then
       print "built  $prog/$lang"
     else
@@ -89,7 +92,7 @@ mkdir -p $BUILD/inputs
 if [[ -x $(exe fasta c) ]]; then
   $(exe fasta c) $INPUT_N > $INPUT
   print "input  $INPUT ($(wc -c < $INPUT) bytes)"
-else
+elif (( ${PROGRAMS[(Ie)knucleotide]} || ${PROGRAMS[(Ie)revcomp]} )); then
   failed=1
 fi
 

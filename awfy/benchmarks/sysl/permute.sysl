@@ -1,0 +1,34 @@
+struct Permute
+    count: int
+    v: []int
+
+    private permute(*self, n: int)
+        self.count += 1
+
+        if n != 0
+            val n1 = n - 1
+
+            self.permute(n1)
+
+            for var i = n1; i >= 0; i -= 1
+                self.swap(n1, i)
+                self.permute(n1)
+                self.swap(n1, i)
+
+    private swap(*self, i: int, j: int)
+        val tmp = self.v[i]
+
+        self.v[i] = self.v[j]
+        self.v[j] = tmp
+end Permute
+
+impl Benchmark for Permute
+    type Result = int
+
+    benchmark(*self) -> int
+        self.count = 0
+        self.v = [0; 6]
+        self.permute(6)
+        self.count
+
+    verify_result(*self, result: int) -> bool = result == 8660

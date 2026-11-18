@@ -1,0 +1,6 @@
+// The C module the Swift program imports as `gmp`, as the Benchmarks Game builds it.
+module gmp [system] {
+  header "gmp-shim.h"
+  link "gmp"
+  export *
+}

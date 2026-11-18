@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<system xmlns="http://www.eiffel.com/developers/xml/configuration-1-22-0" name="pidigits" uuid="6f2c1b0e-000a-4a1b-9c10-00000000000a">
+	<target name="release">
+		<root class="PIDIGITS" feature="make"/>
+		<file_rule>
+			<exclude>/EIFGENs$</exclude>
+		</file_rule>
+		<option warning="none" manifest_array_type="mismatch_warning">
+			<assertions precondition="false" postcondition="false" check="false" invariant="false" loop="false" supplier_precondition="false"/>
+		</option>
+		<setting name="console_application" value="true"/>
+		<setting name="executable_name" value="pidigits"/>
+		<setting name="exception_trace" value="false"/>
+		<setting name="inlining" value="true"/>
+		<setting name="inlining_size" value="100"/>
+		<!-- GMP's header and library directories, which build.zsh exports from pkg-config gmp. -->
+		<external_include location="$(GMP_INCLUDE)"/>
+		<external_linker_flag value="-L$(GMP_LIB)"/>
+		<external_library location="-lgmp"/>
+		<capability>
+			<concurrency support="none"/>
+		</capability>
+		<library name="base" location="$ISE_LIBRARY/library/base/base.ecf"/>
+		<cluster name="app" location="."/>
+	</target>
+	<target name="contracts" extends="release">
+		<option warning="none" manifest_array_type="mismatch_warning">
+			<assertions precondition="true" postcondition="true" check="true" invariant="true" loop="true" supplier_precondition="true"/>
+		</option>
+	</target>
+</system>

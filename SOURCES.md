@@ -27,6 +27,7 @@ included, must do (README rule 3).
 | k-nucleotide | every k-mer counted into a hash table keyed by its 2k-bit code |
 | reverse-complement | each record read whole, complemented through a table, reversed and re-wrapped at 60 |
 | regex-redux | headers and newlines removed by a regex, nine alternation patterns counted, five substitutions applied in turn, each by a regular-expression library (see below) |
+| pidigits | Mr Ledrug's form of Gibbons' unbounded spigot: per term `acc = (acc + 2num)(2k+1)`, `den *= 2k+1`, `num *= k`; a digit when `(3num + acc)/den` and `(4num + acc)/den` agree, then `acc = 10(acc - d·den)`, `num *= 10` |
 
 ## Programs
 
@@ -152,7 +153,7 @@ program it ports, so **the licence is the Benchmarks Game's BSD-3-Clause** as fo
 ### regex-redux
 
 regex-redux measures a regular-expression library more than a compiler, and the Benchmarks Game lets
-each language pick its library ("Contentious. Different libraries."). The rule here (README rule 3):
+each language pick its library ("Contentious. Different libraries."). The rule here (README, under the rules):
 **the language's standard regex library, unless the Game's entries for that language use a faster
 one, in which case that one, in the form of the Game's fastest entry, made single-threaded.** The
 Game's fastest entries all use PCRE2 with its JIT, so most languages here do. Every program reads the
@@ -164,7 +165,7 @@ the input, `regexredux-input1000.txt`, is the same file as `knucleotide.in`).
 **PCRE2 is Homebrew's** (10.49, built with the JIT). macOS has a `/usr/lib/libpcre2-8` of its own,
 built without the JIT; a program that finds that one either fails (`pcre2_jit_compile` answers
 `-45`, "bad JIT option") or silently runs PCRE2's interpreter, so every build and loader below names
-Homebrew's copy outright.
+Homebrew's copy outright (build.zsh's `PCRE2_FLAGS`).
 
 | language | archive file | library | changes |
 |---|---|---|---|
@@ -176,12 +177,80 @@ Homebrew's copy outright.
 | Java | `regexredux.java-2.java` (the JVM form of the fastest Java, `graalvmaot-4`) | PCRE2, JIT, through `java.lang.foreign` | the jextract-generated `jextract_pcre2.pcre2_h` (not in the archive) replaced by a nested class of hand-written downcalls to the same seven functions; the executor's tasks called in turn. Run as every Java program here, on the JVM, so the time includes startup and JIT warm-up. The JVM warns on stderr that a restricted method was called; it does not affect the output |
 | Julia | `regexredux.julia-5.julia` (the fastest Julia) | Base's PCRE2 (Julia ships it, JIT on) | the `Threads.@spawn` around the substitutions and its `wait` removed |
 | Nim | none (not in the archive) | standard `std/re`, which is PCRE2 with the JIT | written for this suite. `std/re` opens `libpcre2-8.0.dylib` by name at run time, which finds macOS's JIT-less copy; `regexredux.nim.cfg` beside the source overrides that `dynlib` and links Homebrew's |
+| Fortran | `regexredux.ifc` (the Game's only Fortran, a translation of `gcc-5`) | PCRE2, JIT, through `bind(C)` interfaces | built with gfortran and no `-fopenmp`, so its `!$omp` directives are comments and it runs on one thread. The `PCRE2_SIZE` arguments of `pcre2_compile` and `pcre2_jit_match` declared `integer(c_size_t)` where the archive passes `c_int`, and standard input opened as `/dev/stdin` because gfortran cannot reopen the preconnected unit for stream access |
 | Zig | none | PCRE2, JIT | Zig has no regex library: **a port of the C program** above to Zig, same calls |
 | D | none | standard `std.regex`, every pattern compiled to native code at compile time with `ctRegex` | written for this suite |
 | Odin | none | standard `core:text/regex` (compiled to its own VM), walked with its match iterator | written for this suite. `.` matches a newline in Odin's regex, so the header pattern is spelled `>[^\n]*\n\|\n` |
 | C3 | none | standard `std::encoding::experimental::regex` (POSIX ERE, musl's TNFA matcher) | written for this suite. The header pattern is compiled with `NEWLINE`, so `.` stops at a newline as in Perl |
 | Ada | `regexredux.gnat-5.gnat` passed over | GNAT's `GNAT.Regpat` | written for this suite. **The Game's only working Ada entry (`gnat-5`) was not adapted**: it is not a regex program — it hand-translates each pattern into GNAT's SPITBOL pattern combinators (`BreakX`, `Any`, `Break`) — and it is five compilation units built on Ada tasks. `gnat-6` (PCRE, tasks) fails the Game's output check. A newline in the pattern is written `\n`, because `GNAT.Regpat.Compile` refuses a literal one ("junk on end") |
 | Eiffel | none | Gobo's `RX_PCRE_REGULAR_EXPRESSION` (a PCRE-syntax matcher written in Eiffel), which ships with EiffelStudio | written for this suite; `regexredux.ecf` adds `$ISE_LIBRARY/library/gobo/gobo_regexp.ecf`. EiffelStudio's own PCRE binding is in its `unstable` tree and was not used. **It does not finish at the timed size**: the substitutions from `<[^>]*>` on hold memory in proportion to the run of text a `[^…]*` crosses (1.87 GB at the 10 MB input with a full collection after every step, 70 MB through the first two), so the 100 MB input is killed for memory after printing the nine counts. It verifies at the small size and its 10 MB output matches C's |
+
+### Fortran
+
+Fortran's programs start from the archive's Fortran entries (`*.ifc`, written for Intel Fortran; BSD-3,
+headers kept), compiled with gfortran (GCC 16.2). Where the archive has several entries, the start is the
+single-threaded one that is the C program's algorithm; OpenMP entries (`fannkuchredux.ifc-3`,
+`mandelbrot.ifc-4`/`-6`/`-7`, `spectralnorm.ifc-3`, `binarytrees.ifc-2`) were passed over or had their
+directives removed. `fannkuchredux.ifc-3` was also passed over because it caches blocks of permutations
+and composes them, which is not the fixed algorithm. Every program reads its argument with
+`get_command_argument`. LLVM `flang` 23 built the same sources as a check: it was faster on mandelbrot,
+nbody and fasta and over four times slower on binarytrees, slower overall, and cannot use the gfortran-built
+stdlib, so the column is gfortran.
+
+| program | Fortran archive file | changes |
+|---|---|---|
+| nbody | `nbody.ifc-6.ifc` | the single-precision reciprocal square root with one Newton step replaced by the C program's `dt / (d2 * sqrt(d2))` in double precision; the argument buffer widened to 12 characters |
+| spectralnorm | `spectralnorm.ifc-2.ifc` | `MultiplyAv`, `MultiplyAtv` and `MultiplyAtAv` are subroutines writing into preallocated arrays, where they were functions returning a fresh array, and each row is summed in a scalar |
+| fannkuchredux | `fannkuchredux.ifc` | unchanged |
+| binarytrees | `binarytrees.ifc` | `NewTreeNode` takes its children as pointer dummies and points the new node at them, where it passed possibly null pointers to non-pointer `target` dummies and copied a structure constructor (invalid when a child is null). A node per `allocate`, freed by `deallocate` as `ItemCheck` walks it, as in the archive |
+| mandelbrot | `mandelbrot.ifc-6.ifc` | rewritten around the archive's idea (a vector of pixels iterated together until all escape): OpenMP removed; eight pixels, one output byte, per vector; the C program's coordinates `2*x/w - 1.5` and its `<= 4` test, which `NaN` fails; the image written in one unformatted stream write to `/dev/stdout` instead of a formatted `a1` per byte |
+| fasta | `fasta.ifc-4.ifc` | double precision where the archive used `real` (the C program's arithmetic, so the output matches at the timed size); the C program's lookup, counting the cumulative probabilities below the random value; output lines gathered in a 64 KB buffer written by unformatted stream writes to `/dev/stdout`, where the archive called C's `puts` per line |
+| knucleotide | none | **written for this suite after the C program** (the archive's `knucleotide.ifc` is a comment that there is no Fortran library hash table): see below |
+| revcomp | `revcomp.ifc` | rewritten in the archive's shape (the whole input read, each record complemented through a table into a buffer from its end, re-wrapped at 60): input read with POSIX `read` through `ISO_C_BINDING` (below), output through an unformatted stream on `/dev/stdout` |
+
+- **Reading standard input.** fasta-derived input of unknown length cannot be read in blocks by a
+  conforming Fortran program: an end of file during a `READ` leaves every input item undefined, so the
+  last, partial block is lost (gfortran happens to keep it; flang drops it). Line-at-a-time formatted
+  reads are conforming but made revcomp five times slower than C, which is Fortran's formatted I/O
+  library rather than the algorithm. revcomp and knucleotide therefore call POSIX `read(2)` through
+  `ISO_C_BINDING`, as Ada's programs use `GNAT.OS_Lib`.
+- **knucleotide** counts into the `open_hashmap_type` of [fortran-lang
+  stdlib](https://stdlib.fortran-lang.org) 0.8.1 (`brew install fortran-stdlib`, MIT licence), keyed by
+  the 2k-bit code as eight bytes, with the C program's `key xor key >> 7` as the hasher (README rule 3:
+  a custom hasher is allowed). Fortran has no hash table in the language or its ISO library, and stdlib
+  is the community's de facto standard library, so this is the analogue of the C program's klib
+  `khash.h`. The map stores an index into parallel key and count arrays, because its values are `class(*)`;
+  each lookup allocates and frees the key's copy and the value it returns, which is where the time goes
+  (about 16 times the C program). The at most sixteen frequency entries are ordered by a selection sort,
+  and percentages are divided in single precision, as in the C program.
+
+### pidigits
+
+pidigits computes with a big-integer library (README, the rules): the language's standard one where
+it has one, otherwise GMP 6.3.0 (`brew install gmp`, LGPL), found with `pkg-config gmp` by
+build.zsh. Every version is the reference algorithm above; the archive's `pidigits.gcc-2` (the
+`lua-5` arrangement, two numerators and no `acc`), `pidigits.java` (composes 2x2 matrices of
+`BigInteger`) and `pidigits.gpp-4` (`gmpxx` temporaries) do different work and were passed over.
+Several archive entries print no padded last line when the count is not a multiple of ten (the
+27-digit reference output has one); those gained the C++ entry's padding, noted as "padding".
+
+| language | library | archive file | changes |
+|---|---|---|---|
+| C | GMP | `pidigits.gcc` | padding |
+| C++ | GMP (C API) | `pidigits.gpp-5.gpp` | `using ulong = unsigned long` (a glibc name macOS lacks) |
+| Rust | GMP (`#[link]` FFI, no crate) | `pidigits.rust-3.rust` | unchanged. `pidigits.rust-4` uses the `rug` crate, which the bench's crate-free `rustc` build cannot take; `-3` binds the same library directly |
+| Swift | GMP (`import gmp`) | `pidigits.swift-2.swift` | unchanged; the `gmp` module is `module.modulemap` and `gmp-shim.h` beside it |
+| Go | `math/big` | `pidigits.go-7.go` | unchanged. The archive's fastest Go entries (`-3`, `-4`) bind GMP through cgo; Go has a standard big integer, so it uses that |
+| Java | `java.math.BigInteger` | `pidigits.java-3.java` | the archive program calls GMP through a JNI wrapper library; its operations rewritten as `BigInteger` ones, the structure and output buffer kept; padding |
+| Julia | `BigInt` (GMP inside) | `pidigits.julia-2.julia` | the padded last line printed `\t<i>` where it should print `\t:<n>` |
+| Ada | GMP (`pragma Import`) | `pidigits.gnat-2.gnat` | `mpz_addmul_ui`/`mpz_submul_ui` take `unsigned_long` (the archive passed a 32-bit `unsigned` for a C `unsigned long`); `printf` imported as `C_Variadic_1`, since arm64 macOS passes variadic arguments on the stack |
+| Fortran | GMP (`bind(C)`) | `pidigits.ifc-4.ifc` | unchanged |
+| Zig, Nim, D, Odin, C3 | GMP (extern declarations of the `__gmpz_*` symbols) | none | **ports of the C program, written for this suite**; output through C stdio (Zig, D, C3), `stdout` (Nim) or a `bufio` writer (Odin) |
+| Eiffel | GMP (`C inline` externals over `gmp.h`) | none | **a port of the C program, written for this suite**: each `mpz_t` a `malloc`ed block held as a `POINTER`; preconditions on the digit and the term, a loop invariant on the count. The `.ecf` names GMP's directories through `$GMP_INCLUDE` and `$GMP_LIB`, which build.zsh exports |
+| c-tuned, rust-tuned | GMP | `pidigits.gcc`, `pidigits.rust-3.rust` | copies of the plain programs. One division per candidate digit (`mpz_tdiv_qr`: the 4num digit agrees exactly when the remainder plus `num` is below `den`), with C's output written in one call, measured slower than the plain programs' two divisions (0.260 s against 0.244 s for C, 0.261 against 0.243 for Rust) |
+| sysl-idiomatic | `sysl.math.bigint` | none | written for this suite: operators between `BigInt`s, the `_long` family (`mul_long`) for a small operand |
+| sysl-tuned | `sysl.math.bigint` | none | as idiomatic, with the tuned columns' one division (`div_rem`, both halves at once); `BigInt` has no in-place arithmetic, so that is the whole difference |
+| `sysl-tuned-gmp` (not built) | GMP through [sysl-lang/gmp](https://github.com/sysl-lang/gmp) 0.1.0 | none | the tuned spigot on the package's in-place `Int` methods and its C layer's `mpz_tdiv_qr`; kept beside the column for the measurement of `BigInt` against GMP, and not in LANGS |
 
 ## Implementation variants of one algorithm
 
@@ -192,6 +261,31 @@ They do the same operations on the same data as C and are kept; the table's rati
 and C++ are mostly this. The fannkuch programs generate the permutations in the same order by different
 rotation schemes (C: Ledrug's; C++: Branimir Maksimovic's; Rust: a factorial-number scheme; Swift and
 sysl: Rex Kerr's count array).
+
+## The tuned C and Rust columns
+
+`c-tuned` and `rust-tuned` follow `sysl-tuned`'s rules (README): single-threaded, the reference
+algorithm above, any speed technique the language offers. Rust uses std only; its SIMD is
+`core::arch::aarch64` (NEON), since `std::simd` is unstable. Each file keeps the header of the plain
+program it starts from (BSD-3) and says in its own header what it changes. The fastest Benchmarks Game
+entries were surveyed first: every C (`*.gcc`) and Rust (`*.rust`) entry of the eight programs that
+builds on arm64 without crates was built, run single-threaded (OpenMP pragmas left inactive) and
+verified; the techniques below are theirs where they apply, ported from SSE/AVX to NEON. Entries that
+change the algorithm were not used: `fasta.gcc-3`'s symbol table indexed by the generator state (a
+direct-indexed array), the arenas of `binarytrees.rust`-`rust-5`, and the custom hash tables of the
+k-nucleotide entries.
+
+| program | C and Rust tuned: what they do |
+|---|---|
+| nbody | C: the bodies as fixed arrays, one per field; each step computes the ten pairwise differences into fixed arrays, then distances and magnitudes as NEON two-lane vectors (five `fsqrt` and five `fdiv` instead of ten each), then the velocity updates. Rust: **a copy of the plain program** (`nbody.rust-2`), which already computes the pairwise differences and magnitudes in arrays: the same NEON form measured 0.950 s against its 0.867 s, and scalar or by-value variants 0.89–0.91 s. The fastest entries (`nbody.gcc-4`/`-5`/`-9`) use an approximate reciprocal square root refined by Newton steps; that replaces the per-pair sqrt and divide, so it is not used |
+| spectralnorm | eight columns per step in four NEON two-lane vectors, each denominator computed exactly in double from the column vector, four independent sums so the divides overlap (the form of `spectralnorm.gcc-7` and `rust-6`, whose SSE `div_pd` becomes NEON `fdiv`) |
+| fannkuchredux | the permutation is one 16-byte NEON register; a flip is one `TBL` through a reversal mask chosen at run time by the first element, the step to the next permutation one `TBL` through a rotation mask (the `pshufb` form of `fannkuchredux.gcc-4`, `gcc-6` and `rust-6`, ported to NEON); the same count-array order |
+| binarytrees | each tree checked and freed in one walk (count the node, walk its children, free it), where the plain programs walk twice; every node is still its own `malloc`/`Box` and its own free |
+| mandelbrot | two output bytes (sixteen pixels) per pass as eight independent NEON two-lane chains; the escape test every fifth iteration, as `sysl-tuned` does (an escaped pixel only grows, or overflows to inf/NaN, which fail `<= 4` too, so the image is the same); the image written in one call |
+| fasta | the generator step's remainder by Lemire's fastmod with the multiply-add folded in (one multiply-add and one high multiply per step on the critical path, the same state sequence); the cumulative-probability scan over the whole table, branch-free, against the least integer state exceeding each probability (computed once from the C program's double comparison, so every symbol is the reference's), four per NEON compare; output in large buffers |
+| k-nucleotide | khash (C) and std `HashMap` (Rust), as the plain programs, with the same hashes; 32-bit keys for k <= 16; each table sized once up front; input read whole and encoded in one pass |
+| revcomp | input read whole; each record's lines joined, then reverse-complemented sixteen bytes at a time from both ends (the complement table indexed by the low five bits with one two-register `TBL`, the reversal a `REV64` plus a swap of halves), re-wrapped at 60, written in one call |
+| regexredux | **copies of the plain programs**, which are already the Game's fastest entries (`gcc-5`, `rust-7`): PCRE2 with its JIT, matched with `pcre2_jit_match`. The work is the library's, and no faster regex library is in the Game's C or Rust entries |
 
 ## The two sysl forms
 
@@ -223,5 +317,5 @@ What each `sysl-tuned` program does differently from `sysl-idiomatic`:
   a Pike VM; `.` matches a newline there, so the header pattern is `>[^\n]*\n|\n`) and its
   `find_all` and `replace_all`. `sysl-tuned` is C's program: PCRE2 with the JIT, through nine `extern`
   declarations of the PCRE2 functions in the file itself, because the org's `pcre2` package binds
-  only the interpreter (`pcre2_match`) and allocates match data on every search. Its build sets
-  `LIBRARY_PATH` to Homebrew's PCRE2 so that `@link("pcre2-8")` does not find macOS's JIT-less copy.
+  only the interpreter (`pcre2_match`) and allocates match data on every search. Its build passes
+  `--link-path` to Homebrew's PCRE2 so that `@link("pcre2-8")` does not find macOS's JIT-less copy.
