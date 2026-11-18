@@ -11,7 +11,7 @@ traced to a cause in [FINDINGS.md](FINDINGS.md).
 A second suite, **[Are We Fast Yet](awfy/README.md)** (Marr, Daloze and Mössenböck, DLS 2016), lives
 in [`awfy/`](awfy/) with its own scripts and results: fourteen object-oriented benchmarks that every
 language writes with the same core language, collections and harness, timed against the suite's own
-C++ and Java ports.
+C++ port (its Java port is not run: rule 9 below).
 
 ## What it measures
 
@@ -58,62 +58,49 @@ names the origin of every file and says exactly what was changed.
    as the C program uses klib's `khash.h`.
 4. **Output is verified before anything is timed.** A wrong answer fails the run.
 5. **Release flags**: C and C++ `-O3 -march=native`; Rust `-C opt-level=3 -C target-cpu=native`; Swift
-   `-O`; Zig `-O ReleaseFast -mcpu=native`; Nim `-d:danger --opt:speed`; Go `go build` with default flags
-   (Go has no optimisation level); D (LDC) `-O3 -release -mcpu=native`; Odin `-o:speed -microarch:native`;
+   `-O`; Zig `-O ReleaseFast -mcpu=native`; Odin `-o:speed -microarch:native`;
    C3 `c3c compile -O3` (c3c has no native-CPU option on arm64); Ada (GNAT) `gnatmake -O3 -gnatp -march=native`;
    Fortran `gfortran -O3 -march=native` (IEEE semantics kept, as in C: no `-ffast-math`; gfortran
-   rather than LLVM's `flang`, which was slower overall and cannot use the gfortran-built stdlib); Java `javac` and `java` with default
-   flags (the JIT already targets the host CPU); Eiffel `ec -finalize -c_compile` (EiffelStudio's
-   optimised build with Eiffel-level inlining on, `inlining_size` 100, set in each .ecf; without it
-   every `ARRAY.item` is an out-of-line call with GC bookkeeping; no native-CPU option); sysl `--release -O3 --cpu native`.
-6. **Checks that remain.** Rust, Go, Odin and Java keep their bounds checks (`rust-tuned` drops them
-   where it reads through `get_unchecked` or raw-pointer NEON loads). C, C++, Zig ReleaseFast, Nim
-   `danger`, C3 `-O3` (c3c's unsafe mode, which turns off bounds checks and contracts), Ada `-gnatp`
+   rather than LLVM's `flang`, which was slower overall and cannot use the gfortran-built stdlib);
+   sysl `--release -O3 --cpu native`.
+6. **Checks that remain.** Rust and Odin keep their bounds checks (`rust-tuned` drops them
+   where it reads through `get_unchecked` or raw-pointer NEON loads). C, C++, Zig ReleaseFast,
+   C3 `-O3` (c3c's unsafe mode, which turns off bounds checks and contracts), Ada `-gnatp`
    (which suppresses every run-time check) and gfortran (which checks array bounds only under
-   `-fcheck=bounds`) have none, and D
-   with `-release` drops the bounds checks of `@system` code, which is what these D programs are. Eiffel's
-   array indices are checked by a precondition, so they are checked only where assertions are on.
-7. **Eiffel is timed twice.** `eiffel` is the finalized build with every assertion off, which is its release
-   mode; `eiffel-contracts` is the same source built with `precondition`, `postcondition`, `check`,
-   `invariant` and `loop` assertions all on. Each Eiffel program carries its contracts: preconditions on
-   index ranges and sizes, class invariants, and loop invariants and variants where the loop has one. The
-   second column measures what the contracts cost at run time.
-8. **Java's timing is the whole process**, JVM startup and JIT warm-up included, as in the Benchmarks Game:
-   `build/<program>/java` is a launcher script that runs `java -cp` on the compiled classes. Eiffel and
-   C3 compile to native executables.
-9. **No Julia.** Julia was timed up to 2026-11-16 and was removed on 2026-11-18. It is a JIT language
-   with a runtime: a whole-process time is mostly its start-up and compilation, and a warm-only
-   measurement is not comparable with the ahead-of-time languages, so neither number answered the
-   question this suite asks. Earlier results files keep their Julia column.
+   `-fcheck=bounds`) have none.
+7. **Every language compiles ahead of time to a native executable**, and the timing is the whole process.
+8. **Swift counts its references (ARC)**, as sysl does: its memory is freed deterministically, when the
+   last reference goes, with no collector running beside the program.
+9. **No garbage-collected language.** Every language here runs with no garbage collector at run time,
+   which is the model sysl competes in. Julia was timed up to 2026-11-16 and Go, Java, D, Eiffel and
+   Nim up to 2026-11-17; all were removed on 2026-11-18. Go, Java and Eiffel collect garbage by design;
+   D collects by default (its GC-free `-betterC` subset is not how its programs are written); Nim's
+   default memory manager, ORC, reference-counts but adds a cycle collector, which is a collector.
+   Julia is also a JIT language: a whole-process time is mostly its start-up and compilation, and a
+   warm-only measurement is not comparable with the ahead-of-time languages. Swift stays: ARC is
+   reference counting with no collector, the same model as sysl (item 8). Earlier results files keep
+   the columns of every removed language.
 
 **pidigits and regex-redux are the two programs that lean on a library**, as they do on the
-Benchmarks Game. pidigits' work is arbitrary-precision arithmetic. A language whose standard library has a big integer uses it (Go
-`math/big`, Java `BigInteger`, sysl `sysl.math.bigint`); every other language binds
+Benchmarks Game. pidigits' work is arbitrary-precision arithmetic. sysl uses its standard library's
+big integer (`sysl.math.bigint`); every other language binds
 [GMP](https://gmplib.org) 6.3.0 through its own C interop, as the Game's entries do (C, C++, Rust,
-Swift, Zig, Nim, D, Odin, C3, Ada, Fortran, Eiffel). Every version runs Mr Ledrug's form of Gibbons'
+Swift, Zig, Odin, C3, Ada, Fortran). Every version runs Mr Ledrug's form of Gibbons'
 spigot; SOURCES.md says which library each uses.
 
 regex-redux's work is a regular-expression library's: each language uses its standard one where it
 has one and nothing faster is in the Game's entries for it, otherwise the library those entries use.
-That is PCRE2 with its JIT for C, C++, Rust, Zig, Go, Java, Fortran and (as its standard library)
-Nim; `sysl-idiomatic` uses the standard `sysl.regex`, and `sysl-tuned` calls PCRE2 with its
-JIT as C does. SOURCES.md gives each language's choice and how its Game entry was adapted.
+That is PCRE2 with its JIT for C, C++, Rust, Zig and Fortran; `sysl-idiomatic` uses the standard
+`sysl.regex`, and `sysl-tuned` calls PCRE2 with its JIT as C does. SOURCES.md gives each language's
+choice and how its Game entry was adapted.
 
-## Groups
-
-The tables group the languages. **Systems**: c, c-tuned, rust, rust-tuned, cpp, zig, d, odin, c3, ada, fortran, nim, swift, sysl-idiomatic,
-sysl-tuned. **Managed**: go, java, eiffel, eiffel-contracts. The criterion: a systems language can run with no tracing GC and no
-required runtime, with deterministic destruction and control over layout (Swift via Embedded Swift, Nim
-via `--os:standalone`, D via `-betterC`); every program here runs in the language's normal hosted mode.
-The report gives the geometric mean of each group as well as overall.
+The report gives one geometric mean per language and one over every language.
 
 ## Layout
 
 ```
-programs/<name>/{sysl-idiomatic,sysl-tuned,c,c-tuned,rust,rust-tuned,cpp,swift,zig,nim,go,d,odin,c3,ada,fortran,java,eiffel}/   one source file per directory
-                   (Eiffel adds its .ecf project file, and a second class file where a program needs one;
-                   `eiffel-contracts` is built from the `eiffel` directory; Swift's pidigits adds
-                   the module map that makes GMP `import gmp`)
+programs/<name>/{sysl-idiomatic,sysl-tuned,c,c-tuned,rust,rust-tuned,cpp,swift,zig,odin,c3,ada,fortran}/   one source file per directory
+                   (Swift's pidigits adds the module map that makes GMP `import gmp`)
 expected/ref/      the Benchmarks Game's published output (and input) at a small size
 expected/<name>.sha256   sha256 of the output at the timed size, from the C program
 scripts/build.zsh  builds everything into build/ and generates the shared input
@@ -132,7 +119,7 @@ at `build/inputs/`.
 
 ## Running it
 
-Requires clang, rustc, swiftc, zig, nim, go, ldc2, odin, c3c, GNAT (`gnatmake`), gfortran with [fortran-stdlib](https://stdlib.fortran-lang.org) (`brew install fortran-stdlib`, found through `pkg-config`), a JDK (`javac`, `java`), EiffelStudio (`ec`), [hyperfine](https://github.com/sharkdp/hyperfine) 2.x and `sysl` on
+Requires clang, rustc, swiftc, zig, odin, c3c, GNAT (`gnatmake`), gfortran with [fortran-stdlib](https://stdlib.fortran-lang.org) (`brew install fortran-stdlib`, found through `pkg-config`), [hyperfine](https://github.com/sharkdp/hyperfine) 2.x and `sysl` on
 `PATH`, and Homebrew's `pcre2` and `boost` (regex-redux).
 
 ```

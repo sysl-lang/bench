@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Are We Fast Yet: builds, verifies and times the suite in sysl, C++ and Java.
+# Are We Fast Yet: builds, verifies and times the suite in sysl and C++.
 #
 #   scripts/run.zsh build              build every language into build/ (and record the build times)
 #   scripts/run.zsh verify [names...]  run each benchmark once at its standard size; the harness checks
@@ -16,14 +16,15 @@ zmodload zsh/datetime
 
 ROOT=${0:A:h:h}
 BUILD=$ROOT/build
-export PATH=/opt/homebrew/opt/openjdk/bin:/opt/homebrew/bin:$PATH
+export PATH=/opt/homebrew/bin:$PATH
 cd $ROOT
 
-LANGS=(sysl cpp java)
+# No garbage-collected language (the repository README, methodology item 9): upstream's Java port is not run.
+LANGS=(sysl cpp)
 
 # A second sysl compiler to compare with the one on PATH: SYSL_DEV names its binary and SYSL_DEV_LIB
 # its library/ tree. When set, the same sysl sources are also built with it, as the language sysl-dev.
-[[ -n $SYSL_DEV ]] && LANGS=(sysl sysl-dev cpp java)
+[[ -n $SYSL_DEV ]] && LANGS=(sysl sysl-dev cpp)
 
 # Each benchmark's inner iterations: upstream rebench.conf.
 typeset -A INNER
@@ -33,10 +34,10 @@ INNER=(DeltaBlue 12000 Richards 100 Json 100 CD 250 Havlak 1500
 BENCHMARKS=(DeltaBlue Richards Json CD Havlak Bounce List Mandelbrot NBody Permute Queens Sieve Storage Towers)
 
 # Outer iterations per invocation, as upstream runs each executor: C++ (and so sysl) is a "slow VM"
-# with 10, the Java JIT a "fast VM" with 100, of which the first half is warm-up.
+# with 10 and no warm-up.
 typeset -A OUTER WARMUP
-OUTER=(sysl 10 sysl-dev 10 cpp 10 java 100)
-WARMUP=(sysl 0 sysl-dev 0 cpp 0 java 50)
+OUTER=(sysl 10 sysl-dev 10 cpp 10)
+WARMUP=(sysl 0 sysl-dev 0 cpp 0)
 
 # The benchmarks a language cannot run yet, with the reason (README.md, "Gaps").
 typeset -A SKIP
@@ -56,7 +57,6 @@ harness() {  # <lang>
     sysl) print -r -- $BUILD/harness-sysl ;;
     sysl-dev) print -r -- $BUILD/harness-sysl-dev ;;
     cpp)  print -r -- $BUILD/harness-cpp ;;
-    java) print -r -- "java -cp $BUILD/java-classes Harness" ;;
   esac
 }
 
@@ -102,15 +102,6 @@ build() {
     print "FAILED cpp (see build/cpp.log)"; failed=1
   fi
 
-  # Upstream builds with `ant jar`, which is javac over src/ with no options.
-  t0=$EPOCHREALTIME
-  if javac -d $BUILD/java-classes benchmarks/Java/src/**/*.java >$BUILD/java.log 2>&1; then
-    print -r -- "$(( EPOCHREALTIME - t0 ))" > $BUILD/java.build-seconds
-    print "built  java ($(<$BUILD/java.build-seconds) s)"
-  else
-    print "FAILED java (see build/java.log)"; failed=1
-  fi
-
   return $failed
 }
 
@@ -150,7 +141,6 @@ time_all() {
   for lang in ${(M)LANGS:#sysl*}; do
     [[ -f $BUILD/$lang.version ]] && cp $BUILD/$lang.version $raw/
   done
-  du -sk $BUILD/java-classes | cut -f1 > $raw/java.classes-kbytes
 
   for bench in $BENCHMARKS; do
     for lang in $LANGS; do

@@ -1,7 +1,8 @@
 # Are We Fast Yet, in sysl
 
 A port of the **Are We Fast Yet** benchmark suite to sysl, timed against the suite's own C++ port
-(the comparison baseline) and its Java port.
+(the comparison baseline). Upstream's Java port is not run: the bench times no garbage-collected
+language (the repository README, rule 9).
 
 Are We Fast Yet (AWFY) is fourteen benchmarks designed for comparing language implementations
 fairly. Unlike the Benchmarks Game, a port may not pick its own algorithm or data structure: every
@@ -44,7 +45,7 @@ Upstream's [guidelines](https://github.com/smarr/are-we-fast-yet/blob/main/docs/
 [core language](https://github.com/smarr/are-we-fast-yet/blob/main/docs/core-language.md), applied to
 sysl:
 
-1. **As identical as possible.** Each class, method and loop of the Java and C++ ports has its
+1. **As identical as possible.** Each class, method and loop of upstream's Java and C++ ports has its
    counterpart, in the same order and under the same name (in sysl's `snake_case`). Iteration over a
    collection is its `for_each` with a closure, as upstream asks.
 2. **The suite's own collections.** `som/` is upstream's `Vector`, `Set`, `IdentitySet`,
@@ -71,7 +72,6 @@ sysl:
 |---|---|---|
 | sysl | the `sysl` on PATH (Homebrew), and with `SYSL_DEV=<binary> SYSL_DEV_LIB=<library dir>` a second compiler as `sysl-dev`; each run's results name both versions | `sysl build --release -O3 --cpu native` |
 | C++ | Apple clang 21.0.0 (clang-2100.4.1.1) | `-O3 -flto -march=native -ffp-contract=off -std=c++17` (upstream `build.sh`) |
-| Java | OpenJDK 27 (Homebrew) | `javac`, run as `java -cp … Harness` (upstream's `Java-jit` executor) |
 
 **Rust:** upstream has no Rust port (its README asks for one, "guided by our C++ port"), so none is
 timed here.
@@ -82,12 +82,10 @@ timed here.
 `harness <Benchmark> <outer> <inner>`, three invocations by default. Each outer iteration runs the
 benchmark's inner loop and is timed **by the harness itself** with a monotonic clock, as upstream's
 harness does and as upstream reports (ReBench parses those lines). The outer iterations are upstream's
-per executor: 10 for C++ (and so for sysl, also compiled ahead of time), 100 for the Java JIT, whose
-first 50 are dropped as warm-up.
+per executor: 10 for C++, and so for sysl, also compiled ahead of time.
 
 The harness's own times are used rather than hyperfine over the process because what AWFY compares is
-the steady-state cost of the benchmark's code: a process time would add the JVM's start-up and JIT
-warm-up to Java's number, and would fold the first, cold iteration into every AOT number. Each
+the steady-state cost of the benchmark's code, as upstream reports it. Each
 invocation also runs under `/usr/bin/time -l` for its peak resident set size.
 
 Reported, in `results/<date>.json` (every iteration) and `results/<date>.md`:
@@ -95,7 +93,7 @@ Reported, in `results/<date>.json` (every iteration) and `results/<date>.md`:
 - mean time per iteration ± standard deviation, per benchmark and language;
 - each language's ratio to C++ per benchmark, and the geometric mean of the ratios;
 - peak RSS per benchmark and language;
-- the size of the harness binary (sysl, C++) or of the compiled classes (Java);
+- the size of the harness binary;
 - the build time of each harness (for sysl, `sysl build` of the whole suite from cold).
 
 ## Running it

@@ -11,13 +11,13 @@ cd $ROOT
 (( $# )) && LANGS=($@)
 
 # pidigits computes with GMP (README, the rules): its directories from pkg-config, and each compiler's
-# spelling of them. The Eiffel .ecf reads the two exported variables. No other program gets these.
-export GMP_INCLUDE=$(pkg-config --variable=includedir gmp) GMP_LIB=$(pkg-config --variable=libdir gmp)
+# spelling of them. No other program gets these.
+GMP_INCLUDE=$(pkg-config --variable=includedir gmp) GMP_LIB=$(pkg-config --variable=libdir gmp)
 typeset -A GMP_FLAGS
 GMP_FLAGS=(c "-I$GMP_INCLUDE -L$GMP_LIB -lgmp" c-tuned "-I$GMP_INCLUDE -L$GMP_LIB -lgmp"
            cpp "-I$GMP_INCLUDE -L$GMP_LIB -lgmp" rust "-L $GMP_LIB" rust-tuned "-L $GMP_LIB"
            swift "-I programs/pidigits/swift -Xcc -I$GMP_INCLUDE -L $GMP_LIB" zig "-L$GMP_LIB -lgmp"
-           nim "--passL:-L$GMP_LIB" d "-L-L$GMP_LIB" odin "-extra-linker-flags:-L$GMP_LIB"
+           odin "-extra-linker-flags:-L$GMP_LIB"
            ada "-largs -L$GMP_LIB" fortran "-L$GMP_LIB -lgmp" c3 "-L $GMP_LIB -l gmp")
 
 # regex-redux's C, C++, Rust, Zig, Fortran and sysl-tuned programs link PCRE2 (C++ also includes Boost).
@@ -35,7 +35,6 @@ for prog in $PROGRAMS; do
   for lang in $LANGS; do
     dir=programs/$prog/$lang
     out=$BUILD/$prog/$lang
-    [[ $lang == eiffel-contracts ]] && dir=programs/$prog/eiffel   # the same source, built with assertions on
     src=${lang%-dev}   # sysl-*-dev: the same source as sysl-*, built with $SYSL_DEV
     [[ $lang == sysl-*-dev ]] && dir=programs/$prog/$src
     rm -f $out
@@ -63,22 +62,6 @@ for prog in $PROGRAMS; do
       fortran) mkdir -p $BUILD/.fmod/$prog   # fortran-stdlib's hash map, which knucleotide uses
               gfortran -O3 -march=native -J $BUILD/.fmod/$prog -I$(pkg-config --variable=moduledir fortran_stdlib) -o $out $dir/$prog.f90 -L$(pkg-config --variable=libdir fortran_stdlib) -lfortran_stdlib_hashmaps -lfortran_stdlib_hash -lfortran_stdlib_core $libs >$out.log 2>&1 ;;
       c3)     c3c compile -O3 --obj-out $BUILD/.c3obj/$prog -o $out $libs $dir/$prog.c3 >$out.log 2>&1 ;;
-      eiffel|eiffel-contracts)
-              # EiffelStudio's finalized (optimised) build. The .ecf has a `release` target with
-              # every assertion off and a `contracts` target with them all on; both inline
-              # (`inlining` true, `inlining_size` 100), as a finalized release build should.
-              target=release
-              [[ $lang == eiffel-contracts ]] && target=contracts
-              rm -rf $BUILD/.eifgen/$prog/$lang
-              ec -batch -finalize -config $dir/$prog.ecf -target $target -project_path $BUILD/.eifgen/$prog/$lang -c_compile >$out.log 2>&1
-              cp $BUILD/.eifgen/$prog/$lang/EIFGENs/$target/F_code/$prog $out 2>>$out.log ;;
-      java)   # The JVM runs bytecode: the "executable" is a launcher, so every timed run
-              # includes JVM startup and JIT warm-up, as on the Benchmarks Game.
-              mkdir -p $BUILD/.jclasses/$prog
-              if javac -d $BUILD/.jclasses/$prog $dir/$prog.java >$out.log 2>&1; then
-                printf '#!/bin/sh\nexec java -cp %s %s "$@"\n' $BUILD/.jclasses/$prog $prog > $out
-                chmod +x $out
-              fi ;;
     esac
     if [[ -x $out && -s $out ]]; then
       print "built  $prog/$lang"

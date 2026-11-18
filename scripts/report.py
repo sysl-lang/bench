@@ -13,13 +13,13 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 programs = ["nbody", "spectralnorm", "fannkuchredux", "binarytrees",
             "mandelbrot", "fasta", "knucleotide", "revcomp", "regexredux", "pidigits"]
-systems = ["c", "c-tuned", "rust", "rust-tuned", "cpp", "zig", "d", "odin", "c3", "ada", "fortran", "nim", "swift", "sysl-idiomatic", "sysl-tuned"]
-managed = ["go", "java", "eiffel", "eiffel-contracts"]
+# Only languages that run with no garbage collector (README, methodology item 9).
+columns = ["c", "c-tuned", "rust", "rust-tuned", "cpp", "zig", "odin", "c3", "ada", "fortran", "swift",
+           "sysl-idiomatic", "sysl-tuned"]
 # A run with a second sysl compiler (SYSL_DEV, scripts/lib.zsh) has its two columns too.
 sysl_dev = os.environ.get("SYSL_DEV")
 if sysl_dev:
-    systems += ["sysl-idiomatic-dev", "sysl-tuned-dev"]
-columns = systems + managed
+    columns += ["sysl-idiomatic-dev", "sysl-tuned-dev"]
 
 
 def run(cmd):
@@ -50,10 +50,6 @@ toolchains = {
              "llvm": run(["rustc", "--version", "--verbose"]).split("LLVM version:")[-1].strip()},
     "swift": {"version": first_line(run(["swiftc", "--version"])), "llvm": clang_llvm},
     "zig": {"version": "zig " + first_line(run(["zig", "version"]))},
-    "nim": {"version": first_line(run(["nim", "--version"])), "llvm": clang_llvm},
-    "go": {"version": first_line(run(["go", "version"]))},
-    "d": {"version": first_line(run(["ldc2", "--version"])),
-          "llvm": run(["ldc2", "--version"]).split("LLVM ")[1].split("\n")[0].strip()},
     "odin": {"version": first_line(run(["odin", "version"])), "llvm": clang_llvm},
     "c3": {"version": first_line(run(["c3c", "--version"])),
            "llvm": run(["c3c", "--version"]).split("LLVM version:")[1].split("\n")[0].strip()},
@@ -62,8 +58,6 @@ toolchains = {
     "fortran": {"version": first_line(run(["gfortran", "--version"])),
                 "backend": "GCC's own back end (not LLVM); fortran-stdlib "
                            + run(["pkg-config", "--modversion", "fortran_stdlib"])},
-    "java": {"version": first_line(run(["java", "--version"]))},
-    "eiffel": {"version": first_line(run(["ec", "-version"])), "llvm": clang_llvm},
     "hyperfine": {"version": first_line(run(["hyperfine", "--version"]))},
 }
 flags = {
@@ -73,9 +67,6 @@ flags = {
     "rust": "rustc --edition 2021 -C opt-level=3 -C target-cpu=native (rust-tuned the same)",
     "swift": "swiftc -O",
     "zig": "zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded",
-    "nim": "nim c -d:danger --opt:speed --mm:orc --cc:clang --passC:-march=native --threads:off",
-    "go": "go build (default flags: Go has no optimisation level; bounds checks stay on)",
-    "d": "ldc2 -O3 -release -mcpu=native (-release drops asserts and the bounds checks of @system code)",
     "odin": "odin build -o:speed -microarch:native (bounds checks stay on)",
     "c3": "c3c compile -O3 (-O3 is c3c's unsafe mode: runtime bounds checks and contracts are off; "
           "c3c has no native-CPU option for arm64)",
@@ -85,15 +76,6 @@ flags = {
     "fortran": "gfortran -O3 -march=native (no -ffast-math: IEEE semantics as in C; no bounds "
                "checks, which gfortran adds only under -fcheck=bounds); knucleotide links "
                "fortran-stdlib's hash map",
-    "java": "javac, then java -cp (default JIT flags; bounds checks stay on; JVM startup and JIT "
-            "warm-up are inside every timed run, as on the Benchmarks Game)",
-    "eiffel": "ec -finalize -c_compile, ECF target `release`: every assertion off (precondition, "
-              "postcondition, check, invariant, loop); the C compiler is the machine's clang with "
-              "EiffelStudio's own flags, which have no native-CPU option; array indices are not "
-              "range-checked, as they are by a precondition",
-    "eiffel-contracts": "the same source as `eiffel`, ECF target `contracts`: precondition, "
-                        "postcondition, check, invariant and loop (invariant and variant) "
-                        "assertions all on",
 }
 machine = {"cpu": run(["sysctl", "-n", "machdep.cpu.brand_string"]),
            "os": first_line(run(["sw_vers", "-productVersion"]))}
@@ -155,14 +137,10 @@ def cell(e, lang, key, fmt):
     return format(e[lang][key], fmt) if lang in e else "DNF"
 
 
-group_geo_wall = {"all": group_geo(columns, "ratio_to_c"), "systems": group_geo(systems, "ratio_to_c"),
-                  "managed": group_geo(managed, "ratio_to_c")}
-group_geo_cpu = {"all": group_geo(columns, "cpu_ratio_to_c"), "systems": group_geo(systems, "cpu_ratio_to_c"),
-                 "managed": group_geo(managed, "cpu_ratio_to_c")}
+overall_geo = {"wall": group_geo(columns, "ratio_to_c"), "cpu": group_geo(columns, "cpu_ratio_to_c")}
 
-doc = {"date": stamp, "groups": {"systems": systems, "managed": managed},
-       "group_geometric_mean_ratio_to_c": group_geo_wall,
-       "group_geometric_mean_cpu_ratio_to_c": group_geo_cpu, "machine": machine, "toolchains": toolchains, "flags": flags,
+doc = {"date": stamp, "columns": columns,
+       "overall_geometric_mean_ratio_to_c": overall_geo, "machine": machine, "toolchains": toolchains, "flags": flags,
        "hyperfine": "--warmup 3 --runs 10",
        "load": {"start": load("load-start.txt"), "end": load("load-end.txt")}, "programs": data, "geometric_mean_ratio_to_c": geo,
        "geometric_mean_cpu_ratio_to_c": cpu_geo, "geometric_mean_programs": common,
@@ -175,8 +153,8 @@ lines = [f"# Results {stamp}", "",
          f"{machine['cpu']}, macOS {machine['os']}. Single-threaded, `hyperfine --warmup 3 --runs 10`.", "",
          *([f"**{os.environ['BENCH_NOTE']}**", ""] if os.environ.get("BENCH_NOTE") else []),
          "Each cell is the mean time as a ratio to C (1.00 = as fast as C, higher is slower). "
-         "The `C (s)` column is C's own mean in seconds. Columns are grouped: **systems** languages "
-         f"({', '.join(systems)}) first, then **managed** ({', '.join(managed)}).", "",
+         "The `C (s)` column is C's own mean in seconds. Every language here runs with no garbage "
+         "collector (README, methodology item 9).", "",
          "Load average at the start and end of the run (`uptime`); if other builds were running, "
          "the figures were measured under load and are noisier than an idle-machine run:", "",
          "```", doc["load"]["start"], doc["load"]["end"], "```", "",
@@ -192,9 +170,8 @@ if dnf:
     lines += ["", "**DNF** (did not finish) cells were verified at the small size and not timed: " +
               "; ".join(f"{p}/{l}" for p, l in dnf) + ". Every geometric mean is over the programs every "
               f"column finished ({', '.join(common)}), so the columns stay comparable."]
-lines += ["", "Geometric mean over every program and language in a group (wall clock; systems includes C):", "",
-          "| overall | systems | managed |", "|---:|---:|---:|",
-          f"| {group_geo_wall['all']:.2f} | {group_geo_wall['systems']:.2f} | {group_geo_wall['managed']:.2f} |"]
+lines += ["", f"Geometric mean over every program and language, C included (wall clock): "
+          f"**{overall_geo['wall']:.2f}**."]
 lines += ["", "## CPU time", "",
           "The same ratios computed from CPU time (user plus system) instead of wall-clock time, which a "
           "busy machine disturbs less.", "",
@@ -206,8 +183,8 @@ for prog in programs:
     lines.append(f"| {prog} | {e['c']['cpu_mean']:.3f} | {cells} |")
 lines.append("| **geometric mean** | | " +
              " | ".join(f"{cpu_geo[c]:.2f}" for c in columns if c != "c") + " |")
-lines += ["", "| overall (CPU) | systems (CPU) | managed (CPU) |", "|---:|---:|---:|",
-          f"| {group_geo_cpu['all']:.2f} | {group_geo_cpu['systems']:.2f} | {group_geo_cpu['managed']:.2f} |"]
+lines += ["", f"Geometric mean over every program and language, C included (CPU): "
+          f"**{overall_geo['cpu']:.2f}**."]
 lines += ["", "## Spread", "",
           "Each cell is the standard deviation of the wall-clock runs as a percentage of their mean "
           f"({data[programs[0]]['c']['runs']} runs each): the noise a difference between two cells has to beat.", "",

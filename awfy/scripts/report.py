@@ -17,7 +17,7 @@ import sys
 
 # sysl-dev: the same sysl sources built by a second compiler (SYSL_DEV, run.zsh).
 SYSL = ["sysl", "sysl-dev"] if os.environ.get("SYSL_DEV") else ["sysl"]
-LANGS = SYSL + ["cpp", "java"]
+LANGS = SYSL + ["cpp"]
 BASELINE = "cpp"
 BENCHMARKS = ["DeltaBlue", "Richards", "Json", "CD", "Havlak", "Bounce", "List", "Mandelbrot", "NBody",
               "Permute", "Queens", "Sieve", "Storage", "Towers"]
@@ -70,7 +70,6 @@ def main():
         "binary_bytes": {lang: read_number(os.path.join(raw, f"{lang}.binary-bytes")) for lang in SYSL + ["cpp"]},
         "compilers": {lang: read(os.path.join(raw, f"{lang}.version")).strip()
                       for lang in SYSL if os.path.exists(os.path.join(raw, f"{lang}.version"))},
-        "java_classes_kbytes": read_number(os.path.join(raw, "java.classes-kbytes")),
     }
 
     os.makedirs(os.path.join(root, "results"), exist_ok=True)
@@ -110,8 +109,8 @@ def main():
     bs, bb = meta["build_seconds"], meta["binary_bytes"]
     lines += ["", "| | " + " | ".join(LANGS) + " |", "|---|" + "---:|" * len(LANGS),
               "| build time (s) | " + " | ".join(f"{bs[l]:.1f}" if bs[l] else "—" for l in LANGS) + " |",
-              "| harness size (KB) | " + " | ".join(f"{bb[l] / 1024:.0f}" if bb.get(l) else "—" for l in SYSL + ["cpp"])
-              + f" | {meta['java_classes_kbytes']:.0f} (classes) |", ""]
+              "| harness size (KB) | " + " | ".join(f"{bb[l] / 1024:.0f}" if bb.get(l) else "—" for l in LANGS)
+              + " |", ""]
     lines += [f"- **{l}**: {v}" for l, v in meta["compilers"].items()]
     lines += ["", f"Load at start: `{meta['load_start']}`", "", f"Load at end: `{meta['load_end']}`", ""]
 
