@@ -13,6 +13,7 @@ struct Run
         self.name match
             "Bounce" -> self.do_runs(Bounce())
             "CD" -> self.do_runs(CD())
+            "DeltaBlue" -> self.do_runs(DeltaBlue())
             "Havlak" -> self.do_runs(Havlak())
             "Json" -> self.do_runs(Json())
             "List" -> self.do_runs(List())

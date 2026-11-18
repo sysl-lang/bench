@@ -47,6 +47,11 @@ for prog in $PROGRAMS; do
       continue
     fi
 
+    if [[ -n ${DNF[$prog:$lang]} ]]; then
+      print "ok       $prog/$lang at the small size only (DNF: ${DNF[$prog:$lang]})"
+      continue
+    fi
+
     got=$(run_program $prog $lang big | shasum -a 256 | cut -d' ' -f1)
     want=$(cut -d' ' -f1 expected/$prog.sha256)
 
@@ -76,11 +81,13 @@ for prog in $PROGRAMS; do
   args=(-N --warmup 3 --runs 10 --output null --export-json $raw/$prog.json)
   cmds=()
 
+  timed=()
+  for lang in $LANGS; do [[ -z ${DNF[$prog:$lang]} ]] && timed+=($lang); done
   if [[ $BIG[$prog] == - ]]; then
     args+=(--input $INPUT)
-    for lang in $LANGS; do cmds+=(-n $lang $(exe $prog $lang)); done
+    for lang in $timed; do cmds+=(-n $lang $(exe $prog $lang)); done
   else
-    for lang in $LANGS; do cmds+=(-n $lang "$(exe $prog $lang) $BIG[$prog]"); done
+    for lang in $timed; do cmds+=(-n $lang "$(exe $prog $lang) $BIG[$prog]"); done
   fi
 
   print -- "-- $prog"

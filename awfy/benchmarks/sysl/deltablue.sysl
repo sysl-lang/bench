@@ -1,8 +1,8 @@
 // DeltaBlue, the incremental constraint solver of Freeman-Benson and Maloney, by way of the Smalltalk,
 // SOM and Java versions of the suite.
 //
-// A DRAFT, not built: it compares constraints with '===', which sysl 0.11.10 refuses on a trait
-// object (awfy/README.md, "Gaps"). It has not been through the compiler past that refusal.
+// Constraints are compared by identity with '===' on the &AbstractConstraint trait object, as the
+// Java port compares them with '=='.
 
 import som.{CustomHash, IdentityDictionary, Vector, identity_dictionary, vector, vector_of_size, vector_with}
 
@@ -95,6 +95,7 @@ trait AbstractConstraint
 
     is_satisfied(*self) -> bool
 
+    @keeps(self)
     add_to_graph(&self)
 
     remove_from_graph(&self)
@@ -113,10 +114,12 @@ trait AbstractConstraint
 
     recalculate(*self)
 
+    @keeps(self)
     add_constraint(&self, planner: &Planner)
         self.add_to_graph()
         planner.incremental_add(self)
 
+    @keeps(self)
     destroy_constraint(&self, planner: &Planner)
         if self.is_satisfied() then planner.incremental_remove(self)
         self.remove_from_graph()
@@ -124,6 +127,7 @@ trait AbstractConstraint
     inputs_known(*self, mark: int) -> bool =
         !self.inputs_has_one(v -> !(v.mark == mark || v.stay || v.determined_by is None))
 
+    @keeps(self)
     satisfy(&self, mark: int, planner: &Planner) -> Option[&AbstractConstraint]
         var overridden: Option[&AbstractConstraint] = None
 
@@ -137,7 +141,7 @@ trait AbstractConstraint
             overridden = out.determined_by
             overridden match
                 Some(o) -> o.mark_unsatisfied()
-                None -> {}
+                None -> ()
 
             out.determined_by = Some(self)
             if !planner.add_propagate(self, mark) then panic("Cycle encountered")
@@ -166,7 +170,7 @@ struct Variable
 
         self.determined_by match
             Some(d) -> if d === c then self.determined_by = None
-            None -> {}
+            None -> ()
 end Variable
 
 // Every variable made, so that release_all can break the cycles between variables and the
@@ -194,7 +198,7 @@ release_all()
             tracked.for_each(v ->
                 v.constraints.remove_all()
                 v.determined_by = None)
-        None -> {}
+        None -> ()
 
     tracked_variables = None
 
@@ -235,8 +239,8 @@ impl AbstractConstraint for EditConstraint
     remove_from_graph(&self) = self.u.remove_from_graph(self)
     choose_method(*self, mark: int) -> Direction = self.u.choose_method(mark)
     // Edit constraints do nothing.
-    execute(*self) = {}
-    inputs_do(*self, f: &Fn(&Variable) -> unit) = {}
+    execute(*self) = ()
+    inputs_do(*self, f: &Fn(&Variable) -> unit) = ()
     inputs_has_one(*self, f: &Fn(&Variable) -> bool) -> bool = false
     mark_unsatisfied(*self) = self.u.satisfied = false
     output -> &Variable = self.u.output
@@ -261,8 +265,8 @@ impl AbstractConstraint for StayConstraint
     remove_from_graph(&self) = self.u.remove_from_graph(self)
     choose_method(*self, mark: int) -> Direction = self.u.choose_method(mark)
     // Stay constraints do nothing.
-    execute(*self) = {}
-    inputs_do(*self, f: &Fn(&Variable) -> unit) = {}
+    execute(*self) = ()
+    inputs_do(*self, f: &Fn(&Variable) -> unit) = ()
     inputs_has_one(*self, f: &Fn(&Variable) -> bool) -> bool = false
     mark_unsatisfied(*self) = self.u.satisfied = false
     output -> &Variable = self.u.output
@@ -457,7 +461,7 @@ struct Planner
 
     make_plan(&self, sources: &Vector[&AbstractConstraint]) -> Plan
         val mark = self.new_mark()
-        val plan = Plan(vector_of_size(15))
+        var plan = Plan(vector_of_size(15))
         val todo = sources
 
         while !todo.is_empty()
@@ -492,7 +496,7 @@ struct Planner
 
     change(&self, v: &Variable, new_value: int)
         val edit_c = edit_constraint(v, preferred, self)
-        val plan = self.extract_plan_from_constraints(vector_with(edit_c))
+        var plan = self.extract_plan_from_constraints(vector_with(edit_c))
 
         for _ in 0..<10
             v.value = new_value
@@ -500,7 +504,7 @@ struct Planner
 
         edit_c.destroy_constraint(self)
 
-    constraints_consuming(&self, v: &Variable, f: &Fn(&AbstractConstraint) -> unit)
+    constraints_consuming(&self, v: &Variable, f: &Fn(@keeps &AbstractConstraint) -> unit)
         val determining_c = v.determined_by
 
         v.constraints.for_each(c -> if !is_determining(c, determining_c) && c.is_satisfied() then f(c))
@@ -549,7 +553,7 @@ chain_test(n: int)
     stay_constraint(vars[n], strong_default, planner)
 
     val edit_c = edit_constraint(vars[0], preferred, planner)
-    val plan = planner.extract_plan_from_constraints(vector_with(edit_c))
+    var plan = planner.extract_plan_from_constraints(vector_with(edit_c))
 
     for i in 0..<100
         vars[0].value = i

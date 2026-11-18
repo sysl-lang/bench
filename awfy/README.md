@@ -69,7 +69,7 @@ sysl:
 
 | language | compiler | flags |
 |---|---|---|
-| sysl | sysl 0.11.10 (Homebrew) | `sysl build --release -O3 --cpu native` |
+| sysl | the `sysl` on PATH (Homebrew), and with `SYSL_DEV=<binary> SYSL_DEV_LIB=<library dir>` a second compiler as `sysl-dev`; each run's results name both versions | `sysl build --release -O3 --cpu native` |
 | C++ | Apple clang 21.0.0 (clang-2100.4.1.1) | `-O3 -flto -march=native -ffp-contract=off -std=c++17` (upstream `build.sh`) |
 | Java | OpenJDK 27 (Homebrew) | `javac`, run as `java -cp … Harness` (upstream's `Java-jit` executor) |
 
@@ -115,19 +115,18 @@ caffeinate -dimsu marshal run --exclusive --quiet-load auto --dir ~/dev/sysl-lan
 
 ## Gaps
 
-Three benchmarks cannot be written in sysl 0.11.10 as the guidelines require. `run.zsh` skips them
-for sysl and says why; their drafts are in `pending/`.
+`run.zsh` skips a benchmark a sysl compiler cannot run and says why.
 
 - **DeltaBlue** compares constraints by identity — `Vector.remove(constraint)`,
   `c != determiningC`, `determinedBy == c` — and its constraints are polymorphic, so in sysl they are
-  `&AbstractConstraint` trait objects. `===` is refused on a trait object ("'===' is not defined for
-  the trait object &Constraint, which is two words rather than one address"), and there is no other
-  way to ask whether two objects are one. Giving each constraint an id, or replacing the trait with an
-  enum, would be writing it the long way round. `pending/deltablue.sysl` is the port as far as it got.
+  `&AbstractConstraint` trait objects compared with `===`. sysl 0.11.12 and earlier refuse `===` on a
+  trait object; sysl dev from c3af7f5c accepts it. `run.zsh` builds the 0.11.12 harness from a copy of
+  the sources without DeltaBlue (`OMIT`), so the `sysl` column has no DeltaBlue and `sysl-dev` does.
 - **Mandelbrot** and **NBody** check their floating-point result exactly, against values computed with
   every multiply and add rounded separately (upstream builds C++ with `-ffp-contract=off` for this
   reason). sysl fuses `a * b + c` into one rounding wherever the machine can, which on AArch64 is
-  everywhere, and has no build option, attribute or pragma to turn that off; the only way to keep a
-  product apart is to bind it to a `val`. Both ports compile and run, and fail their checks.
+  everywhere; sysl 0.11.12 has no build option, attribute or pragma to turn that off. sysl dev has
+  `@no_fuse` (B5), and the ports have not yet been rewritten with it. Both ports compile and run, and
+  fail their checks.
   `pending/unfused/` has them rewritten with every product bound to a `val`: so written they pass, at
   C++'s speed.

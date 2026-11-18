@@ -79,26 +79,30 @@ names the origin of every file and says exactly what was changed.
    index ranges and sizes, class invariants, and loop invariants and variants where the loop has one. The
    second column measures what the contracts cost at run time.
 8. **Java's timing is the whole process**, JVM startup and JIT warm-up included, as in the Benchmarks Game:
-   `build/<program>/java` is a launcher script that runs `java -cp` on the compiled classes, as the Julia
-   one does. Eiffel and C3 compile to native executables.
+   `build/<program>/java` is a launcher script that runs `java -cp` on the compiled classes. Eiffel and
+   C3 compile to native executables.
+9. **No Julia.** Julia was timed up to 2026-11-16 and was removed on 2026-11-18. It is a JIT language
+   with a runtime: a whole-process time is mostly its start-up and compilation, and a warm-only
+   measurement is not comparable with the ahead-of-time languages, so neither number answered the
+   question this suite asks. Earlier results files keep their Julia column.
 
 **pidigits and regex-redux are the two programs that lean on a library**, as they do on the
 Benchmarks Game. pidigits' work is arbitrary-precision arithmetic. A language whose standard library has a big integer uses it (Go
-`math/big`, Java `BigInteger`, Julia `BigInt`, sysl `sysl.math.bigint`); every other language binds
+`math/big`, Java `BigInteger`, sysl `sysl.math.bigint`); every other language binds
 [GMP](https://gmplib.org) 6.3.0 through its own C interop, as the Game's entries do (C, C++, Rust,
 Swift, Zig, Nim, D, Odin, C3, Ada, Fortran, Eiffel). Every version runs Mr Ledrug's form of Gibbons'
 spigot; SOURCES.md says which library each uses.
 
 regex-redux's work is a regular-expression library's: each language uses its standard one where it
 has one and nothing faster is in the Game's entries for it, otherwise the library those entries use.
-That is PCRE2 with its JIT for C, C++, Rust, Zig, Go, Java, Fortran and (as their standard libraries)
-Nim and Julia; `sysl-idiomatic` uses the standard `sysl.regex`, and `sysl-tuned` calls PCRE2 with its
+That is PCRE2 with its JIT for C, C++, Rust, Zig, Go, Java, Fortran and (as its standard library)
+Nim; `sysl-idiomatic` uses the standard `sysl.regex`, and `sysl-tuned` calls PCRE2 with its
 JIT as C does. SOURCES.md gives each language's choice and how its Game entry was adapted.
 
 ## Groups
 
 The tables group the languages. **Systems**: c, c-tuned, rust, rust-tuned, cpp, zig, d, odin, c3, ada, fortran, nim, swift, sysl-idiomatic,
-sysl-tuned. **Managed**: go, java, eiffel, eiffel-contracts, julia. The criterion: a systems language can run with no tracing GC and no
+sysl-tuned. **Managed**: go, java, eiffel, eiffel-contracts. The criterion: a systems language can run with no tracing GC and no
 required runtime, with deterministic destruction and control over layout (Swift via Embedded Swift, Nim
 via `--os:standalone`, D via `-betterC`); every program here runs in the language's normal hosted mode.
 The report gives the geometric mean of each group as well as overall.
@@ -106,7 +110,7 @@ The report gives the geometric mean of each group as well as overall.
 ## Layout
 
 ```
-programs/<name>/{sysl-idiomatic,sysl-tuned,c,c-tuned,rust,rust-tuned,cpp,swift,zig,nim,julia,go,d,odin,c3,ada,fortran,java,eiffel}/   one source file per directory
+programs/<name>/{sysl-idiomatic,sysl-tuned,c,c-tuned,rust,rust-tuned,cpp,swift,zig,nim,go,d,odin,c3,ada,fortran,java,eiffel}/   one source file per directory
                    (Eiffel adds its .ecf project file, and a second class file where a program needs one;
                    `eiffel-contracts` is built from the `eiffel` directory; Swift's pidigits adds
                    the module map that makes GMP `import gmp`)
@@ -128,7 +132,7 @@ at `build/inputs/`.
 
 ## Running it
 
-Requires clang, rustc, swiftc, zig, nim, julia, go, ldc2, odin, c3c, GNAT (`gnatmake`), gfortran with [fortran-stdlib](https://stdlib.fortran-lang.org) (`brew install fortran-stdlib`, found through `pkg-config`), a JDK (`javac`, `java`), EiffelStudio (`ec`), [hyperfine](https://github.com/sharkdp/hyperfine) 2.x and `sysl` on
+Requires clang, rustc, swiftc, zig, nim, go, ldc2, odin, c3c, GNAT (`gnatmake`), gfortran with [fortran-stdlib](https://stdlib.fortran-lang.org) (`brew install fortran-stdlib`, found through `pkg-config`), a JDK (`javac`, `java`), EiffelStudio (`ec`), [hyperfine](https://github.com/sharkdp/hyperfine) 2.x and `sysl` on
 `PATH`, and Homebrew's `pcre2` and `boost` (regex-redux).
 
 ```
@@ -150,3 +154,10 @@ caffeinate -dimsu marshal run --exclusive --quiet-load auto --deadline 2h --dir 
 ```
 
 A run taken while other builds are going says so in its results file.
+
+**Comparing two sysl compilers.** With `SYSL_DEV=<sysl binary>` and `SYSL_DEV_LIB=<its library/
+directory>` in the environment of both `build.zsh` and `run.zsh`, every program's `sysl-idiomatic` and
+`sysl-tuned` sources are also built with that compiler, as the columns `sysl-idiomatic-dev` and
+`sysl-tuned-dev`, and the report adds a table of the two compilers side by side (`SYSL_DEV_COMMIT`
+names its commit in the toolchain list). Every sysl build sets `SYSL_NO_CACHE=1`, so neither
+compiler replays a cached build.

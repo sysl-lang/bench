@@ -36,12 +36,17 @@ for prog in $PROGRAMS; do
     dir=programs/$prog/$lang
     out=$BUILD/$prog/$lang
     [[ $lang == eiffel-contracts ]] && dir=programs/$prog/eiffel   # the same source, built with assertions on
+    src=${lang%-dev}   # sysl-*-dev: the same source as sysl-*, built with $SYSL_DEV
+    [[ $lang == sysl-*-dev ]] && dir=programs/$prog/$src
     rm -f $out
     libs=()
-    [[ $prog == pidigits ]] && libs=(${(z)GMP_FLAGS[$lang]})
-    [[ $prog == regexredux ]] && libs=(${(z)PCRE2_FLAGS[$lang]})
+    [[ $prog == pidigits ]] && libs=(${(z)GMP_FLAGS[$src]})
+    [[ $prog == regexredux ]] && libs=(${(z)PCRE2_FLAGS[$src]})
+    # SYSL_NO_CACHE: a build from the sources, never a replay of the run cache of either compiler.
     case $lang in
-      sysl-*) sysl build --release -O3 --cpu native $libs -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
+      sysl-*-dev)
+              SYSL_NO_CACHE=1 SYSL_LIB=$SYSL_DEV_LIB $SYSL_DEV build --release -O3 --cpu native $libs -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
+      sysl-*) SYSL_NO_CACHE=1 env -u SYSL_LIB sysl build --release -O3 --cpu native $libs -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
       c|c-tuned)
               clang -std=gnu17 -O3 -march=native -w -I$dir $dir/$prog.c -o $out -lm $libs >$out.log 2>&1 ;;
       cpp)    clang++ -std=c++20 -O3 -march=native -w $dir/$prog.cpp -o $out $libs >$out.log 2>&1 ;;
@@ -74,10 +79,6 @@ for prog in $PROGRAMS; do
                 printf '#!/bin/sh\nexec java -cp %s %s "$@"\n' $BUILD/.jclasses/$prog $prog > $out
                 chmod +x $out
               fi ;;
-      julia)  # Julia is JIT-compiled: the "executable" is a launcher, so every timed run
-              # includes Julia's startup and compilation, as on the Benchmarks Game.
-              printf '#!/bin/sh\nexec julia -O3 --check-bounds=no --startup-file=no %s "$@"\n' $ROOT/$dir/$prog.jl > $out
-              chmod +x $out ;;
     esac
     if [[ -x $out && -s $out ]]; then
       print "built  $prog/$lang"

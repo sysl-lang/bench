@@ -21,6 +21,10 @@ cd $ROOT
 
 LANGS=(sysl cpp java)
 
+# A second sysl compiler to compare with the one on PATH: SYSL_DEV names its binary and SYSL_DEV_LIB
+# its library/ tree. When set, the same sysl sources are also built with it, as the language sysl-dev.
+[[ -n $SYSL_DEV ]] && LANGS=(sysl sysl-dev cpp java)
+
 # Each benchmark's inner iterations: upstream rebench.conf.
 typeset -A INNER
 INNER=(DeltaBlue 12000 Richards 100 Json 100 CD 250 Havlak 1500
@@ -31,18 +35,26 @@ BENCHMARKS=(DeltaBlue Richards Json CD Havlak Bounce List Mandelbrot NBody Permu
 # Outer iterations per invocation, as upstream runs each executor: C++ (and so sysl) is a "slow VM"
 # with 10, the Java JIT a "fast VM" with 100, of which the first half is warm-up.
 typeset -A OUTER WARMUP
-OUTER=(sysl 10 cpp 10 java 100)
-WARMUP=(sysl 0 cpp 0 java 50)
+OUTER=(sysl 10 sysl-dev 10 cpp 10 java 100)
+WARMUP=(sysl 0 sysl-dev 0 cpp 0 java 50)
 
 # The benchmarks a language cannot run yet, with the reason (README.md, "Gaps").
 typeset -A SKIP
-SKIP=(sysl:DeltaBlue "a trait object has no identity ('===') in sysl 0.11.10"
-      sysl:Mandelbrot "sysl always fuses a*b+c on AArch64 and has no way to turn it off; the check needs separate roundings"
-      sysl:NBody "sysl always fuses a*b+c on AArch64 and has no way to turn it off; the check needs separate roundings")
+SKIP=(sysl:DeltaBlue "a trait object has no identity ('===') in sysl 0.11.12; it has from sysl dev c3af7f5c (AW1)"
+      sysl:Mandelbrot "the port fuses a*b+c on AArch64 and the check needs separate roundings"
+      sysl:NBody "the port fuses a*b+c on AArch64 and the check needs separate roundings"
+      sysl-dev:Mandelbrot "the port fuses a*b+c on AArch64 and the check needs separate roundings"
+      sysl-dev:NBody "the port fuses a*b+c on AArch64 and the check needs separate roundings")
+
+# The benchmarks a sysl compiler cannot build at all: its harness is built from a copy of
+# benchmarks/sysl without their files and without their arms in run.sysl.
+typeset -A OMIT
+OMIT=(sysl DeltaBlue)
 
 harness() {  # <lang>
   case $1 in
     sysl) print -r -- $BUILD/harness-sysl ;;
+    sysl-dev) print -r -- $BUILD/harness-sysl-dev ;;
     cpp)  print -r -- $BUILD/harness-cpp ;;
     java) print -r -- "java -cp $BUILD/java-classes Harness" ;;
   esac
@@ -53,14 +65,31 @@ build() {
   mkdir -p $BUILD
   local t0 failed=0
 
-  # SYSL_NO_CACHE: a build from the sources, not a replay of the run cache.
-  t0=$EPOCHREALTIME
-  if (cd benchmarks/sysl && SYSL_NO_CACHE=1 sysl build --release -O3 --cpu native -o $BUILD/harness-sysl .) >$BUILD/sysl.log 2>&1; then
-    print -r -- "$(( EPOCHREALTIME - t0 ))" > $BUILD/sysl.build-seconds
-    print "built  sysl ($(<$BUILD/sysl.build-seconds) s)"
-  else
-    print "FAILED sysl (see build/sysl.log)"; failed=1
-  fi
+  local lang src compiler bench
+  local -a lines
+  for lang in ${(M)LANGS:#sysl*}; do
+    src=benchmarks/sysl
+    if [[ -n ${OMIT[$lang]} ]]; then
+      src=$BUILD/src-$lang
+      cp -R benchmarks/sysl $src
+      for bench in ${=OMIT[$lang]}; do
+        rm $src/${bench:l}.sysl
+        lines=("${(@f)$(<$src/run.sysl)}")
+        print -rl -- "${(@)lines:#*\"$bench\" -> *}" > $src/run.sysl
+      done
+    fi
+    compiler=(env -u SYSL_LIB sysl)
+    [[ $lang == sysl-dev ]] && compiler=(env SYSL_LIB=$SYSL_DEV_LIB $SYSL_DEV)
+    ${compiler[-1]} --version > $BUILD/$lang.version
+    # SYSL_NO_CACHE: a build from the sources, not a replay of the run cache.
+    t0=$EPOCHREALTIME
+    if (cd $src && SYSL_NO_CACHE=1 $compiler build --release -O3 --cpu native -o $BUILD/harness-$lang .) >$BUILD/$lang.log 2>&1; then
+      print -r -- "$(( EPOCHREALTIME - t0 ))" > $BUILD/$lang.build-seconds
+      print "built  $lang ($(<$BUILD/$lang.build-seconds) s)"
+    else
+      print "FAILED $lang (see build/$lang.log)"; failed=1
+    fi
+  done
 
   # Upstream build.sh: OPT='-O3 -flto -march=native', COMP_OPT='-ffp-contract=off -std=c++17'.
   t0=$EPOCHREALTIME
@@ -115,8 +144,12 @@ time_all() {
   for lang in $LANGS; do
     [[ -f $BUILD/$lang.build-seconds ]] && cp $BUILD/$lang.build-seconds $raw/
   done
-  stat -f %z $BUILD/harness-sysl > $raw/sysl.binary-bytes
-  stat -f %z $BUILD/harness-cpp > $raw/cpp.binary-bytes
+  for lang in ${(M)LANGS:#sysl*} cpp; do
+    stat -f %z $BUILD/harness-$lang > $raw/$lang.binary-bytes
+  done
+  for lang in ${(M)LANGS:#sysl*}; do
+    [[ -f $BUILD/$lang.version ]] && cp $BUILD/$lang.version $raw/
+  done
   du -sk $BUILD/java-classes | cut -f1 > $raw/java.classes-kbytes
 
   for bench in $BENCHMARKS; do

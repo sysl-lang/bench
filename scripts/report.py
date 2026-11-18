@@ -14,7 +14,11 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 programs = ["nbody", "spectralnorm", "fannkuchredux", "binarytrees",
             "mandelbrot", "fasta", "knucleotide", "revcomp", "regexredux", "pidigits"]
 systems = ["c", "c-tuned", "rust", "rust-tuned", "cpp", "zig", "d", "odin", "c3", "ada", "fortran", "nim", "swift", "sysl-idiomatic", "sysl-tuned"]
-managed = ["go", "java", "eiffel", "eiffel-contracts", "julia"]
+managed = ["go", "java", "eiffel", "eiffel-contracts"]
+# A run with a second sysl compiler (SYSL_DEV, scripts/lib.zsh) has its two columns too.
+sysl_dev = os.environ.get("SYSL_DEV")
+if sysl_dev:
+    systems += ["sysl-idiomatic-dev", "sysl-tuned-dev"]
 columns = systems + managed
 
 
@@ -34,8 +38,12 @@ clang_version = run(["/usr/bin/clang", "-E", "-dM", "-"]).split("__clang_version
 clang_llvm = clang_version[1].splitlines()[0].strip().strip('"') if len(clang_version) > 1 else ""
 
 toolchains = {
-    "sysl": {"version": first_line(run(["sysl", "--version"])),
-             "backend": "emits LLVM IR, which Apple clang (below) optimises and links"},
+    "sysl": {"version": first_line(run(["sysl", "--version"])) + " (" + run(["which", "sysl"]) + ")",
+             "backend": "emits LLVM IR, which the first clang on PATH (Apple clang, below) optimises and links"},
+    **({"sysl-dev": {"version": first_line(run([sysl_dev, "--version"])) + " (" + sysl_dev + ")"
+                                + (", " + os.environ["SYSL_DEV_COMMIT"] if os.environ.get("SYSL_DEV_COMMIT") else ""),
+                     "backend": "the same clang as sysl"}} if sysl_dev else {}),
+    "homebrew-llvm": {"version": first_line(run(["/opt/homebrew/opt/llvm/bin/clang", "--version"]))},
     "c": {"version": first_line(run(["/usr/bin/clang", "--version"])), "llvm": clang_llvm},
     "cpp": {"version": first_line(run(["/usr/bin/clang++", "--version"])), "llvm": clang_llvm},
     "rust": {"version": first_line(run(["rustc", "--version"])),
@@ -43,7 +51,6 @@ toolchains = {
     "swift": {"version": first_line(run(["swiftc", "--version"])), "llvm": clang_llvm},
     "zig": {"version": "zig " + first_line(run(["zig", "version"]))},
     "nim": {"version": first_line(run(["nim", "--version"])), "llvm": clang_llvm},
-    "julia": {"version": first_line(run(["julia", "--version"]))},
     "go": {"version": first_line(run(["go", "version"]))},
     "d": {"version": first_line(run(["ldc2", "--version"])),
           "llvm": run(["ldc2", "--version"]).split("LLVM ")[1].split("\n")[0].strip()},
@@ -87,8 +94,6 @@ flags = {
     "eiffel-contracts": "the same source as `eiffel`, ECF target `contracts`: precondition, "
                         "postcondition, check, invariant and loop (invariant and variant) "
                         "assertions all on",
-    "julia": "julia -O3 --check-bounds=no --startup-file=no (JIT: every timed run includes "
-             "Julia's startup and compilation, as on the Benchmarks Game)",
 }
 machine = {"cpu": run(["sysctl", "-n", "machdep.cpu.brand_string"]),
            "os": first_line(run(["sw_vers", "-productVersion"]))}
@@ -113,6 +118,8 @@ for prog in programs:
         rows = {r["name"]: r for r in json.load(f)["results"]}
     entry = {}
     for lang in columns:
+        if lang not in rows:  # a DNF cell (scripts/lib.zsh): not timed
+            continue
         ms = rows[lang]["measurements"]
         wall = [m["time_wall_clock"]["value"] for m in ms]
         cpu = [m["time_cpu"]["value"] for m in ms]
@@ -120,22 +127,32 @@ for prog in programs:
         entry[lang] = {"mean": mean, "stddev": stddev, "min": low, "median": median,
                        "cpu_mean": sum(cpu) / len(cpu), "runs": len(wall)}
     base, cpu_base = entry["c"]["mean"], entry["c"]["cpu_mean"]
-    for lang in columns:
+    for lang in entry:
         entry[lang]["ratio_to_c"] = entry[lang]["mean"] / base
         entry[lang]["cpu_ratio_to_c"] = entry[lang]["cpu_mean"] / cpu_base
     data[prog] = entry
 
+# Every geometric mean is over the programs that every column finished, so that the columns stay
+# comparable; a program with a DNF cell is left out of all of them, and the report names it.
+dnf = [cell.split(":") for cell in os.environ.get("BENCH_DNF", "").split(",") if cell]
+dnf = [(p, l) for p, l in dnf if p in programs and l in columns]
+common = [p for p in programs if all(lang in data[p] for lang in columns)]
+
 geo = {}
 cpu_geo = {}
 for lang in columns:
-    vals = [data[p][lang]["ratio_to_c"] for p in programs]
+    vals = [data[p][lang]["ratio_to_c"] for p in common]
     geo[lang] = math.exp(sum(math.log(v) for v in vals) / len(vals))
-    vals = [data[p][lang]["cpu_ratio_to_c"] for p in programs]
+    vals = [data[p][lang]["cpu_ratio_to_c"] for p in common]
     cpu_geo[lang] = math.exp(sum(math.log(v) for v in vals) / len(vals))
 
 def group_geo(langs, key):
-    vals = [data[p][lang][key] for p in programs for lang in langs]
+    vals = [data[p][lang][key] for p in common for lang in langs]
     return math.exp(sum(math.log(v) for v in vals) / len(vals))
+
+
+def cell(e, lang, key, fmt):
+    return format(e[lang][key], fmt) if lang in e else "DNF"
 
 
 group_geo_wall = {"all": group_geo(columns, "ratio_to_c"), "systems": group_geo(systems, "ratio_to_c"),
@@ -148,7 +165,8 @@ doc = {"date": stamp, "groups": {"systems": systems, "managed": managed},
        "group_geometric_mean_cpu_ratio_to_c": group_geo_cpu, "machine": machine, "toolchains": toolchains, "flags": flags,
        "hyperfine": "--warmup 3 --runs 10",
        "load": {"start": load("load-start.txt"), "end": load("load-end.txt")}, "programs": data, "geometric_mean_ratio_to_c": geo,
-       "geometric_mean_cpu_ratio_to_c": cpu_geo}
+       "geometric_mean_cpu_ratio_to_c": cpu_geo, "geometric_mean_programs": common,
+       "dnf": [{"program": p, "language": l} for p, l in dnf]}
 with open(os.path.join(root, "results", stamp + ".json"), "w") as f:
     json.dump(doc, f, indent=2)
     f.write("\n")
@@ -166,10 +184,14 @@ lines = [f"# Results {stamp}", "",
          "|---|---:|" + "---:|" * (len(columns) - 1)]
 for prog in programs:
     e = data[prog]
-    cells = " | ".join(f"{e[c]['ratio_to_c']:.2f}" for c in columns if c != "c")
+    cells = " | ".join(cell(e, c, "ratio_to_c", ".2f") for c in columns if c != "c")
     lines.append(f"| {prog} | {e['c']['mean']:.3f} | {cells} |")
 lines.append("| **geometric mean** | | " +
              " | ".join(f"{geo[c]:.2f}" for c in columns if c != "c") + " |")
+if dnf:
+    lines += ["", "**DNF** (did not finish) cells were verified at the small size and not timed: " +
+              "; ".join(f"{p}/{l}" for p, l in dnf) + ". Every geometric mean is over the programs every "
+              f"column finished ({', '.join(common)}), so the columns stay comparable."]
 lines += ["", "Geometric mean over every program and language in a group (wall clock; systems includes C):", "",
           "| overall | systems | managed |", "|---:|---:|---:|",
           f"| {group_geo_wall['all']:.2f} | {group_geo_wall['systems']:.2f} | {group_geo_wall['managed']:.2f} |"]
@@ -180,12 +202,37 @@ lines += ["", "## CPU time", "",
           "|---|---:|" + "---:|" * (len(columns) - 1)]
 for prog in programs:
     e = data[prog]
-    cells = " | ".join(f"{e[c]['cpu_ratio_to_c']:.2f}" for c in columns if c != "c")
+    cells = " | ".join(cell(e, c, "cpu_ratio_to_c", ".2f") for c in columns if c != "c")
     lines.append(f"| {prog} | {e['c']['cpu_mean']:.3f} | {cells} |")
 lines.append("| **geometric mean** | | " +
              " | ".join(f"{cpu_geo[c]:.2f}" for c in columns if c != "c") + " |")
 lines += ["", "| overall (CPU) | systems (CPU) | managed (CPU) |", "|---:|---:|---:|",
           f"| {group_geo_cpu['all']:.2f} | {group_geo_cpu['systems']:.2f} | {group_geo_cpu['managed']:.2f} |"]
+lines += ["", "## Spread", "",
+          "Each cell is the standard deviation of the wall-clock runs as a percentage of their mean "
+          f"({data[programs[0]]['c']['runs']} runs each): the noise a difference between two cells has to beat.", "",
+          "| program | " + " | ".join(columns) + " |",
+          "|---|" + "---:|" * len(columns)]
+for prog in programs:
+    e = data[prog]
+    cells = " | ".join(f"{100 * e[c]['stddev'] / e[c]['mean']:.1f}" if c in e else "DNF" for c in columns)
+    lines.append(f"| {prog} | {cells} |")
+if sysl_dev:
+    lines += ["", "## sysl compilers", "",
+              f"The same sysl sources built by `sysl` ({toolchains['sysl']['version']}) and by `sysl-dev` "
+              f"({toolchains['sysl-dev']['version']}). Times are means in seconds ± one standard deviation; "
+              "`change` is dev's mean against the base's (negative is faster).", "",
+              "| program | idiomatic base (s) | idiomatic dev (s) | change | tuned base (s) | tuned dev (s) | change |",
+              "|---|---:|---:|---:|---:|---:|---:|"]
+    for prog in programs:
+        e = data[prog]
+        cells = []
+        for col in ["sysl-idiomatic", "sysl-tuned"]:
+            b, d = e.get(col), e.get(col + "-dev")
+            cells += [f"{b['mean']:.3f} ± {b['stddev']:.3f}" if b else "DNF",
+                      f"{d['mean']:.3f} ± {d['stddev']:.3f}" if d else "DNF",
+                      f"{100 * (d['mean'] / b['mean'] - 1):+.1f}%" if b and d else "—"]
+        lines.append(f"| {prog} | " + " | ".join(cells) + " |")
 lines += ["", "## Toolchains", ""]
 for name, t in toolchains.items():
     extra = f" (LLVM: {t['llvm']})" if t.get("llvm") else ""

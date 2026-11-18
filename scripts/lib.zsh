@@ -4,9 +4,17 @@ ROOT=${0:A:h:h}
 export PATH=$HOME/.local/gnat-16.1.0/bin:/Users/work/.cargo/bin:/opt/homebrew/opt/openjdk/bin:/opt/homebrew/opt/eiffelstudio/bin:/opt/homebrew/bin:$PATH
 
 PROGRAMS=(nbody spectralnorm fannkuchredux binarytrees mandelbrot fasta knucleotide revcomp)
-LANGS=(sysl-idiomatic sysl-tuned c c-tuned rust rust-tuned cpp swift zig nim julia go d odin c3 ada fortran java eiffel eiffel-contracts)
+LANGS=(sysl-idiomatic sysl-tuned c c-tuned rust rust-tuned cpp swift zig nim go d odin c3 ada fortran java eiffel eiffel-contracts)
 SYSTEMS=(c c-tuned rust rust-tuned cpp zig d odin c3 ada fortran nim swift sysl-idiomatic sysl-tuned)
-MANAGED=(go java eiffel eiffel-contracts julia)
+MANAGED=(go java eiffel eiffel-contracts)
+
+# A second sysl compiler to compare with the one on PATH: SYSL_DEV names its binary and SYSL_DEV_LIB
+# its library/ tree. When set, every program is also built from its sysl-idiomatic and sysl-tuned
+# sources with that compiler, as the columns sysl-idiomatic-dev and sysl-tuned-dev.
+if [[ -n $SYSL_DEV ]]; then
+  LANGS=(sysl-idiomatic sysl-tuned sysl-idiomatic-dev sysl-tuned-dev ${LANGS:#sysl-*})
+  SYSTEMS+=(sysl-idiomatic-dev sysl-tuned-dev)
+fi
 
 # Size handed to each program as its one argument. A program whose size is -
 # (knucleotide, revcomp, regexredux) takes no argument and reads the generated
@@ -26,6 +34,15 @@ SMALL+=(regexredux -)
 PROGRAMS+=(pidigits)
 BIG[pidigits]=10000
 SMALL[pidigits]=27
+
+# Programs that do not finish at the timed size, with the reason. They are verified at the small size
+# only, are not timed, and show as DNF in the report (which reads the same table from BENCH_DNF).
+typeset -A DNF
+DNF=(regexredux:sysl-idiomatic "sysl.regex replace_all is quadratic (FINDINGS.md §9): not finished in hours at the timed size"
+     regexredux:sysl-idiomatic-dev "sysl.regex replace_all is quadratic (FINDINGS.md §9): not finished in hours at the timed size"
+     regexredux:eiffel "Gobo's regex holds memory in proportion to the text a [^…]* crosses: killed for memory at the timed size (SOURCES.md)"
+     regexredux:eiffel-contracts "Gobo's regex holds memory in proportion to the text a [^…]* crosses: killed for memory at the timed size (SOURCES.md)")
+export BENCH_DNF=${(j:,:)${(k)DNF}}
 
 # BENCH_PROGRAMS names a subset to build or verify (default: every program).
 (( ${+BENCH_PROGRAMS} )) && PROGRAMS=(${=BENCH_PROGRAMS})
