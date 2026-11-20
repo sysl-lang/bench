@@ -34,37 +34,72 @@ included, must do (README rule 3).
 | program | language | archive file | changes |
 |---|---|---|---|
 | nbody | C | `nbody.gcc-6.gcc` | unchanged |
-| nbody | C++ | `nbody.gpp` | unchanged |
 | nbody | Rust | `nbody.rust-2.rust` | unchanged |
 | nbody | Swift | `nbody.swift-5.swift` | unchanged |
 | spectralnorm | C | `spectralnorm.gcc-8.gcc` | unchanged |
-| spectralnorm | C++ | `spectralnorm.gpp` | unchanged |
 | spectralnorm | Rust | `spectralnorm.rust` | the `parallel` helper and `std::thread` removed; `mult_Av` and `mult_Atv` call `mult` once over the whole slice |
 | spectralnorm | Swift | `spectralnorm.swift-8.swift` | unchanged |
 | fannkuchredux | C | `fannkuchredux.gcc-3.gcc` | unchanged |
-| fannkuchredux | C++ | `fannkuchredux.gpp-3.gpp` | unchanged |
 | fannkuchredux | Rust | `fannkuchredux.rust-2.rust` | the four threads replaced by one call of `work` over the whole range |
 | fannkuchredux | Swift | `fannkuchredux.swift-8.swift` | unchanged |
 | binarytrees | C | `binarytrees.gcc` | `#include <malloc.h>` removed (absent on macOS) |
-| binarytrees | C++ | `binarytrees.gpp-2.gpp` | unchanged |
 | binarytrees | Rust | `binarytrees.rust` | the `typed_arena` crate (an arena, so not the reference allocation pattern) replaced by `Box` nodes, and the thread per depth by a loop |
 | binarytrees | Swift | `binarytrees.swift` | the Dispatch queue replaced by a sequential loop |
 | mandelbrot | C | `mandelbrot.gcc-8.gcc` | unchanged |
-| mandelbrot | C++ | `mandelbrot.gpp-5.gpp` | unchanged |
 | mandelbrot | Rust | `mandelbrot.rust` | `thread::spawn` replaced by calling each worker closure in turn on the main thread |
 | mandelbrot | Swift | `mandelbrot.swift-8.swift` | `import Glibc` changed to `import Darwin` |
 | fasta | C | `fasta.gcc-2.gcc` | unchanged (linear lookup, its default) |
-| fasta | C++ | `fasta.gpp-2.gpp` | unchanged |
 | fasta | Rust | `fasta.rust-3.rust` | unchanged |
 | fasta | Swift | none | **a port of the C program above, written for this suite**: the archive's Swift programs build a `String` a `Character` at a time (`fasta.swift-8`) or use Dispatch threads (`fasta.swift-2`, `-3`), neither of which is the C program's work |
 | knucleotide | C | `knucleotide.gcc` | unchanged; needs `khash.h` |
-| knucleotide | C++ | `knucleotide.gpp-3.gpp` | `__gnu_pbds::cc_hash_table` replaced by `std::unordered_map` (libc++ has no pb_ds), and the `std::async` worker per core by one call. Each k-mer's code is rolled from the previous one, as every other program does (rule 3), where the archive re-encoded all k bases at every position (AUDIT.md A4) |
 | knucleotide | Rust | `knucleotide.rust` | the archive program keys a `HashMap` by a freshly allocated `Vec<u8>` per position, which is a different data structure from the others' integer keys. Rewritten to key a `HashMap` by the 2k-bit `u64` code with a one-multiply hasher; the reading, sorting and output are the archive's. Threads removed |
 | knucleotide | Swift | `knucleotide.swift-2.swift` | `concurrentPerform` over 8 tasks replaced by a loop over one task, whose table is the result (merging it into an empty table, as the threaded original must, inserted every key twice: AUDIT.md A3); the Dispatch queues removed |
 | revcomp | C | `revcomp.gcc-4.gcc` | unchanged |
-| revcomp | C++ | `revcomp.gcc-4.gcc` | **the C program ported to C++** (casts on `malloc`/`realloc`, the table copied with `memcpy`). The archive's C++ programs (`revcomp.gpp`, `-2`, `-3`) read line by line through iostreams and ran 45 times slower than C, which is the I/O library rather than the algorithm |
 | revcomp | Rust | `revcomp.rust-2.rust` | `rayon::join` replaced by a local sequential `join` |
 | revcomp | Swift | `revcomp.swift` | the Dispatch reader, worker and writer queues replaced by a sequential loop |
+
+### C++
+
+C++'s programs come from the same archive (`*.gpp` files, BSD-3), **byte for byte as published**:
+no source line is changed in any of them. Each is **the fastest C++ entry on the Game's CPU seconds
+that builds and runs unmodified on this machine** (arm64 macOS; Apple clang 21 with libc++, or
+Homebrew's GCC 16 with libstdc++). An entry that needs any source change to build or to print the
+Game's output here is passed over for the next one, and every entry passed over is listed below with
+the reason. Chosen 2026-11-20 from the Game's `performance/<program>.html`; the "Game" column is its
+published wall / CPU seconds on its 4-core x86. **Threads as published**: the OpenMP, `std::thread`,
+`std::async` and parallel-algorithm entries run multi-threaded.
+
+**Build.** `clang++ -std=c++20 -O3 -mcpu=native -w`, plus what the entry's own Game build line adds
+(its `-std`, which overrides, `-fopenmp`, `-g`, its libraries), in this compiler's spelling
+(build.zsh's `CPP_FLAGS`). Apple clang's `-fopenmp` is `-Xclang -fopenmp` with Homebrew's `libomp`.
+Binary-trees' `std::execution::par` is behind `-fexperimental-library` in libc++ (its parallel backend
+on macOS is libdispatch; the Game's libstdc++ build links `-ltbb`), and it includes Boost's
+`counting_iterator` (Homebrew `boost`, headers only). **k-nucleotide is built by Homebrew's
+`g++-16`**, since its hash table, `__gnu_pbds::cc_hash_table`, is part of libstdc++ and absent from
+libc++. regex-redux links Homebrew's PCRE2 and pidigits Homebrew's GMP and `gmpxx`, as in the Game's
+lines. No other library is installed for C++.
+
+**Inputs and checks are the Game's own.** Each program was checked at the Game's check size against the
+Game's own output file (`download/<program>-output.txt`, fetched 2026-11-20: nbody 1,000,
+spectralnorm 100, fannkuchredux 7, binarytrees 10, mandelbrot 200, fasta 1,000, pidigits 30, and
+k-nucleotide, reverse-complement and regex-redux on the Game's `<program>-input.txt`), and at the Game's
+timed size (nbody 50,000,000, spectralnorm 5,500, fannkuchredux 12, binarytrees 21, mandelbrot 16,000,
+fasta 25,000,000, pidigits 10,000; k-nucleotide and reverse-complement on fasta 25,000,000, regex-redux
+on fasta 5,000,000) against the C program's output at that size, since the Game publishes no output
+there. These are the Game's sizes, not the bench's current `lib.zsh` sizes.
+
+| program | archive file | Game wall / CPU (s) | built with | entries passed over (faster on the Game's CPU seconds) |
+|---|---|---|---|---|
+| nbody | `nbody.gpp-9.gpp` | 5.15 / 5.15 | clang++, `-std=c++17` | `-0` (2.15) and `-7` (4.09): x86 intrinsics (`<immintrin.h>`, which neither compiler has for arm64) |
+| spectralnorm | `spectralnorm.gpp` | 5.34 / 5.34 | clang++ | `-6` (2.86) and `-5` (5.27): x86 SSE2 intrinsics (`<emmintrin.h>`) |
+| fannkuchredux | `fannkuchredux.gpp-5.gpp` | 7.86 / 30.73 | clang++, `-std=c++11`, OpenMP | `-6` (13.11) and `-7` (14.04): x86 intrinsics (`<immintrin.h>`, `<xmmintrin.h>`) |
+| binarytrees | `binarytrees.gpp-7.gpp` | 1.01 / 3.44 | clang++, `-std=gnu++17`, `-fexperimental-library`, Boost headers | none. Its nodes come from `std::pmr::monotonic_buffer_resource` arenas, one per tree, a library memory pool the Game allows |
+| mandelbrot | `mandelbrot.gpp-7.gpp` | 4.87 / 13.29 | clang++, OpenMP | `-4` (3.46): builds with `-mno-fma` spelled `-ffp-contract=off`, but on arm64 it takes its scalar fallback and rounds the image height up to a multiple of `hardware_concurrency()` (18 here, 4 on the Game), so at 200 it writes a 200 x 216 bitmap. `-1` (3.48) and `-6` (3.88): x86 intrinsics. `-0` (9.31): builds, but its output at 200 differs from the Game's (its Game build adds Agner Fog's x86 vector class library) |
+| fasta | `fasta.gpp-2.gpp` | 1.85 / 1.84 | clang++ | `-9` (1.55): its non-SSE2 path, the one arm64 compiles, does not build (`begin` undeclared at line 101); the x86 path is SSE2 intrinsics |
+| knucleotide | `knucleotide.gpp-2.gpp` | 2.02 / 6.00 | **g++-16**, `-std=c++17 -lpthread` | none (clang++ cannot build it: no `ext/pb_ds` in libc++) |
+| revcomp | `revcomp.gpp` | 6.55 / 6.55 | clang++ | `-2` (0.75): x86 SSSE3 intrinsics under its Game build's `-DSIMD` |
+| regexredux | `regexredux.gpp-6.gpp` | 1.14 / 2.26 | clang++, `-std=c++17 -lpthread`, PCRE2 | none |
+| pidigits | `pidigits.gpp-4.gpp` | 0.72 / 0.71 | clang++, `-std=c++14 -g`, `-lgmp -lgmpxx` | none. GMP through `gmpxx`, the same spigot steps as the reference |
 
 ### Go, D and Odin
 
@@ -172,7 +207,7 @@ Homebrew's copy outright (build.zsh's `PCRE2_FLAGS`).
 | language | archive file | library | changes |
 |---|---|---|---|
 | C, `c-tuned` | `regexredux.gcc-5.gcc` (the Game's fastest C) | PCRE2, JIT | unchanged: the `#pragma omp` lines are ignored without `-fopenmp` (Apple clang has none), so it runs on one thread. `c-tuned` is a copy: nothing faster than PCRE2's JIT is known for C |
-| C++ | `regexredux.gpp-6.gpp` (the fastest C++) | PCRE2, JIT | `std::launch::async` changed to `std::launch::deferred`, so each task runs on the main thread when its result is asked for |
+| C++ | `regexredux.gpp-6.gpp` (the fastest C++) | PCRE2, JIT | unchanged, a `std::async` task per pattern as published; see "C++" above |
 | Rust, `rust-tuned` | `regexredux.rust-7.rust` (the Game's fastest program) | PCRE2, JIT | the `pcre2_sys` and `libc` crates replaced by the `extern "C"` declarations they provide (the build is a bare `rustc` with no crates); `rayon::scope`, the `mpsc` channels and `into_par_iter` replaced by sequential calls. `rust-tuned` is a copy. **The entries using the `regex` crate (`regexredux.rust`, `-2` to `-6`) were not used**: the crate cannot be built without cargo, and the PCRE2 entry is the Game's fastest |
 | Swift | `regexredux.swift-4.swift` | Foundation `NSRegularExpression` (every Swift entry's) | the `DispatchGroup` and its queues removed; the replacement chain and the counts run in turn |
 | Go | `regexredux.go-5.go` (the fastest Go) | PCRE2, JIT, through cgo | the archive program imports `github.com/GRbit/go-pcre`, a cgo binding to the retired PCRE1 (not installed, and a module fetch); it is replaced by a few dozen lines of cgo over PCRE2 making the same calls (`pcre2_jit_compile`, `pcre2_jit_match`). Goroutines and `GOMAXPROCS` removed. Go's own `regexp` (`regexredux.go`, `-3`) is about eight times slower on the Game. The cgo flags come from PCRE2's `pkg-config` file, Homebrew's named outright by build.zsh |
@@ -231,14 +266,14 @@ pidigits computes with a big-integer library (README, the rules): the language's
 it has one, otherwise GMP 6.3.0 (`brew install gmp`, LGPL), found with `pkg-config gmp` by
 build.zsh. Every version is the reference algorithm above; the archive's `pidigits.gcc-2` (the
 `lua-5` arrangement, two numerators and no `acc`), `pidigits.java` (composes 2x2 matrices of
-`BigInteger`) and `pidigits.gpp-4` (`gmpxx` temporaries) do different work and were passed over.
+`BigInteger`) do different work and were passed over.
 Several archive entries print no padded last line when the count is not a multiple of ten (the
 27-digit reference output has one); those gained the C++ entry's padding, noted as "padding".
 
 | language | library | archive file | changes |
 |---|---|---|---|
 | C | GMP | `pidigits.gcc` | padding |
-| C++ | GMP (C API) | `pidigits.gpp-5.gpp` | `using ulong = unsigned long` (a glibc name macOS lacks) |
+| C++ | GMP (`gmpxx`, its C++ classes) | `pidigits.gpp-4.gpp` (the fastest C++) | unchanged; links `-lgmpxx` as its Game build line does. The same spigot steps as the reference (`r` is `acc`, `q` `num`, `t` `den`); see "C++" above |
 | Rust | GMP (`#[link]` FFI, no crate) | `pidigits.rust-3.rust` | unchanged. `pidigits.rust-4` uses the `rug` crate, which the bench's crate-free `rustc` build cannot take; `-3` binds the same library directly |
 | Swift | GMP (`import gmp`) | `pidigits.swift-2.swift` | unchanged; the `gmp` module is `module.modulemap` and `gmp-shim.h` beside it |
 | Go | GMP (cgo) | `pidigits.go-4.go` (the fastest Go: 0.82 s on the Game, against 5.00 for `math/big` in `-7`) | padding (the archive program prints only whole lines of ten). It sets `GOMAXPROCS(1)` and locks the OS thread itself. Until 2026-11-17 Go ran `-7` over `math/big`, about six times slower on the Game, while every other language here used GMP (AUDIT.md G4) |
@@ -255,12 +290,13 @@ Several archive entries print no padded last line when the count is not a multip
 ## Implementation variants of one algorithm
 
 Some programs differ in how the same arithmetic is laid out, as they do on the Benchmarks Game. The
-Rust spectral-norm and the C++ and Rust mandelbrot carry two values in a struct or eight pixels in an
+Rust spectral-norm and the Rust mandelbrot carry two values in a struct or eight pixels in an
 array so the optimizer can vectorize, and the Rust n-body computes all pairwise differences in arrays.
 They do the same operations on the same data as C and are kept; the table's ratios below 1.00 for Rust
-and C++ are mostly this. The fannkuch programs generate the permutations in the same order by different
-rotation schemes (C: Ledrug's; C++: Branimir Maksimovic's; Rust: a factorial-number scheme; Swift and
-sysl: Rex Kerr's count array).
+are mostly this. The fannkuch programs generate the permutations in the same order by different
+rotation schemes (C: Ledrug's; Rust: a factorial-number scheme; Swift and sysl: Rex Kerr's count
+array). The C++ programs are the Game's fastest that run here unmodified, threads included, and are
+not held to this section ("C++" above).
 
 ## The tuned C and Rust columns
 

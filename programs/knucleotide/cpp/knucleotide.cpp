@@ -1,151 +1,220 @@
-/* The Computer Language Benchmarks Game
-   https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
+// The Computer Language Benchmarks Game
+// https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
+//
+// Contributed by Sylvester Saguban
+// taken some inspirations from C++ G++ #3 from Branimir Maksimovic
+//
+// Improvements to algorithm of C++ G++ #3:
+// - Only doing incremental update to key instead of
+//   recomputing it for every insert to hash table,
+//   this aligns it to the other fast implementations.
+//   Notably C GCC, Rust #6, Rust #4.
+// - Returning the hash object by moving instead of
+//   returning by copy.
+// - Using std::thread instead of std::async so routines
+//   are guaranteed to run on their own threads.
 
-   Contributed by Branimir Maksimovic
+// Improvements aimed at better compiler optimizations:
+// - Passing the count/string length as a function
+//   template argument so it is known in advance by
+//   the compiler. For programming languages without
+//   value generics, the same optimization can done
+//   by making those values as constants.
+// - 'Key' class uses this template value so 'size'
+//   member variable is not needed inside the class,
+//   this also reduced the memory usage against the
+//   original implementation.
 
-   Adapted for this suite: __gnu_pbds::cc_hash_table is replaced by
-   std::unordered_map and the std::async worker per core by a single call; each
-   k-mer's code is rolled from the previous one, not re-encoded from its k bases.
-*/
-
-// g++ 4.8.x bug, compile with: -Wl,--no-as-needed option 
+// compile with these flags:
+// -std=c++17 -march=native -msse -msse2 -msse3 -O3
 
 #include <iostream>
 #include <iomanip>
 #include <cstdint>
-#include <cstdio>
 #include <string>
-#include <cstring>
 #include <algorithm>
 #include <map>
-#include <unordered_map>
-#include <unistd.h>
+#include <thread>
+#include <type_traits>
+#include <cstring>
+#include <vector>
+#include <cassert>
+#include <ext/pb_ds/assoc_container.hpp>
 
-unsigned char tonum[256],tochar[4];
-static void init()
+struct Cfg {
+    static constexpr size_t thread_count = 4;
+    static constexpr unsigned to_char[4] = {'A', 'C', 'T', 'G'};
+    static inline unsigned char to_num[128];
+    using Data = std::vector<unsigned char>;
+
+    Cfg() {
+        to_num['A'] = to_num['a'] = 0;
+        to_num['C'] = to_num['c'] = 1;
+        to_num['T'] = to_num['t'] = 2;
+        to_num['G'] = to_num['g'] = 3;
+    }
+} const cfg;
+
+template <size_t size>
+struct Key
 {
-   tonum['A'] = 0;
-   tonum['C'] = 1;
-   tonum['T'] = 2;
-   tonum['G'] = 3;
-   tochar[0] = 'A';
-   tochar[1] = 'C';
-   tochar[2] = 'T';
-   tochar[3] = 'G';
-}
+    // select type to use for 'data', if hash key can fit on 32-bit integer
+    // then use uint32_t else use uint64_t.
+    using Data = typename std::conditional<size<=16, uint32_t, uint64_t>::type;
 
-struct T{
-   T(const std::string& s = std::string())
-   :data(0),size(s.size())
-   {
-      reset(s,0,s.size());
-   }
-   void reset(const std::string& s,unsigned beg,unsigned end)
-   {
-      size = end-beg;
-      data = 0;
-      for(unsigned i = beg; i != end; ++i)
-      {
-         data <<= 2;
-         data |= tonum[unsigned(s[i])];
-      }
-   }
-   bool operator<(const T& in)const
-   {
-      return data < in.data;
-   }
-   bool operator==(const T& in)const
-   {
-      return data == in.data;
-   }
-   operator std::string()const
-   {
-      std::string tmp;
-      uint64_t tmp1 = data;
-      for(unsigned i = 0;i!=size;++i)
-      {
-         tmp+=tochar[tmp1 & 3];
-         tmp1 >>= 2;
-      }
-      std::reverse(tmp.begin(),tmp.end());
-      return tmp;
-   }
-   struct hash{
-   uint64_t operator()(const T& t)const{ return t.data; }
-   };
-   uint64_t data;
-   unsigned char size;
+    struct Hash {
+        Data operator()(const Key& t)const{ return t._data; }
+    };
+
+    Key(Data data) : _data(data) {
+    }
+
+    // uses std::string_view instead of std::string because std::string always
+    // allocates a copy from the heap. while std::string_view is only a wrapper
+    // of a pointer and a size
+    Key(const std::string_view& str) {
+        _data = 0;
+        for(unsigned i = 0; i < size; ++i){
+            _data <<= 2;
+            _data |= cfg.to_num[unsigned(str[i])];
+        }
+    }
+
+    // initialize hash from input data
+    void InitKey(const unsigned char * data){
+        for(unsigned i = 0; i < size; ++i){
+            _data <<= 2;
+            _data |= data[i];
+        }
+    }
+
+    // updates the key with 1 byte
+    void UpdateKey(const unsigned char data){
+        _data <<= 2;
+        _data |= data;
+    }
+
+    // masks out excess information
+    void MaskKey(){
+        _data &= _mask;
+    }
+
+    // implicit casting operator to string
+    operator std::string() const {
+        std::string tmp;
+        Data data = _data;
+        for(size_t i = 0; i != size; ++i, data >>= 2)
+            tmp += cfg.to_char[data & 3ull];
+        std::reverse(tmp.begin(), tmp.end());
+        return std::move(tmp);
+    }
+
+    bool operator== (const Key& in) const {
+        return _data == in._data;
+    }
+private:
+    static constexpr Data _mask = ~(Data(-1) << (2 * size));
+    Data _data;
 };
 
-std::unordered_map<T,unsigned,T::hash>
-calculate(const std::string& input,unsigned size, unsigned beg=0,unsigned incr=1)
+template <size_t size, typename K = Key<size> >
+using HashTable = __gnu_pbds::cc_hash_table<K, unsigned, typename K::Hash>;
+
+template <size_t size>
+void Calculate(const Cfg::Data& input, size_t begin, HashTable<size>& table)
 {
-   std::unordered_map<T,unsigned,T::hash> frequencies;
-   T tmp;
-   unsigned i_end = input.size() + 1 - size;
-   if (beg >= i_end) return frequencies;
-   // The first k-mer is encoded whole; each later one rolls the code by one base, as every
-   // other language's program does (README rule 3), where the archive re-encoded all k bases.
-   const uint64_t mask = size >= 32 ? ~uint64_t(0) : (uint64_t(1) << (2 * size)) - 1;
-   tmp.reset(input,beg,beg+size);
-   ++frequencies[tmp];
-   for (unsigned i = beg + incr; i < i_end; i+=incr)
-   {
-      tmp.data = ((tmp.data << 2) | tonum[unsigned(input[i+size-1])]) & mask;
-      ++frequencies[tmp];
-   }
-   return frequencies;
+    // original implementation fully recomputes the hash key for each
+    // insert to the hash table. This implementation only partially
+    // updates the hash, this is the same with C GCC, Rust #6 and Rust #4
+    Key<size> key(0);
+    // initialize key
+    key.InitKey(input.data() + begin);
+    // use key to increment value
+    ++table[key];
+
+    auto itr_begin = input.data() + begin + cfg.thread_count;
+    auto itr_end = (input.data() + input.size() + 1) - size;
+    for(;itr_begin < itr_end; itr_begin += cfg.thread_count) {
+        // update the key 1 byte at a time
+        constexpr size_t nsize = std::min(size, cfg.thread_count);
+        for(unsigned i = 0; i < nsize; ++i)
+            key.UpdateKey( itr_begin[i] );
+        // then finally mask out excess information
+        key.MaskKey();
+        // then use key to increment value
+        ++table[key];
+    }
 }
 
-std::unordered_map<T,unsigned,T::hash>
-tcalculate(const std::string& input,unsigned size)
+template <size_t size>
+auto CalculateInThreads(const Cfg::Data& input)
 {
-   return calculate(input,size);
+    HashTable<size> hash_tables[cfg.thread_count];
+    std::thread threads[cfg.thread_count];
+
+    auto invoke = [&](unsigned begin) {
+        Calculate<size>(input, begin, hash_tables[begin]);
+    };
+
+    for(unsigned i = 0; i < cfg.thread_count; ++i)
+        threads[i] = std::thread(invoke, i);
+
+    for(auto& i : threads)
+        i.join();
+
+    auto& frequencies = hash_tables[0];
+    for(unsigned i = 1 ; i < cfg.thread_count; ++i)
+        for(auto& j : hash_tables[i])
+            frequencies[j.first] += j.second;
+    // return the 'frequency' by move instead of copy.
+    return std::move(frequencies);
 }
 
-void write_frequencies(const std::string & input, unsigned size)
+template <unsigned size>
+void WriteFrequencies(const Cfg::Data& input)
 {
-   unsigned sum = input.size() + 1 - size;
-   auto frequencies = tcalculate(input,size);
-   std::map<unsigned, std::string,std::greater<unsigned>> freq;
-   for(auto& i: frequencies)
-   {
-      freq.insert(std::make_pair(i.second,i.first));
-   }
-   for(auto& i : freq)
-      std::cout << i.second << ' ' << (sum ? double(100 * i.first) / sum : 0.0) << '\n';
-   std::cout << '\n';
+    // we "receive" the returned object by move instead of copy.
+    auto&& frequencies = CalculateInThreads<size>(input);
+    std::map<unsigned, std::string, std::greater<unsigned>> freq;
+    for(const auto& i: frequencies)
+        freq.insert({i.second, i.first});
+
+    const unsigned sum = input.size() + 1 - size;
+    for(const auto& i : freq)
+        std::cout << i.second << ' ' << (sum ? double(100 * i.first) / sum : 0.0) << '\n';
+    std::cout << '\n';
 }
 
-void write_count(const std::string & input, const std::string& string)
-{
-   unsigned size = string.size();
-   auto frequencies = tcalculate(input,size);
-
-   std::cout << frequencies[string] << '\t' << string << '\n';
+template <unsigned size>
+void WriteCount( const Cfg::Data& input, const std::string& text ) {
+    // we "receive" the returned object by move instead of copy.
+    auto&& frequencies = CalculateInThreads<size>(input);
+    std::cout << frequencies[Key<size>(text)] << '\t' << text << '\n';
 }
 
 int main()
 {
-   init();
-   std::string input;
-   char buffer[256];
-   while (fgets(buffer,100,stdin) && memcmp(">THREE",buffer,6)!=0);
-   while (fgets(buffer,100,stdin) && buffer[0] != '>')
-   {
-      if (buffer[0] != ';')
-      {
-         input.append(buffer,strlen(buffer)-1);
-      }
-   }
-   std::transform(input.begin(),input.end(),input.begin(),::toupper);
+    Cfg::Data data;
+    std::array<char, 256> buf;
 
-   std::cout << std::setprecision(3) << std::setiosflags(std::ios::fixed);
-   write_frequencies(input,1);
-   write_frequencies(input,2);
-   write_count(input, "GGT");
-   write_count(input, "GGTA");
-   write_count(input, "GGTATT");
-   write_count(input, "GGTATTTTAATT");
-   write_count(input, "GGTATTTTAATTTATAGT");
+    while(fgets(buf.data(), buf.size(), stdin) && memcmp(">THREE", buf.data(), 6));
+    while(fgets(buf.data(), buf.size(), stdin) && buf.front() != '>') {
+        if(buf.front() != ';'){
+            auto i = std::find(buf.begin(), buf.end(), '\n');
+            data.insert(data.end(), buf.begin(), i);
+        }
+    }
+    std::transform(data.begin(), data.end(), data.begin(), [](auto c){
+        return cfg.to_num[c];
+    });
+    std::cout << std::setprecision(3) << std::setiosflags(std::ios::fixed);
+
+    WriteFrequencies<1>(data);
+    WriteFrequencies<2>(data);
+    // value at left is the length of the passed string.
+    WriteCount<3>(data, "GGT");
+    WriteCount<4>(data, "GGTA");
+    WriteCount<6>(data, "GGTATT");
+    WriteCount<12>(data, "GGTATTTTAATT");
+    WriteCount<18>(data, "GGTATTTTAATTTATAGT");
 }

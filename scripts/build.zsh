@@ -15,7 +15,7 @@ cd $ROOT
 GMP_INCLUDE=$(pkg-config --variable=includedir gmp) GMP_LIB=$(pkg-config --variable=libdir gmp)
 typeset -A GMP_FLAGS
 GMP_FLAGS=(c "-I$GMP_INCLUDE -L$GMP_LIB -lgmp" c-tuned "-I$GMP_INCLUDE -L$GMP_LIB -lgmp"
-           cpp "-I$GMP_INCLUDE -L$GMP_LIB -lgmp" rust "-L $GMP_LIB" rust-tuned "-L $GMP_LIB"
+           cpp "-I$GMP_INCLUDE -L$GMP_LIB -lgmpxx -lgmp" rust "-L $GMP_LIB" rust-tuned "-L $GMP_LIB"
            swift "-I programs/pidigits/swift -Xcc -I$GMP_INCLUDE -L $GMP_LIB" zig "-L$GMP_LIB -lgmp"
            odin "-extra-linker-flags:-L$GMP_LIB"
            ada "-largs -L$GMP_LIB" fortran "-L$GMP_LIB -lgmp" c3 "-L $GMP_LIB -l gmp")
@@ -28,6 +28,20 @@ PCRE2_FLAGS=(c "-I$PCRE2/include -L$PCRE2/lib -lpcre2-8" c-tuned "-I$PCRE2/inclu
              cpp "-I$PCRE2/include -I/opt/homebrew/opt/boost/include -L$PCRE2/lib -lpcre2-8"
              rust "-L $PCRE2/lib" rust-tuned "-L $PCRE2/lib" zig "-L$PCRE2/lib -lpcre2-8"
              fortran "-L$PCRE2/lib -lpcre2-8" sysl-tuned "--link-path $PCRE2/lib")
+
+# The C++ programs are the Game's fastest C++ entries that build and run unmodified here, threads as
+# published (SOURCES.md, "C++"). Each gets what its own Game build line adds, in this compiler's
+# spelling: its -std, OpenMP (-fopenmp is -Xclang -fopenmp with Homebrew's libomp), -g, and for
+# binary-trees the parallel algorithms (libc++ keeps std::execution::par behind -fexperimental-library;
+# the Game links TBB for libstdc++'s) and Boost's headers. k-nucleotide's entry uses libstdc++'s
+# __gnu_pbds, which libc++ lacks, so it is built by Homebrew's g++-16, the Game's own compiler family.
+B=/opt/homebrew/opt
+OMP="-Xclang -fopenmp -I$B/libomp/include -L$B/libomp/lib -lomp"
+typeset -A CPP_FLAGS CPP_CC
+CPP_FLAGS=(nbody "-std=c++17" fannkuchredux "-std=c++11 $OMP" mandelbrot "$OMP"
+           binarytrees "-std=gnu++17 -fexperimental-library -I$B/boost/include"
+           knucleotide "-std=c++17 -lpthread" regexredux "-std=c++17 -lpthread" pidigits "-std=c++14 -g")
+CPP_CC=(knucleotide g++-16)
 
 failed=0
 for prog in $PROGRAMS; do
@@ -51,7 +65,7 @@ for prog in $PROGRAMS; do
               # the v8.7a features, while -mcpu=native is this machine's processor, as sysl's
               # --cpu native and Rust's target-cpu=native are (AUDIT.md A1).
               clang -std=gnu17 -O3 -mcpu=native -w -I$dir $dir/$prog.c -o $out -lm $libs >$out.log 2>&1 ;;
-      cpp)    clang++ -std=c++20 -O3 -mcpu=native -w $dir/$prog.cpp -o $out $libs >$out.log 2>&1 ;;
+      cpp)    ${CPP_CC[$prog]:-clang++} -std=c++20 -O3 -mcpu=native -w ${(z)CPP_FLAGS[$prog]} $dir/$prog.cpp -o $out $libs >$out.log 2>&1 ;;
       rust|rust-tuned)
               # codegen-units=1, as the Benchmarks Game builds Rust (AUDIT.md A2).
               rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native -C codegen-units=1 $dir/$prog.rs -o $out $libs >$out.log 2>&1 ;;

@@ -292,8 +292,8 @@ const regex_replace_spec replace_specs[] = { { "tHa[Nt]", "<4>" },
     { "aND|caN|Ha[DS]|WaS", "<3>" }, { "a[NSt]|BY", "<2>" }, { "<[^>]*>", "|" },
     { "\\|[^|][^|]*\\|", "-" } };
 
-// Run every task on the calling thread, when its result is asked for (single-threaded)
-const auto launch_type = std::launch::deferred;
+// Run asynchronous tasks in separate thread
+const auto launch_type = std::launch::async;
 
 // Read all data from input-stream and return as string
 inline std::string slurp(std::istream& in)
