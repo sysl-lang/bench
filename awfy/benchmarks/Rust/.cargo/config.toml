@@ -1,0 +1,3 @@
+# Read by cargo when it is run from benchmarks/Rust: this machine's processor, as C++'s -mcpu=native.
+[build]
+rustflags = ["-C", "target-cpu=native"]
