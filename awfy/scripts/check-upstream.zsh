@@ -11,14 +11,18 @@ if [[ $(git -C $UPSTREAM_DIR rev-parse HEAD 2>/dev/null) != $UPSTREAM_COMMIT ]];
   exit 1
 fi
 
+# build.sh's outputs (`harness`, `harness-<CXX><OPT>`), which upstream's own .gitignore ignores, are
+# not compared: they are in the upstream checkout once C++ is built. Narrower than upstream's
+# `/harness*`, since diff -x matches a name at any depth and src/harness.cpp must still be compared.
+skip=(-x harness -x 'harness-*')
 differ=0
 for pair in $UPSTREAM_FILES; do
   here=${pair%%=*} there=${pair#*=}
-  if diff -r $here $UPSTREAM_DIR/$there >/dev/null; then
+  if diff -r $skip $here $UPSTREAM_DIR/$there >/dev/null; then
     print "same     $here  =  upstream $there"
   else
     print "DIFFERS  $here  vs  upstream $there"
-    diff -r $here $UPSTREAM_DIR/$there | head -20
+    diff -r $skip $here $UPSTREAM_DIR/$there | head -20
     differ=1
   fi
 done

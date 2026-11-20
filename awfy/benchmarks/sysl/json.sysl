@@ -317,17 +317,18 @@ struct JsonPureStringParser
     private pause_capture(*self)
         val end = if self.current.len == 0 then self.index else self.index - 1
 
-        self.capture_buffer = f"${self.capture_buffer}${self.input[self.capture_start..end]}"
+        self.capture_buffer = f"${self.capture_buffer}${self.input[self.capture_start..end].copy()}"
         self.capture_start = -1
 
     private end_capture(*self) -> string
         val end = if self.current.len == 0 then self.index else self.index - 1
         var captured = ""
 
+        // Every capture is a copy of its part of the input, as C++'s `substr` and Java's `substring`.
         if self.capture_buffer.len == 0
-            captured = self.input[self.capture_start..end]
+            captured = self.input[self.capture_start..end].copy()
         else
-            self.capture_buffer = f"${self.capture_buffer}${self.input[self.capture_start..end]}"
+            self.capture_buffer = f"${self.capture_buffer}${self.input[self.capture_start..end].copy()}"
             captured = self.capture_buffer
             self.capture_buffer = ""
 
