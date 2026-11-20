@@ -55,9 +55,7 @@ toolchains = {
            "llvm": run(["c3c", "--version"]).split("LLVM version:")[1].split("\n")[0].strip()},
     "ada": {"version": first_line(run(["gnat", "--version"])),
             "backend": "GCC's own back end (not LLVM)"},
-    "fortran": {"version": first_line(run(["gfortran", "--version"])),
-                "backend": "GCC's own back end (not LLVM); fortran-stdlib "
-                           + run(["pkg-config", "--modversion", "fortran_stdlib"])},
+    "fortran": {"version": first_line(run([os.environ.get("FORTRAN", "flang"), "--version"]))},
     "go": {"version": first_line(run(["go", "version"])),
            "backend": "Go's own compiler and garbage collector (not LLVM); cgo's C through Apple clang"},
     "hyperfine": {"version": first_line(run(["hyperfine", "--version"]))},
@@ -70,17 +68,18 @@ flags = {
     "cpp": "clang++ -std=c++20 -O3 -mcpu=native",
     "rust": "rustc --edition 2021 -C opt-level=3 -C target-cpu=native -C codegen-units=1 (rust-tuned the "
             "same; bounds checks stay on, overflow wraps)",
-    "swift": "swiftc -O (bounds checks and integer-overflow traps stay on; no CPU option, so generic arm64)",
+    "swift": "swiftc -Ounchecked -wmo -target-cpu <this processor> (the Benchmarks Game's Swift build line; "
+             "-Ounchecked removes bounds checks and overflow traps); the Game's entries unmodified",
     "zig": "zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded",
     "odin": "odin build -o:speed -microarch:native (bounds checks stay on)",
     "c3": "c3c compile -O3 (-O3 is c3c's unsafe mode: runtime bounds checks and contracts are off; "
           "c3c has no native-CPU option for arm64)",
-    "ada": "gnatmake -O3 -gnatp -march=native (-gnatp suppresses every run-time check, "
-           "bounds checks included, as C's -O3 has none; GNAT is GCC's Ada front end and "
-           "uses GCC's back end)",
-    "fortran": "gfortran -O3 -march=native (no -ffast-math: IEEE semantics as in C; no bounds "
-               "checks, which gfortran adds only under -fcheck=bounds); knucleotide links "
-               "fortran-stdlib's hash map",
+    "ada": "gnatmake -O3 -fomit-frame-pointer -mcpu=<this processor> -gnatn2 -f (the Benchmarks Game's "
+           "GNAT build line; checks stay on except where an entry suppresses them itself); the Game's "
+           "entries unmodified",
+    "fortran": "flang -O3 -mcpu=<this processor> -flto, -fopenmp where the Game's ifx line has -qopenmp, "
+               "-ffp-contract=off for mandelbrot; the Game's entries unmodified, k-nucleotide and "
+               "regex-redux written for this benchmark",
     "go": "GOARM64=v8.7 go build (no other flag, as the Benchmarks Game builds Go, which sets "
           "GOAMD64=v2; v8.7 is this machine's level; bounds checks stay on); run with GOMAXPROCS=1 and "
           "the default GOGC=100; pidigits calls GMP and regex-redux PCRE2 through cgo",

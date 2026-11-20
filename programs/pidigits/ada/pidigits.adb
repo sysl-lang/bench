@@ -3,22 +3,22 @@
 --  Calculate digits of pi using the
 --  Unbounded Spigot Algorithms
 --
---  Contributed by Brian Kolden
---  gmp headers by Karl-Michael Schindler and Brian Kolden
---  Port of Mr Ledrug's pidigits
---  Fixed by johnisgood
+--  From Pascal code by Vincent Snijders
+--  gmp headers by Karl-Michael Schindler
+--  Translated by (New) P2Ada v. 17-June-2006
 
-with Ada.Command_Line;    use Ada.Command_Line;
+with Ada.Text_IO;                       use Ada.Text_IO;
+with Ada.Integer_Text_IO;               use Ada.Integer_Text_IO;
+with Ada.Command_Line;                  use Ada.Command_Line;
+with Ada.Calendar;                      use Ada.Calendar;
 
 with Interfaces.C;
 
-procedure Pidigits is
+procedure pidigits is
 
   pragma Suppress(All_Checks);
 
-  package GMP_Mini is
-  	Print_String : constant String := ASCII.HT & ":%d" & ASCII.LF & ASCII.NUL;
-
+  package GMP_mini is
     type mp_limb_t is new Interfaces.C.unsigned;
     type mp_ptr is access mp_limb_t;
 
@@ -27,125 +27,135 @@ procedure Pidigits is
       mp_d    : mp_ptr;
     end record;
 
-    procedure mpz_init (Dest: out mpz_t) with Inline=>True;
+    procedure mpz_init (Dest: out mpz_t);
     pragma Import(C, mpz_init, "__gmpz_init");
 
-    procedure mpz_init_set_ui (Dest: out mpz_t; Src: in Interfaces.C.unsigned_long) with Inline=>True;
+    procedure mpz_init_set_ui (Dest: out mpz_t; Src: in Interfaces.C.unsigned_long);
     pragma Import(C, mpz_init_set_ui, "__gmpz_init_set_ui");
 
-    procedure mpz_mul_ui (Dest: out mpz_t; Src1: in mpz_t; Src2: in Interfaces.C.unsigned_long) with Inline=>True;
+    procedure mpz_mul_ui (Dest: out mpz_t; Src1: in mpz_t; Src2: in Interfaces.C.unsigned_long);
     pragma Import(C, mpz_mul_ui, "__gmpz_mul_ui");
 
-    procedure mpz_add (Dest: out mpz_t; Src1, Src2: in mpz_t) with Inline=>True;
+    procedure mpz_mul_si (Dest: out mpz_t; Src1: in mpz_t; Src2: in Interfaces.C.int);
+    pragma Import(C, mpz_mul_si, "__gmpz_mul_si");
+
+    procedure mpz_add (Dest: out mpz_t; Src1, Src2: in mpz_t);
     pragma Import(C, mpz_add, "__gmpz_add");
 
-    procedure mpz_addmul_ui (Dest: out mpz_t; Src1: in mpz_t; Src2: in Interfaces.C.unsigned_long) with Inline=>True;
-    pragma Import(C, mpz_addmul_ui, "__gmpz_addmul_ui");
-
-    procedure mpz_submul_ui (Dest: out mpz_t; Src1: in mpz_t; Src2: in Interfaces.C.unsigned_long) with Inline=>True;
-    pragma Import(C, mpz_submul_ui, "__gmpz_submul_ui");
-
-    procedure mpz_tdiv_q (Dest: out mpz_t; Src1, Src2: in mpz_t) with Inline=>True;
+    procedure mpz_tdiv_q (Dest: out mpz_t; Src1, Src2: in mpz_t);
     pragma Import(C, mpz_tdiv_q, "__gmpz_tdiv_q");
 
-    function mpz_get_ui (Src: in mpz_t) return Interfaces.C.unsigned_long with Inline=>True;
+    function  mpz_get_ui (Src: in mpz_t) return Interfaces.C.unsigned_long;
     pragma Import(C, mpz_get_ui, "__gmpz_get_ui");
-
-    function mpz_cmp (Src: in mpz_t; Ref: in mpz_t) return Interfaces.C.int with Inline=>True;
-    pragma Import(C, mpz_cmp, "__gmpz_cmp");
-
-    procedure Put_Char (Val : in Interfaces.C.unsigned) with Inline=>True;
-    pragma Import(C, Put_Char, "putchar");
-
-    procedure Put_Line (Format : in String; Data : in Interfaces.C.unsigned) with Inline=>True;
-    pragma Import(C_Variadic_1, Put_Line, "printf");
 
     pragma Linker_Options("-lgmp");
 
   end GMP_Mini;
-  use GMP_Mini;
 
-  Tmp1, Tmp2, Acc, Den, Num : mpz_t;
+  procedure Print_pi_digits(num_digits: Integer) is
+    use GMP_mini;
 
-  function Extract(X: Interfaces.C.Unsigned_long) return Interfaces.C.unsigned with Inline=>True;
-  function Extract(X: Interfaces.C.Unsigned_long) return Interfaces.C.unsigned is
-  begin
-    mpz_mul_ui(Tmp1, Num, X);
-    mpz_add(Tmp2, Tmp1, Acc);
-    mpz_tdiv_q(Tmp1, Tmp2, Den);
-    return Interfaces.C.unsigned(mpz_get_ui(Tmp1));
-  end Extract;
+    q,r,s,t: mpz_t; --  Transformation matrix components
 
-  procedure Eliminate (D : in Interfaces.C.unsigned) with Inline=>True;
-  procedure Eliminate (D : in Interfaces.C.unsigned) is
-  begin
-    mpz_submul_ui(Acc, Den, Interfaces.C.unsigned_long(D));
-    mpz_mul_ui(Acc, Acc, 10);
-    mpz_mul_ui(Num, Num, 10);
-  end Eliminate;
+    u,v,w: mpz_t;   --  Temporary variables
 
-  procedure Consume (K : in Interfaces.C.unsigned) with Inline=>True;
-  procedure Consume (K : in Interfaces.C.unsigned) is
+    k,digit: Interfaces.C.int;
+    c,i: Integer;
+    line: String(1 ..10);
+
+    function Extract(x: Interfaces.C.Unsigned_long) return Interfaces.C.int is
+    begin
+      mpz_mul_ui(u, q, x);
+      mpz_add(u, u, r);
+      mpz_mul_ui(v, s, x);
+      mpz_add(v, v, t);
+      mpz_tdiv_q(w, u, v);
+      return Interfaces.C.int(mpz_get_ui(w));
+    end Extract;
+
     use Interfaces.C;
-    K2 : unsigned;
+
+    function IsSafe return Boolean is
+    begin
+      return digit = Extract(4);
+    end IsSafe;
+
+    procedure Produce is
+    begin
+      mpz_mul_si(r, r, 10);
+      mpz_mul_si(v, t, -10 * digit);
+      mpz_add(r, r, v);
+      mpz_mul_si(q, q, 10);
+    end Produce;
+
+    procedure Consume is
+    begin
+      k:= k + 1;
+      mpz_mul_si(r, r, 2*k+1);
+      mpz_mul_si(u, q, 4*k+2);
+      mpz_add(r, r, u);
+      mpz_mul_si(t, t, 2*k+1);
+      mpz_mul_si(v, s, 4*k+2);
+      mpz_add(t, t, v);
+      mpz_mul_si(s, s, k);
+      mpz_mul_si(q, q, k);
+    end Consume;
+
   begin
-    K2 := K * 2 + 1;
+    k := 0;
+    i := 0;
+    c := 0;
+    mpz_init_set_ui(q, 1);
+    mpz_init_set_ui(r, 0);
+    mpz_init_set_ui(s, 0);
+    mpz_init_set_ui(t, 1);
+    mpz_init(u);
+    mpz_init(v);
+    mpz_init(w);
+    while i < num_digits loop
+      digit := Extract(3);
+      while not IsSafe loop
+        Consume;
+        digit:= Extract(3);
+      end loop;
+      Produce;
+      c:= c + 1;
+      line(c) := Character'Val(Character'Pos('0')+digit);
+      i:= i + 1;
+      if c = 10 then
+        Put(line & ASCII.HT & ':');
+        Put(i,0); New_Line;
+        c := 0;
+      end if;
+    end loop;
+    if  c/=0 then
+      Put(line(1..c));
+      for i in c+1..10 loop
+        Put(' ');
+      end loop;
+      Put(ASCII.HT & ':');
+      Put(i,0);
+      New_Line;
+    end if;
+  end Print_pi_digits;
 
-    mpz_addmul_ui(Acc, Num, 2);
-    mpz_mul_ui(Acc, Acc, unsigned_long(K2));
-    mpz_mul_ui(Den, Den, unsigned_long(K2));
-    mpz_mul_ui(Num, Num, unsigned_long(K));
-  end Consume;
+  n: Integer;
 
-
-  N : Interfaces.C.unsigned;
+  t0,t1: Time;
+  timing: constant Boolean:= False;
 
 begin
-  N := 2_500;
+  n:= 2_500;
   if Argument_Count=1 then
-    N := Interfaces.C.unsigned'Value(Argument(1));
+    n:= Integer'Value(Argument(1));
   end if;
-
-  mpz_init(Tmp1);
-  mpz_init(Tmp2);
-
-  mpz_init_set_ui(Acc, 0);
-  mpz_init_set_ui(Den, 1);
-  mpz_init_set_ui(Num, 1);
-
-  declare
-    use Interfaces.C;
-    D, K, I : Interfaces.C.unsigned := 0;
-    Space   : constant Interfaces.C.unsigned := 32;
-  begin
-    <<Work_Loop>>
-    while I < N loop
-      K := K + 1;
-      Consume(K);
-
-      if mpz_cmp(Num, Acc) > 0 then
-        goto Work_Loop;
-      end if;
-
-      D := Extract(3);
-      if D /= Extract(4) then 
-        goto Work_Loop;
-      end if;
-
-      Put_Char(D + 48);
-      I := I + 1;
-      if I rem 10 = 0 then
-        Put_Line(Print_String, I);
-      end if;
-      Eliminate(D);
-
-    end loop;
-    if I rem 10 /= 0 then
-       for X in 1 .. 10 - Integer'Val (I) rem 10 loop
-          Put_Char (Space);
-       end loop;
-       Put_Line (Print_String, I);
-    end if;
-  end;
-
-end Pidigits;
+  if timing then
+    t0:= Clock;
+  end if;
+  Print_pi_digits(n);
+  if timing then
+    t1:= Clock;
+    Put("Time in seconds: " & Duration'Image(t1-t0) & " [press return]");
+    Skip_Line;
+  end if;
+end pidigits;

@@ -1,7 +1,15 @@
 ! The Computer Language Benchmarks Game
 ! https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
 !
-! Contributed by Jeremy Zerfas
+! Original, written for this benchmark: the Game has no Fortran k-nucleotide
+! (Fortran's standard library has no hash table). It mirrors the Game's
+! fastest C program, knucleotide.gcc, contributed by Jeremy Zerfas: each
+! oligonucleotide is a 2k-bit code rolled one base at a time, counted in an
+! open-addressing hash table of 64-bit keys and 32-bit counts with the C
+! program's hash, key xor key >> 7, and the seven tables are counted at once,
+! one OpenMP section each, their text printed in order afterwards. The hash
+! table is ffhash (ffhash_inc.f90 beside this file), a Fortran library
+! modelled on the C program's khash.h.
 
 module posix_read
   use iso_c_binding, only: c_int, c_size_t, c_long, c_int8_t
@@ -20,47 +28,41 @@ module posix_read
   end interface
 end module posix_read
 
+! ffhash instantiated for 2k-bit codes and counts, as the C program
+! instantiates khash: KHASH_INIT(oligonucleotide, uint64_t, uint32_t, ...).
+module oligonucleotide_table
+  use iso_fortran_env, only: int32, int64
+  implicit none
+#define FFH_KEY_TYPE integer(int64)
+#define FFH_VAL_TYPE integer(int32)
+#define FFH_CUSTOM_HASH_FUNCTION
+#include "ffhash_inc.f90"
+
+  ! The C program's CUSTOM_HASH_FUNCTION(key): key ^ key >> 7.
+  pure function hash_function(key) result(hash)
+    integer(int64), intent(in) :: key
+    integer(int32) :: hash
+    hash = int(ieor(key, shiftr(key, 7)), int32)
+  end function hash_function
+end module oligonucleotide_table
+
 module oligonucleotides
   use iso_fortran_env, only: int8, int32, int64
-  use stdlib_hashmaps, only: open_hashmap_type
-  use stdlib_hashmap_wrappers, only: key_type, set
+  use oligonucleotide_table, only: ffh_t
   implicit none
-
-  ! stdlib's map holds class(*) values, so it maps each oligonucleotide's
-  ! code to its index in keys and counts.
-  type counter
-     type(open_hashmap_type) :: map
-     integer(int64), allocatable :: keys(:)
-     integer(int32), allocatable :: counts(:)
-     integer :: n = 0
-  end type counter
 
 contains
 
-  ! The C program's hash, key xor key >> 7, of the 2k-bit code that the
-  ! key holds as eight bytes.
-  pure function kmer_hasher(key) result(hash)
-    type(key_type), intent(in) :: key
-    integer(int32) :: hash
-    integer(int64) :: code
-
-    code = transfer(key%value, code)
-    hash = int(ieor(code, shiftr(code, 7)), int32)
-  end function kmer_hasher
-
-  ! Counts every oligonucleotide of length k in seq into c.
-  subroutine count_all(seq, k, c)
+  ! Counts every oligonucleotide of length k in seq into h, as the C
+  ! program's generate_Frequencies_For_Desired_Length_Oligonucleotides does.
+  subroutine count_all(seq, k, h)
     integer(int8), intent(in) :: seq(:)
     integer, intent(in) :: k
-    type(counter), intent(out) :: c
+    type(ffh_t), intent(inout) :: h
     integer(int64) :: code, mask
+    integer(int32) :: ix, before
     integer :: i
-    type(key_type) :: key
-    class(*), allocatable :: other
-    logical :: exists
 
-    call c%map%init(kmer_hasher, slots_bits=10)
-    allocate(c%keys(1024), c%counts(1024))
     mask = shiftl(1_int64, 2 * k) - 1
     code = 0
     do i = 1, k - 1
@@ -68,34 +70,15 @@ contains
     end do
     do i = k, size(seq)
        code = ior(iand(shiftl(code, 2), mask), int(seq(i), int64))
-       call set(key, transfer(code, [0_int8], 8))
-       call c%map%get_other_data(key, other, exists)
-       if (exists) then
-          select type (other)
-          type is (integer)
-             c%counts(other) = c%counts(other) + 1
-          end select
+       before = h%n_keys_stored
+       call h%store_key(code, ix)
+       if (h%n_keys_stored /= before) then
+          h%vals(ix) = 1
        else
-          c%n = c%n + 1
-          if (c%n > size(c%keys)) call grow(c)
-          c%keys(c%n) = code
-          c%counts(c%n) = 1
-          call c%map%map_entry(key, c%n)
+          h%vals(ix) = h%vals(ix) + 1
        end if
     end do
   end subroutine count_all
-
-  subroutine grow(c)
-    type(counter), intent(inout) :: c
-    integer(int64), allocatable :: k2(:)
-    integer(int32), allocatable :: c2(:)
-
-    allocate(k2(2 * size(c%keys)), c2(2 * size(c%keys)))
-    k2(1:c%n-1) = c%keys(1:c%n-1)
-    c2(1:c%n-1) = c%counts(1:c%n-1)
-    call move_alloc(k2, c%keys)
-    call move_alloc(c2, c%counts)
-  end subroutine grow
 
 end module oligonucleotides
 
@@ -103,6 +86,7 @@ program knucleotide
   use iso_fortran_env, only: int8, int32, int64
   use iso_c_binding, only: c_size_t, c_long
   use posix_read
+  use oligonucleotide_table, only: ffh_t
   use oligonucleotides
   implicit none
 
@@ -111,7 +95,12 @@ program knucleotide
   character(len=*), parameter :: three = '>THREE'
   character(len=4), parameter :: letters = 'ACGT'
 
+  type text
+     character(len=:), allocatable :: text
+  end type text
+
   integer(int8), allocatable :: input(:), seq(:), w(:)
+  type(text) :: results(7)
   integer(int8) :: code_of(-128:127)
   integer(c_long) :: got
   integer :: n, i, j, nseq
@@ -167,77 +156,103 @@ program knucleotide
   end do
   deallocate(input)
 
-  call write_frequencies(seq(1:nseq), 1)
-  call write_frequencies(seq(1:nseq), 2)
-  call write_count(seq(1:nseq), 'GGT')
-  call write_count(seq(1:nseq), 'GGTA')
-  call write_count(seq(1:nseq), 'GGTATT')
-  call write_count(seq(1:nseq), 'GGTATTTTAATT')
-  call write_count(seq(1:nseq), 'GGTATTTTAATTTATAGT')
+  ! The seven tables are counted at once, one OpenMP section each, as the
+  ! C program does; each section's text is printed in order after.
+  !$omp parallel sections
+  !$omp section
+  call write_frequencies(seq(1:nseq), 1, results(1)%text)
+  !$omp section
+  call write_frequencies(seq(1:nseq), 2, results(2)%text)
+  !$omp section
+  call write_count(seq(1:nseq), 'GGT', results(3)%text)
+  !$omp section
+  call write_count(seq(1:nseq), 'GGTA', results(4)%text)
+  !$omp section
+  call write_count(seq(1:nseq), 'GGTATT', results(5)%text)
+  !$omp section
+  call write_count(seq(1:nseq), 'GGTATTTTAATT', results(6)%text)
+  !$omp section
+  call write_count(seq(1:nseq), 'GGTATTTTAATTTATAGT', results(7)%text)
+  !$omp end parallel sections
+
+  do i = 1, size(results)
+     write(*, '(a)', advance='no') results(i)%text
+  end do
 
 contains
 
   ! Every oligonucleotide of length k with its percentage, most frequent
-  ! first, then by code.
-  subroutine write_frequencies(seq, k)
+  ! first, then by code, as lines of text in res.
+  subroutine write_frequencies(seq, k, res)
     integer(int8), intent(in) :: seq(:)
     integer, intent(in) :: k
-    type(counter) :: c
-    integer :: i, j, best, total
+    character(len=:), allocatable, intent(out) :: res
+    type(ffh_t) :: h
+    integer(int64), allocatable :: keys(:)
+    integer(int32), allocatable :: counts(:)
+    integer :: i, j, m, best, total
     integer(int64) :: tk, code
     integer(int32) :: tc
     character(len=k) :: name
+    character(len=64) :: line
 
-    call count_all(seq, k, c)
+    call count_all(seq, k, h)
+    ! The table's entries as arrays, as the C program copies them out.
+    allocate(keys(h%n_keys_stored), counts(h%n_keys_stored))
+    m = 0
+    do i = 0, h%n_buckets - 1
+       if (h%valid_index(i)) then
+          m = m + 1
+          keys(m) = h%keys(i)
+          counts(m) = h%vals(i)
+       end if
+    end do
     ! At most 16 entries: a selection sort by count, then by code.
-    do i = 1, c%n - 1
+    do i = 1, m - 1
        best = i
-       do j = i + 1, c%n
-          if (c%counts(j) > c%counts(best) .or. &
-              (c%counts(j) == c%counts(best) .and. c%keys(j) < c%keys(best))) best = j
+       do j = i + 1, m
+          if (counts(j) > counts(best) .or. &
+              (counts(j) == counts(best) .and. keys(j) < keys(best))) best = j
        end do
-       tk = c%keys(i); c%keys(i) = c%keys(best); c%keys(best) = tk
-       tc = c%counts(i); c%counts(i) = c%counts(best); c%counts(best) = tc
+       tk = keys(i); keys(i) = keys(best); keys(best) = tk
+       tc = counts(i); counts(i) = counts(best); counts(best) = tc
     end do
     total = size(seq) - k + 1
-    do i = 1, c%n
-       code = c%keys(i)
+    res = ''
+    do i = 1, m
+       code = keys(i)
        do j = k, 1, -1
           name(j:j) = letters(iand(code, 3_int64) + 1:iand(code, 3_int64) + 1)
           code = shiftr(code, 2)
        end do
        ! The C program divides in single precision.
-       write(*, '(a," ",f0.3)') name, 100.0 * real(c%counts(i)) / real(total)
+       write(line, '(a," ",f0.3)') name, 100.0 * real(counts(i)) / real(total)
+       res = res // trim(line) // achar(10)
     end do
-    write(*, '(a)') ''
+    res = res // achar(10)
   end subroutine write_frequencies
 
-  ! The number of times the oligonucleotide s occurs.
-  subroutine write_count(seq, s)
+  ! The number of times the oligonucleotide s occurs, as a line of text in res.
+  subroutine write_count(seq, s, res)
     integer(int8), intent(in) :: seq(:)
     character(len=*), intent(in) :: s
-    type(counter) :: c
-    type(key_type) :: key
-    class(*), allocatable :: other
-    logical :: exists
+    character(len=:), allocatable, intent(out) :: res
+    character(len=64) :: line
+    type(ffh_t) :: h
     integer(int64) :: code
+    integer(int32) :: ix
     integer :: i, count
 
-    call count_all(seq, len(s), c)
+    call count_all(seq, len(s), h)
     code = 0
     do i = 1, len(s)
        code = ior(shiftl(code, 2), int(code_of(iachar(s(i:i))), int64))
     end do
-    call set(key, transfer(code, [0_int8], 8))
-    call c%map%get_other_data(key, other, exists)
+    ix = h%get_index(code)
     count = 0
-    if (exists) then
-       select type (other)
-       type is (integer)
-          count = c%counts(other)
-       end select
-    end if
-    write(*, '(i0,a,a)') count, achar(9), s
+    if (ix >= 0) count = h%vals(ix)
+    write(line, '(i0,a,a)') count, achar(9), s
+    res = trim(line) // achar(10)
   end subroutine write_count
 
 end program knucleotide

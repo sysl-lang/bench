@@ -1,66 +1,52 @@
---  The Computer Language Benchmarks Game
---  https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
+
+-- The Computer Language Benchmarks Game
+-- https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
 --
---  A port to Ada of the C program contributed by Sebastien Loisel.
+-- Contributed by Jim Rogers
+-- Modified by Jonathan Parker (Oct 2009)
 
-with Ada.Command_Line;
-with Ada.Numerics.Long_Elementary_Functions;
-with Ada.Text_IO;
+pragma Restrictions (No_Abort_Statements);
+pragma Restrictions (Max_Asynchronous_Select_Nesting => 0);
 
-procedure Spectralnorm is
-   use Ada.Numerics.Long_Elementary_Functions;
+with Ada.Text_Io;
+with Ada.Numerics.Generic_Elementary_Functions;
+with Ada.Command_Line; use Ada.Command_Line;
+with Spectral_Utils;
 
-   type Vector is array (Natural range <>) of Long_Float;
+procedure SpectralNorm is
 
-   function Eval_A (I, J : Integer) return Long_Float is
-   begin
-      return 1.0 / Long_Float ((I + J) * (I + J + 1) / 2 + I + 1);
-   end Eval_A;
+   type Real is digits 15;
 
-   procedure Eval_A_Times_U (U : Vector; Au : out Vector) is
-   begin
-      for I in Au'Range loop
-         Au (I) := 0.0;
-         for J in U'Range loop
-            Au (I) := Au (I) + Eval_A (I, J) * U (J);
-         end loop;
-      end loop;
-   end Eval_A_Times_U;
+   No_of_Cores_to_Use : constant := 4;
 
-   procedure Eval_At_Times_U (U : Vector; Au : out Vector) is
-   begin
-      for I in Au'Range loop
-         Au (I) := 0.0;
-         for J in U'Range loop
-            Au (I) := Au (I) + Eval_A (J, I) * U (J);
-         end loop;
-      end loop;
-   end Eval_At_Times_U;
+   package Real_IO is new Ada.Text_Io.Float_Io(Real);
+   package Real_Funcs is new Ada.Numerics.Generic_Elementary_Functions(Real);
+   use Real_Funcs;
 
-   procedure Eval_AtA_Times_U (U : Vector; AtAu : out Vector) is
-      V : Vector (U'Range);
-   begin
-      Eval_A_Times_U (U, V);
-      Eval_At_Times_U (V, AtAu);
-   end Eval_AtA_Times_U;
-
-   package Long_IO is new Ada.Text_IO.Float_IO (Long_Float);
-
-   N : constant Natural :=
-     (if Ada.Command_Line.Argument_Count = 1
-      then Natural'Value (Ada.Command_Line.Argument (1)) else 100);
-   U, V     : Vector (0 .. N - 1);
-   VBv, Vv  : Long_Float := 0.0;
+   N : Natural := 100;
+   Vbv, Vv : Real := 0.0;
 begin
-   U := (others => 1.0);
-   for I in 1 .. 10 loop
-      Eval_AtA_Times_U (U, V);
-      Eval_AtA_Times_U (V, U);
-   end loop;
-   for I in 0 .. N - 1 loop
-      VBv := VBv + U (I) * V (I);
-      Vv := Vv + V (I) * V (I);
-   end loop;
-   Long_IO.Put (Sqrt (VBv / Vv), Fore => 1, Aft => 9, Exp => 0);
-   Ada.Text_IO.New_Line;
-end Spectralnorm;
+   if Argument_Count = 1 then
+      N := Natural'Value (Argument(1));
+   end if;
+
+   declare
+      package Spectral_Utilities is new Spectral_Utils
+        (Real, No_of_Tasks => No_of_Cores_to_Use, Matrix_Size => N);
+      use Spectral_Utilities;
+
+      U : Matrix := (Others => 1.0);
+      V : Matrix := (Others => 0.0);
+   begin
+      for I in 1 .. 10 loop
+         Eval_Ata_Times_U(U, V);
+         Eval_Ata_Times_U(V, U);
+      end loop;
+      for I in V'Range loop
+         Vbv := Vbv + U(I) * V(I);
+         Vv  := Vv  + V(I) * V(I);
+      end loop;
+   end;
+   Real_IO.Put(Item => Sqrt(Vbv/Vv), Fore => 1, Aft => 9, Exp => 0);
+   Ada.Text_Io.New_Line;
+end SpectralNorm;

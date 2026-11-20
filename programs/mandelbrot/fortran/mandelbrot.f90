@@ -3,62 +3,97 @@
 !
 ! contributed by Pascal Parois
 
-program mandelbrot
-  implicit none
+program mandelbrot 
+implicit none
+    
+integer, parameter :: iter = 50, vsize=32
+integer, parameter :: int8 = selected_int_kind(2)
+integer, parameter :: dp = selected_real_kind(15, 307)
 
-  integer, parameter :: iter = 50
-  integer, parameter :: dp = selected_real_kind(15, 307)
-  real(dp), parameter :: limit2 = 4.0_dp
+integer :: i, j,k, pos
+real(dp),dimension(vsize) :: cr,ci,zr,zi,tr,ti
+real(dp) cte
+integer :: bytepos, grid
+integer(int8) :: byte
+integer(int8), dimension(:,:), allocatable :: buf
+integer w
+character(len=8) :: argv
+character(len=100) :: sbuffer
 
-  real(dp), dimension(8) :: cr, zr, zi, tr, ti
-  real(dp) :: ci
-  integer :: w, nbytes, y, xb, x0, k, n, byte, pos, out
-  character(len=1), dimension(:), allocatable :: buf
-  character(len=16) :: argv
-  character(len=32) :: header
+real(dp), parameter :: threshold = 4.0_dp
 
-  call get_command_argument(1, argv)
-  read(argv, *) w
-  nbytes = (w + 7) / 8
+    call get_command_argument(1, argv)
+    read(argv, *) w        
+    grid=ceiling(w/real(vsize))*vsize
 
-  allocate(buf(nbytes * w))
-  pos = 0
+    allocate(buf(grid/8, w))
+    buf=0.0_dp
 
-  do y = 0, w - 1
-     ci = 2.0_dp * real(y, dp) / w - 1.0_dp
-     do xb = 0, nbytes - 1
-        x0 = xb * 8
-        do k = 1, 8
-           cr(k) = 2.0_dp * real(x0 + k - 1, dp) / w - 1.5_dp
-        end do
+    cte=2.0_dp/real(w,dp)
 
-        zr = 0.0_dp
-        zi = 0.0_dp
-        tr = 0.0_dp
-        ti = 0.0_dp
+    !$omp parallel do default(none) shared(grid, buf, cte, w)&
+    !$omp& private(i, j, k, bytepos, pos, byte)&
+    !$omp& private(zr, zi, cr, ci, tr, ti)&
+    !$omp& schedule(guided)
+    do i=0, w-1
+        pos=0
+        byte=0_int8
+        bytepos=8
+        do j = 0, grid-1,vsize
+            ci = cte*real(i,dp)-1.0_dp
+            do k=0, vsize-1
+                cr(k+1) = cte*real(j+k,dp)-1.5_dp
+            end do
 
-        ! Eight pixels at once. A pixel that has escaped keeps iterating (its
-        ! magnitude only grows, to infinity and then NaN), and every test
-        ! below is false for it, so it ends outside exactly as when it stops.
-        do n = 1, iter
-           zi = 2.0_dp * zr * zi + ci
-           zr = tr - ti + cr
-           tr = zr * zr
-           ti = zi * zi
-           if (.not. any(tr + ti <= limit2)) exit
-        end do
+            zr=0.0_dp
+            zi=0.0_dp
+            tr=0.0_dp
+            ti=0.0_dp
 
-        byte = 0
-        do k = 1, 8
-           if (tr(k) + ti(k) <= limit2 .and. x0 + k - 1 < w) byte = ibset(byte, 8 - k)
-        end do
-        pos = pos + 1
-        buf(pos) = achar(byte)
-     end do
-  end do
+            do k=1, iter
+                zi=2.0_dp*zr*zi+ci
+                zr=tr-ti+cr
+                ti=zi*zi
+                tr=zr*zr
 
-  write(header, '("P4",a,i0," ",i0,a)') achar(10), w, w, achar(10)
-  open(newunit=out, file='/dev/stdout', access='stream', form='unformatted', action='write')
-  write(out) trim(header), buf
-  close(out)
+                if (all(tr+ti>threshold)) then 
+                    exit
+                end if 
+            end do
+
+            do k=1, vsize
+                bytepos=bytepos-1
+                if (.not. isnan(tr(k)+ti(k)) .and. tr(k)+ti(k)<threshold .and. j<=w) then
+                    byte = ibset(byte, bytepos)
+                end if
+                if(bytepos==0) then
+                    bytepos=8
+                    pos = pos + 1
+                    buf(pos,i+1) = byte                         
+                    byte=0_int8
+                end if
+            end do
+        end do  
+    end do
+    !$omp end parallel do
+
+
+    !open(unit=100,file='out',status='replace', form='unformatted',access='stream')
+    !! pbm header
+    !write(100) "P4"//char(10)
+    !write(sbuffer, '(I0,A,I0,A)') w,' ',w,char(10)
+    !write(100) trim(sbuffer)
+    !
+    !do i = 1, w
+    !    write(100) buf(1:ceiling(w/8.0),i)
+    !end do
+    !close(100)
+
+    ! pbm header
+    write(*,'("P4",/,i0," ",i0)') w, w
+    ! print output
+    do i = 1, w
+        write(*, '(10000000a1)', advance='no') buf(1:ceiling(w/8.0),i)
+    end do
+          
 end program mandelbrot

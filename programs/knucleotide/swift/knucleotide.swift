@@ -1,21 +1,21 @@
-/* Adapted for this suite: the concurrentPerform over 8 tasks is a single sequential task, whose
-   table is returned as it is rather than merged into an empty one.
-
-   The Computer Language Benchmarks Game
+/* The Computer Language Benchmarks Game
    https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
 
    contributed by Ralph Ganszky
 */
 
 import Foundation
+import Dispatch
 
 let i2c = [ 0: "A", 1: "C", 2: "T", 3: "G" ]
 
 let c2i: [Character:Int] = [ "A": 0, "C": 1, "T": 2, "G": 3 ]
 
-let ntasks = 1
+let ntasks = 8
 let linewidth = 60
 
+let mQueue = DispatchQueue(label: "mergeQueue", attributes: [])
+let queue = DispatchQueue(label: "hashQueue", attributes: DispatchQueue.Attributes.concurrent)
 
 func compress(_ n: Int, seq: ArraySlice<Int8>) -> Int {
     var res = 0
@@ -49,7 +49,7 @@ func getSequenceHash(_ n: Int, seq: [Int8]) -> [Int:Int] {
     let slice = (seq.count-(n-1)) / ntasks
     let remainder = (seq.count-(n-1)) % ntasks
     let mask = ~(-1 << (2*n))
-    for i in 0..<ntasks {
+    DispatchQueue.concurrentPerform(iterations: ntasks) { i in
         var lHash = [Int:Int]()
         var idx = compress(n, seq: seq[i*slice..<(i*slice+n)])
         lHash[idx] = 1
@@ -61,17 +61,13 @@ func getSequenceHash(_ n: Int, seq: [Int8]) -> [Int:Int] {
                 lHash[idx] = 1
             }
         }
-        // One task: its table IS the result. Merging it into an empty table, as the threaded
-        // original must, would insert every key a second time.
-        if ntasks == 1 {
-            hash = lHash
-            continue
-        }
-        for (key, count) in lHash {
-            if let value = hash[key] {
-                hash[key] = value + count
-            } else {
-                hash[key] = count
+        mQueue.sync {
+            for (key, count) in lHash {
+                if let value = hash[key] {
+                    hash[key] = value + count
+                } else {
+                    hash[key] = count
+                }
             }
         }
     }

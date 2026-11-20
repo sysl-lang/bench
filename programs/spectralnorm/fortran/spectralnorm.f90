@@ -1,89 +1,123 @@
 ! The Computer Language Benchmarks Game
 ! https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
 !
-! contributed by Steve Decker based on the version by Simon Geard
-! compilation:
-!   g95 -O1 -fomit-frame-pointer -funroll-loops spectral_norm.f90
-!   ifort -ipo -O3 -static spectral_norm.f90
-module norm_subs
-  implicit none
+! Original C contributed by Sebastien Loisel
+! Conversion to C++ by Jon Harrop
+! OpenMP parallelize by The Anh Tran
+! Add SSE by The Anh Tran
+! Reconversion into C by Dan Farina
+! Conversion to Fortran by Brian Taylor
 
-  integer, parameter :: dp = selected_real_kind(12)
+program main
+!$ use omp_lib
+implicit none
+
+character(len=6) :: argv
+integer :: n
+real*8, allocatable :: u(:), v(:), tmp(:)
+integer :: n2, r_begin, r_end
+real*8 uv, vv
+integer :: i, tid, tcount, chunk, ite
+
+call get_command_argument(1, argv)
+read (argv, *) n
+
+n2 = n / 2
+
+allocate(u(0:n-1), v(0:n-1), tmp(0:n-1))
+
+uv = 0.d0
+vv = 0.d0
+
+!$omp parallel default(shared) private(i,tid,tcount,chunk,r_begin,r_end)
+
+!$omp do schedule(static)
+do i = 0, n - 1
+  u(i) = 1.d0
+end do
+
+tid = omp_get_thread_num()
+tcount = omp_get_num_threads()
+chunk = n / tcount
+
+r_begin = tid * chunk
+if (tid < tcount - 1) then
+  r_end = r_begin + chunk - 1
+else
+  r_end = n - 1
+end if
+
+do i = 1, 10
+  call eval_AtA_times_u(r_begin, r_end, u, v)
+  call eval_AtA_times_u(r_begin, r_end, v, u)
+end do
+
+!$omp do schedule(static) reduction(+:uv) reduction(+:vv)
+do i = 0, n - 1
+  uv = uv + u(i) * v(i)
+  vv = vv + v(i) * v(i)
+end do
+!$omp end do nowait
+
+!$omp end parallel
+
+write (*, "(f0.9)") sqrt(uv / vv)
 
 contains
 
-  ! Return element i,j of infinite matrix A
-  pure real(dp) function A(i, j)
-    integer, intent(in) :: i, j
 
-    a = 1.d0 / ((i+j-2) * (i+j-1)/2 + i)
-  end function A
+! Return element (i,j) of matrix A
+pure function eval_A(i, j)
+real*8 :: eval_A
+integer, intent(in) :: i, j
+real*8 :: di, dj
+integer :: d
+di = real(i,8)
+dj = real(j,8)
+eval_A = 1.d0 / (0.5d0 * ((di + dj) * (di + dj + 1.d0)) + di + 1.d0)
+end function
 
-  ! Multiply v by A
-  pure subroutine MultiplyAv(v, Av)
-    real(dp), dimension(:), intent(in)  :: v
-    real(dp), dimension(:), intent(out) :: Av
 
-    integer :: n, i, j
-    real(dp) :: s
-
-    n = size(v)
-    do i = 1, n
-       s = 0.d0
-       do j = 1, n
-          s = s + A(i,j) * v(j)
-       end do
-       Av(i) = s
-    end do
-  end subroutine MultiplyAv
-
-  ! Multiply v by A transpose
-  pure subroutine MultiplyAtv(v, Atv)
-    real(dp), dimension(:), intent(in)  :: v
-    real(dp), dimension(:), intent(out) :: Atv
-
-    integer :: n, i, j
-    real(dp) :: s
-
-    n = size(v)
-    do i = 1, n
-       s = 0.d0
-       do j = 1, n
-          s = s + A(j,i) * v(j)
-       end do
-       Atv(i) = s
-    end do
-  end subroutine MultiplyAtv
-
-  ! Multiply v by A and then by A transpose
-  pure subroutine MultiplyAtAv(v, tmp, AtAv)
-    real(dp), dimension(:), intent(in)    :: v
-    real(dp), dimension(:), intent(inout) :: tmp
-    real(dp), dimension(:), intent(out)   :: AtAv
-
-    call MultiplyAv(v, tmp)
-    call MultiplyAtv(tmp, AtAv)
-  end subroutine MultiplyAtAv
-end module norm_subs
-
-program spectral_norm
-  use norm_subs
-  implicit none
-
-  real(dp), dimension(:), allocatable :: u, v, tmp
-  integer          :: i, n
-  character(len=12) :: argv
-
-  call get_command_argument(1, argv)
-  read(argv, *) n
-
-  allocate(u(n), v(n), tmp(n))
-  u = 1.d0
-  do i = 1, 10
-     call MultiplyAtAv(u, tmp, v)
-     call MultiplyAtAv(v, tmp, u)
+subroutine eval_A_times_u(r_begin, r_end, src, dest)
+integer, intent(in) :: r_begin, r_end
+real*8, intent(in) :: src(0:)
+real*8, intent(out) :: dest(0:)
+real*8 sum1
+integer :: i, j
+do i = r_begin, r_end
+  sum1 = 0.d0
+  do j = 0, n - 1
+    sum1 = sum1 + src(j) * eval_A(i, j)
   end do
+  dest(i) = sum1
+end do
+end subroutine
 
-  write(*, "(f0.9)") sqrt(dot_product(u,v) / dot_product(v,v))
-  deallocate(u, v, tmp)
-end program spectral_norm
+
+subroutine eval_At_times_u(r_begin, r_end, src, dest)
+integer, intent(in) :: r_begin, r_end
+real*8, intent(in) :: src(0:)
+real*8, intent(out) :: dest(0:)
+real*8 sum1
+integer :: i, j
+do i = r_begin, r_end
+  sum1 = 0.d0
+  do j = 0, n - 1
+    sum1 = sum1 + src(j) * eval_A(j, i)
+  end do
+  dest(i) = sum1
+end do
+end subroutine
+
+
+subroutine eval_AtA_times_u(r_begin, r_end, src, dest)
+integer, intent(in) :: r_begin, r_end
+real*8, intent(in) :: src(0:)
+real*8, intent(out) :: dest(0:)
+call eval_A_times_u(r_begin, r_end, src, tmp)
+!$omp barrier
+call eval_At_times_u(r_begin, r_end, tmp, dest)
+!$omp barrier
+end subroutine
+
+end program

@@ -1,175 +1,247 @@
+--
 --  The Computer Language Benchmarks Game
 --  https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
 --
---  A port to Ada of the C program contributed by Bob W: each record is read
---  a line at a time, complemented through a table into a buffer filled from
---  its end, and written back out in lines of 60.
+--  Contributed by Pascal Obry on 2005/03/19
+--  Modified by Bill Findlay  on 2005/04/04
+--  Updated by Georg Bauhaus and Jonathan Parker (May 2012)
 
-with GNAT.OS_Lib;
-with Ada.Unchecked_Deallocation;
+with Text_Input; use Text_Input;
+with Line_IO;
 
 procedure Revcomp is
-   type String_Access is access String;
-   procedure Free is new Ada.Unchecked_Deallocation (String, String_Access);
 
-   --  Input is read from fd 0 in large blocks and output written to fd 1 in
-   --  large blocks.
-   In_Buf  : String (1 .. 65536);
-   In_Pos  : Natural := 1;
-   In_Len  : Natural := 0;
-   Out_Buf : String (1 .. 65536);
-   Out_Len : Natural := 0;
+   Multitasking_Version_Desired : constant Boolean := True;
 
-   function End_Of_File return Boolean is
+   Complement : constant array (Character) of Character :=
+     ('A' => 'T', 'C' => 'G', 'G' => 'C', 'T' => 'A', 'U' => 'A',
+      'M' => 'K', 'R' => 'Y', 'W' => 'W', 'S' => 'S', 'Y' => 'R',
+      'K' => 'M', 'V' => 'B', 'H' => 'D', 'D' => 'H', 'B' => 'V',
+      'N' => 'N',
+      'a' => 'T', 'c' => 'G', 'g' => 'C', 't' => 'A', 'u' => 'A',
+      'm' => 'K', 'r' => 'Y', 'w' => 'W', 's' => 'S', 'y' => 'R',
+      'k' => 'M', 'v' => 'B', 'h' => 'D', 'd' => 'H', 'b' => 'V',
+      'n' => 'N',
+      others => '?');
+
+   Max_Line_Length : constant := 60;
+
+   End_Of_Line : constant String := Line_IO.Separator;
+
+   procedure Reverse_Fasta
+     (Fasta_Line   : in     String_Access;
+      Fasta_Start  : in     Natural;
+      Fasta_Finish : in     Natural;
+      Bundle       : in out String)
+   is
+      L : Natural := Bundle'First; -- Leftmost char
+      R : Natural := Fasta_Finish; -- Rightmost char
+      c0, c1 : Character;
    begin
-      if In_Pos > In_Len then
-         declare
-            Got : constant Integer :=
-              GNAT.OS_Lib.Read (GNAT.OS_Lib.Standin, In_Buf'Address, In_Buf'Length);
-         begin
-            In_Pos := 1;
-            In_Len := Natural'Max (Got, 0);
-         end;
-      end if;
-      return In_Pos > In_Len;
-   end End_Of_File;
+      if R < Fasta_Start then return; end if;
 
-   --  Reads up to one line (at most Item'Length characters) into Item.
-   procedure Get_Line (Item : out String; Last : out Natural) is
-   begin
-      Last := Item'First - 1;
-      while Last < Item'Last and then not End_Of_File loop
-         declare
-            C : constant Character := In_Buf (In_Pos);
-         begin
-            In_Pos := In_Pos + 1;
-            exit when C = ASCII.LF;
-            Last := Last + 1;
-            Item (Last) := C;
-         end;
-      end loop;
-   end Get_Line;
-
-   procedure Flush is
-      Pos : Natural := 1;
-      Got : Integer;
-   begin
-      while Pos <= Out_Len loop
-         Got := GNAT.OS_Lib.Write (GNAT.OS_Lib.Standout, Out_Buf (Pos)'Address, Out_Len - Pos + 1);
-         exit when Got <= 0;
-         Pos := Pos + Got;
-      end loop;
-      Out_Len := 0;
-   end Flush;
-
-   procedure Put (S : String) is
-   begin
-      if Out_Len + S'Length > Out_Buf'Length then
-         Flush;
-      end if;
-      Out_Buf (Out_Len + 1 .. Out_Len + S'Length) := S;
-      Out_Len := Out_Len + S'Length;
-   end Put;
-
-   procedure New_Line is
-   begin
-      Put ((1 => ASCII.LF));
-   end New_Line;
-
-   Growth : constant := 12_777_888;
-
-   --  The complement of each IUB code letter, in either case; NUL for any
-   --  other character, which is dropped.
-   Xtab : array (Character) of Character := (others => ASCII.NUL);
-
-   procedure Map (From, To : Character) is
-   begin
-      Xtab (From) := To;
-      Xtab (Character'Val (Character'Pos (From) + 32)) := To;
-   end Map;
-
-   Line : String (1 .. 1024);
-   Last : Natural;
-
-   Buf : String_Access := new String (1 .. 5200);
-   Cap : Natural := 5200;
-   Pr  : Natural;
-
-   procedure Grow is
-      New_Cap : constant Natural := Cap + Growth;
-      New_Buf : constant String_Access := new String (1 .. New_Cap);
-      Used    : constant Natural := Cap - Pr + 1;
-   begin
-      New_Buf (New_Cap - Used + 1 .. New_Cap) := Buf (Pr .. Cap);
-      Free (Buf);
-      Buf := New_Buf;
-      Pr := New_Cap - Used + 1;
-      Cap := New_Cap;
-   end Grow;
-
-   More : Boolean := True;
-begin
-   Map ('A', 'T');
-   Map ('B', 'V');
-   Map ('C', 'G');
-   Map ('D', 'H');
-   Map ('G', 'C');
-   Map ('H', 'D');
-   Map ('K', 'M');
-   Map ('M', 'K');
-   Map ('N', 'N');
-   Map ('R', 'Y');
-   Map ('S', 'S');
-   Map ('T', 'A');
-   Map ('V', 'B');
-   Map ('W', 'W');
-   Map ('Y', 'R');
-
-   if End_Of_File then
-      raise Program_Error with "No input data";
-   end if;
-   Get_Line (Line, Last);
-   if Last = 0 or else Line (1) /= '>' then
-      raise Program_Error with "1st char not '>'";
-   end if;
-
-   while More loop
-      Put (Line (1 .. Last));
-      New_Line;
-      Pr := Cap + 1;
-
+      c1 := Fasta_Line(R);
       loop
-         if End_Of_File then
-            More := False;
+         Bundle(L) := Complement(c1);
+         R := R - 1;
+         L := L + 1;
+         if R > Fasta_Start then
+            c0 := Fasta_Line(R);
+            c1 := Fasta_Line(R-1);
+            Bundle(L) := Complement(c0);
+            L := L + 1;
+            R := R - 1;
+         else
+            if R = Fasta_Start then
+               Bundle(L) := Complement(Fasta_Line(R));
+            end if;
             exit;
          end if;
-         Get_Line (Line, Last);
-         exit when Last > 0 and then Line (1) = '>';
+      end loop;
 
-         if Pr - 1 <= Last + 1 then
-            Grow;
-         end if;
-         for K in 1 .. Last loop
-            declare
-               C : constant Character := Xtab (Line (K));
-            begin
-               if C /= ASCII.NUL then
-                  Pr := Pr - 1;
-                  Buf (Pr) := C;
-               end if;
-            end;
+   end Reverse_Fasta;
+
+   procedure Put_Reversed_Fasta
+     (Fasta_Section     : in String_Access;
+      Fasta_Data_Length : in Natural)
+   is
+      Lines_per_Bundle : constant := 2000;
+      Line_Feed_Len    : constant Natural := End_Of_Line'Length;
+      Line_Bundle : String(1 .. Lines_per_Bundle*(Max_Line_Length + Line_Feed_Len));
+      L        : Natural := Fasta_Data_Length;
+      B_start  : Natural := Line_Bundle'First;
+      B_finish : Natural := B_start + Max_Line_Length - 1;
+   begin
+
+      -- Append line feed string (End_Of_Line) to 2000 Line_Bundle lines:
+
+      while L >= Lines_per_Bundle * Max_Line_Length loop
+         B_start := Line_Bundle'First;
+         for j in 1 .. Lines_per_Bundle loop
+            B_finish := B_start + Max_Line_Length - 1;
+            Reverse_Fasta
+              (Fasta_Line   => Fasta_Section,
+               Fasta_Start  => L - Max_Line_Length + 1,
+               Fasta_Finish => L,
+               Bundle       => Line_Bundle(B_start .. B_finish));
+            Line_Bundle(B_finish + 1 .. B_finish + Line_Feed_Len) := End_Of_Line;
+            B_start := B_finish + Line_Feed_Len + 1;
+            L       := L - Max_Line_Length;
          end loop;
+         Line_IO.Put (Line_Bundle);
       end loop;
 
-      while Pr <= Cap loop
-         declare
-            X : constant Natural := Natural'Min (Cap - Pr + 1, 60);
-         begin
-            Put (Buf (Pr .. Pr + X - 1));
-            New_Line;
-            Pr := Pr + X;
-         end;
+      while L >= Max_Line_Length loop
+         Reverse_Fasta
+           (Fasta_Line   => Fasta_Section,
+            Fasta_Start  => L - Max_Line_Length + 1,
+            Fasta_Finish => L,
+            Bundle       => Line_Bundle(1 .. Max_Line_Length));
+         Line_IO.Put_Line (Line_Bundle (1..Max_Line_Length));
+         L := L - Max_Line_Length;
       end loop;
-   end loop;
-   Flush;
+
+      if L > 0 then
+         Reverse_Fasta
+           (Fasta_Line   => Fasta_Section,
+            Fasta_Start  => 1,
+            Fasta_Finish => L,
+            Bundle       => Line_Bundle(1 .. L));
+         Line_IO.Put_Line (Line_Bundle (1 .. L));
+      end if;
+
+   end Put_Reversed_Fasta;
+
+   procedure Read_Reverse_Write_a_Section_p
+     (Job_Is_Complete : out Boolean)
+   is
+      Section_o_Fasta : String_Pointer (2**20 * 128);
+      Header          : String(1..Max_Line_Length) := (others => '?');
+      Section_Length  : Natural := 0;
+      Header_Length   : Natural := 0;
+   begin
+      Job_Is_Complete := False;
+
+      Text_Input.Read_Section
+        (Data_Buffer     => Section_o_Fasta.Buffer,
+         Data_Length     => Section_Length,
+         Next_Header     => Header,
+         Header_Length   => Header_Length,
+         Max_Line_Length => 100); -- use anything >= actual limit of 60.
+
+      if Header_Length < 1 then   -- null Header marks final section.
+         Job_Is_Complete := True;
+      end if;
+
+      if Section_Length > 0 then
+         Put_Reversed_Fasta (Section_o_Fasta.Buffer, Section_Length);
+      end if;
+      if Header_Length > 0 then
+         Line_IO.Put_Line (Header(1..Header_Length));
+      end if;
+
+   end Read_Reverse_Write_a_Section_p;
+
+   task type Read_Reverse_Write_a_Section is
+      entry Start_Reading;
+      entry Done_Reading_Start_Writing (Reached_End_Of_File : out Boolean);
+      entry Done_Writing;
+      pragma Storage_Size (2**20);
+   end Read_Reverse_Write_a_Section;
+
+   task body Read_Reverse_Write_a_Section is
+      Section_o_Fasta : String_Pointer (2**20 * 128);
+      Header          : String(1..Max_Line_Length) := (others => '?');
+      Section_Length  : Natural := 0;
+      Header_Length   : Natural := 0;
+      Hit_End_Of_File : Boolean := False;
+   begin
+      loop
+      select
+         accept Start_Reading;
+
+         Text_Input.Read_Section
+           (Data_Buffer     => Section_o_Fasta.Buffer,
+            Data_Length     => Section_Length,
+            Next_Header     => Header,
+            Header_Length   => Header_Length,
+            Max_Line_Length => 100); -- use anything >= actual limit of 60.
+
+         if Header_Length < 1 then   -- null Header marks final section.
+            Hit_End_Of_File := True;
+         end if;
+
+         accept Done_Reading_Start_Writing (Reached_End_Of_File : out Boolean) do
+            Reached_End_Of_File := Hit_End_Of_File;
+         end Done_Reading_Start_Writing;
+
+         if Section_Length > 0 then
+            Put_Reversed_Fasta (Section_o_Fasta.Buffer, Section_Length);
+         end if;
+         if Header_Length > 0 then
+            Line_IO.Put_Line (Header(1..Header_Length));
+         end if;
+
+         accept Done_Writing;
+      or
+         terminate;
+      end select;
+      end loop;
+   end Read_Reverse_Write_a_Section;
+
+   Job_Is_Complete : Boolean;
+
+begin
+
+   if Multitasking_Version_Desired then -- Do computation concurrently with Input
+
+      declare
+         type Task_Id_Type is mod 2;
+         Do_a_Section : array (Task_Id_Type) of Read_Reverse_Write_a_Section;
+         i : Task_Id_Type := Task_Id_Type'First;
+         Reached_End_Of_File : Boolean := False;
+      begin
+
+         Read_Reverse_Write_a_Section_p (Job_Is_Complete);
+         --  All this does is handle the 1st line of the file (the Header).
+
+         Do_a_Section(i).Start_Reading;
+         --  Start 1st task reading 1st section.
+
+         loop
+
+            Do_a_Section(i).Done_Reading_Start_Writing (Reached_End_Of_File);
+            -- Block here until task i says its done reading the section.
+            -- After completion of this rendezvous, task i is unblocked. Task i
+            -- then begins computing and writing the reversed data. Task i 
+            -- remains unblocked until it finishes writing.
+
+            -- Task i is done reading so we can unblock task i+1 to start reading:
+            if not Reached_End_Of_File then
+               Do_a_Section(i+1).Start_Reading;
+            end if;
+
+            Do_a_Section(i).Done_Writing;
+            -- Block here until task i says it's done writing. (If task i+1 were
+            -- to write while task i writes, then their output is interleaved.)
+            -- Next go to top of loop to unblock task i+1 so that it can write.
+
+            exit when Reached_End_Of_File;
+            i := i + 1;
+
+         end loop;
+
+      end;
+
+   else -- Use a Procedure rather than Tasks:
+
+      loop
+         Read_Reverse_Write_a_Section_p (Job_Is_Complete);
+         exit when Job_Is_Complete;
+      end loop;
+
+   end if; -- Multitasking_Version_Desired
+
+   Line_IO.Close;
+
 end Revcomp;

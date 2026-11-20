@@ -5,6 +5,7 @@
 // variant concurrency added by Daniel Sell
 
 import Foundation
+import Dispatch
 
 let input = FileHandle.standardInput.readDataToEndOfFile()
 
@@ -23,7 +24,10 @@ let codeLength = sequence.utf8.count
 
 var resultLength = 0
 
-do {
+let group = DispatchGroup()
+
+group.enter()
+DispatchQueue.global().async {
     resultLength = [
         (regex: "tHa[Nt]",            replacement: "<4>"),
         (regex: "aND|caN|Ha[DS]|WaS", replacement: "<3>"),
@@ -34,6 +38,7 @@ do {
             return buffer.replacingOccurrences(of: iub.regex, 
                 with: iub.replacement, options: .regularExpression)
     }.utf8.count
+    group.leave()
 }
 
 let variants = [
@@ -51,9 +56,15 @@ let variants = [
 var variantMatches = Array(repeating: 0, count: variants.count)
 
 for (i, variant) in variants.enumerated() {
-    variantMatches[i] = regex(variant).numberOfMatches(in: sequence, 
-        options: [], range: NSRange(location: 0, length: codeLength))
+    group.enter()
+    DispatchQueue.global().async {
+        variantMatches[i] = regex(variant).numberOfMatches(in: sequence, 
+            options: [], range: NSRange(location: 0, length: codeLength))
+        group.leave()
+    }
 }
+
+group.wait()
 
 for (i, variant) in variants.enumerated() {
     print(variant, variantMatches[i])

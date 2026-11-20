@@ -35,6 +35,10 @@ failures=0
 print "== verifying output"
 for prog in $PROGRAMS; do
   for lang in $LANGS; do
+    if [[ -n ${ABSENT[$prog:$lang]} ]]; then
+      print "absent   $prog/$lang (${ABSENT[$prog:$lang]})"
+      continue
+    fi
     if [[ ! -x $(exe $prog $lang) ]]; then
       print "MISSING  $prog/$lang (run scripts/build.zsh)"
       failures=$((failures + 1))

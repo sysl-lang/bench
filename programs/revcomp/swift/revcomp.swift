@@ -1,4 +1,3 @@
-// Adapted for this suite: the Dispatch reader, worker and writer queues are replaced by a sequential loop.
 // The Computer Language Benchmark Game
 // https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
 //
@@ -7,6 +6,7 @@
 
 
 import Foundation
+import Dispatch
 
 // BlockReader class does a bit more than necessary, but this
 // should not be that expensive.
@@ -172,12 +172,54 @@ func reverseComplement(seq: inout [Int8]) {
 }
 
 let lineWidth = 60
+let group = DispatchGroup()
+let rqueue = DispatchQueue(label: "Reader", attributes: [])
+let cqueue = DispatchQueue(label: "Complement", attributes: .concurrent)
+let wqueue = DispatchQueue(label: "Writer", attributes: [])
+
 var reader = BlockReader(fp: stdin)
+var toWrite = 0
+var deferedWrite = [(Int, [Int8])]()
 
 // Read, build reverse complement and write every of the three blocks
-for _ in 0..<3 {
-    var (desc, seq) = reader.read()
-    reverseComplement(seq: &seq)
-    fwrite(desc, desc.count, 1, stdout)
-    fwrite(seq, seq.count, 1, stdout)
+group.enter()
+for i in 0..<3 {
+    rqueue.sync {
+        var (desc, seq) = reader.read()
+        cqueue.async {
+            reverseComplement(seq: &seq)
+            wqueue.async {
+                if i == toWrite {
+                    fwrite(desc, desc.count, 1, stdout)
+                    fwrite(seq, seq.count, 1, stdout)
+                    toWrite += 1
+                    if toWrite == 3 {
+                        group.leave()
+                    }
+                    // Check for deferred blocks
+                    if deferedWrite.count > 0 {
+                        while deferedWrite.count > 0  {
+                            for (j, (k, seq)) in deferedWrite.enumerated() {
+                                if k == toWrite {
+                                    fwrite(seq, seq.count, 1, stdout)
+                                    deferedWrite.remove(at: j)
+                                    toWrite += 1
+                                    if toWrite == 3 {
+                                        group.leave()
+                                    }
+                                    break
+                                }
+                            }
+                        }
+                    }
+                } else {
+		    // Append the two arrays into one,
+		    // maybe this should be done in the reader
+		    // like in gcc #6
+                    deferedWrite.append((i, desc + seq))
+                }
+            }
+        }
+    }
 }
+group.wait()

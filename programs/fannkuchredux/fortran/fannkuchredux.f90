@@ -1,68 +1,162 @@
 ! The Computer Language Benchmarks Game
 ! https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
 !
-! converted to fortran by Gilbert Brietzke on 31. Januar 2011
-! from C-code by Joseph Piché as a conversion
-! from Java version by Oleg Mazurov and Isaac Gouy
+! Code by Andrei Jirnyi; modified from my earlier submission.
+!  thanks to Gilbert Brietzke for the previous Fortran code,
+!  and to other submitters for their work
+! Compilation:
+! - single-core: ifort -fast fannkuch3.f90
+! - multi-core:  ifort -fast -openmp fannkuch3.f90
 
 program fannkuch
-
+  use iso_fortran_env
+  use iso_c_binding
   implicit none
 
-  integer :: n,checksum,maxFlipsCount
+  integer,parameter :: ILONG = 8, ISHORT = 1, MAXL = 7
+  integer :: NP, maxfk, cksum = 0, current = 0
+  integer(ILONG) ::NQ
+  integer(ISHORT), allocatable :: blk(:,:), cnt(:)
+  logical ::saveblk = .true.
   character(len=2) :: arg
-  character(len=10) :: out
-  call get_command_argument(1,arg);read(arg,'(I2)')n
-  call fannkuchredux(n,checksum,maxFlipsCount)
-  write(out,'(I10)') checksum;
-  write(*,'(A)') trim(adjustl(out))
-  write(out,'(I10)') maxFlipsCount;
-  write(*,'(A)') 'Pfannkuchen('//trim(adjustl(arg))//') = '//trim(adjustl(out))
+  character(len=20) :: out
+  logical :: WR = .false., WR1 = .false.
+
+  WR1 = WR1 .or. WR
+
+  call get_command_argument(1,arg)
+  read(arg,'(I2)') NP
+  NQ = factorial(MAXL)/MAXL
+  allocate(blk(NP,NQ))
+  allocate(cnt(NP))
+  cnt = 0
+
+  call fkcompute(NP)
+
+  write(out,'(i15)') cksum-2
+  write(*,'(a)') trim(adjustl(out))
+  write(*,'(3a,i3)') 'Pfannkuchen(',trim(adjustl(arg)),') =',maxfk
 
 contains
 
-  subroutine fannkuchredux(n,checksum,maxFlipsCount)
-    implicit none
-    integer, intent(in) :: n
-    integer, intent(out) :: maxFlipsCount,checksum
-    integer :: perm(0:n-1),perm1(0:n-1),icount(0:n-1);
-    integer :: i,r,temp,k,perm0,permCount = 0,flipsCount = 0;
-    checksum = 0;  maxFlipsCount = 0;
-    do i = 0,n-1
-       perm1(i)= i;
-    enddo
-    r=n
-    do while (.true.)
-       do while (r /= 1)
-          icount(r-1)=r; r=r-1;
-       end do
-       perm = perm1; flipsCount = 0;
-       do while (perm(0)/=0) 
-          k = perm(0)
-          do  i=0,ishft(k+1,-1)-1
-             temp = perm(i); perm(i) = perm(k-i); perm(k-i) = temp;
-          enddo
-          flipsCount = flipsCount + 1;
-       end do
-       maxFlipsCount = max(maxFlipsCount,flipsCount);
-       if (modulo(permCount,2) == 0)then
-          checksum = checksum + flipsCount
-       else
-          checksum = checksum - flipsCount
-       end if
-       do while (.true.)
-          if (r==n) return
-          perm0 = perm1(0); i = 0;
-          do while (i < r) 
-             perm1(i) = perm1(i + 1); i = i + 1;
-          end do
-          perm1(r) = perm0;
-          icount(r) = icount(r) - 1;
-          if (icount(r) > 0) exit;
-          r = r + 1;
-       end do
-       permCount = permCount + 1;
+  function factorial(n)
+    integer n, factorial, i
+    factorial = 1
+    do i=1,n
+       factorial = factorial*i
     end do
-  end subroutine fannkuchredux
+  end function factorial
+
+  subroutine fkcompute(NP)
+    integer :: NP
+    integer(ILONG) :: bsize
+    integer :: i,k,k1
+    integer(ISHORT), dimension(NP) :: base,oldbase
+    integer :: numblk, ii, nshift
+    integer :: maxlevel
+    integer(ISHORT),allocatable :: bases(:,:)
+    integer ::icksum, imaxfk
+
+    base = [(i,i=1,NP)]
+    blk(:,1) = base;
+
+    k = 2;
+    bsize = 1;
+    maxfk = 0;
+    nshift = 1
+    maxlevel = min(MAXL,NP);   ! max block level
+
+    do i=2,NP       ! rot count
+       current = i
+       if(i>=maxlevel) saveblk = .false.
+
+       if(i<=maxlevel) then
+          numblk = i-1
+          nshift = i
+          bsize = bsize*(i-1)
+       else
+          numblk = (i-1)*factorial(i-1)/bsize
+       end if
+       oldbase = base
+       allocate(bases(NP,numblk))
+       do ii=1, numblk
+          call baseshift(base, nshift)
+          bases(:,ii) = base
+       end do
+
+       !$omp  parallel do default(shared) private(ii,k1,icksum,imaxfk) &
+       !$omp& if(numblk>1000) schedule(guided) &
+       !$omp& reduction(+:cksum) reduction(max: maxfk) 
+       do ii = 1, numblk
+          k1 = k+bsize*(ii-1)
+          if(saveblk) then
+             call writeblk(blk(1,k1),blk(1,1),bases(1,ii),bsize)
+          end if
+          call procblk(blk(1,1),bases(1,ii),bsize,icksum,imaxfk)
+          cksum = cksum+icksum
+          maxfk = max(maxfk, imaxfk)
+       end do
+       !$omp end parallel do
+
+       k = k+bsize*numblk
+       deallocate(bases)
+       if(saveblk) then
+          base = oldbase
+          cnt(1:nshift-1)=0
+          cnt(nshift) = cnt(nshift)+1
+       end if
+    end do
+
+  end subroutine fkcompute
+
+  recursive subroutine baseshift(base, n)
+    integer(ISHORT) :: base(NP)
+    integer :: n
+
+    base(1:n) = cshift(base(1:n), 1)
+    cnt(n) = cnt(n) +1
+    if(cnt(n) >= n) then
+       cnt(n) = 0
+       if(n == NP) return
+       call baseshift(base, n+1)
+    end if
+
+  end subroutine baseshift
   
+  subroutine procblk(mult,base,bsize,icksum,imaxfk)
+    integer(ILONG) :: bsize
+    integer(ISHORT) :: base(NP),mult(NP,bsize)
+    integer(ISHORT) :: line(NP), t, t1
+    integer :: j, ii, iii, icksum, imaxfk
+
+    icksum = 0
+    imaxfk = 0
+
+    do iii=1,bsize
+       line = base(mult(:,iii));
+       j = 0
+       t = line(1)
+       do while(t /= 1)        ! flip till line(1)==1 
+          do ii=1,ishft(t,-1)  ! do the flip
+             t1 = line(ii)
+             line(ii) = line(t+1-ii)
+             line(t+1-ii) = t1
+          end do
+          t = line(1)
+          j = j+1
+       end do
+       imaxfk = max(imaxfk, j)
+       icksum = icksum+j*(ishft(mod(iii,2),1)-1)
+    end do
+    
+  end subroutine procblk
+
+  subroutine writeblk(blk,mult,base,bsize);
+    integer(ILONG) :: bsize
+    integer(ISHORT) :: blk(NP*bsize),mult(NP*bsize),base(NP)
+
+    blk = base(mult);
+
+  end subroutine writeblk
+
 end program fannkuch

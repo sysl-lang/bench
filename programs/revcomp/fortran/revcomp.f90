@@ -1,114 +1,91 @@
 ! The Computer Language Benchmarks Game
 ! https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
 !
-! contributed by Andrei Jirnyi, modified from version by Steve Decker
-
-module posix_read
-  use iso_c_binding, only: c_int, c_size_t, c_long, c_int8_t
-  implicit none
-  interface
-     ! POSIX read(2). Fortran cannot read a stream of unknown length in
-     ! blocks: an end of file during a READ leaves every input item
-     ! undefined, so the last, partial block would be lost.
-     function c_read(fd, buf, count) bind(C, name='read') result(got)
-       import :: c_int, c_size_t, c_long, c_int8_t
-       integer(c_int), value :: fd
-       integer(c_int8_t) :: buf(*)
-       integer(c_size_t), value :: count
-       integer(c_long) :: got
-     end function c_read
-  end interface
-end module posix_read
+! contributed by Steve Decker, modified from the version by Simon Geard
+! compilation:
+!   g95 -O3 reverse.f90
+!   ifort -ipo -O3 -static reverse.f90
 
 program revcomp
-  use iso_fortran_env, only: int8
-  use iso_c_binding, only: c_size_t, c_long
-  use posix_read
   implicit none
 
-  integer(int8), parameter :: EOL = 10, GT = iachar('>', int8)
-  integer, parameter :: LW = 60, CHUNK = 1048576
+  character, parameter :: EndStr = ">"
+  integer,   parameter :: LineWidth = 60
 
-  integer(int8), dimension(:), allocatable :: input, seq, output, w
-  integer(int8) :: comp(-128:127)
-  integer(c_long) :: got
-  integer :: out, n, i, start, k, nseq, nout, last, lines
+  character(len=LineWidth), dimension(:), allocatable :: data, w
+  logical                  :: insection = .false.
+  integer                  :: stat, bcount
+  character(len=LineWidth) :: line, title
 
-  call make_table()
-
-  ! Read all of standard input.
-  allocate(input(4 * CHUNK))
-  n = 0
-  do
-     if (n + CHUNK > size(input)) then
-        allocate(w(2 * size(input)))
-        w(1:n) = input(1:n)
-        call move_alloc(w, input)
-     end if
-     got = c_read(0, input(n+1:), int(CHUNK, c_size_t))
-     if (got <= 0) exit
-     n = n + int(got)
-  end do
-
-  open(newunit=out, file='/dev/stdout', access='stream', form='unformatted', action='write')
-  allocate(seq(n), output(n + n / LW + 2))
-
-  i = 1
-  do while (i <= n)
-     ! The title line, written as it is.
-     start = i
-     do while (i <= n)
-        if (input(i) == EOL) exit
-        i = i + 1
-     end do
-     write(out) input(start:min(i, n))
-     i = i + 1
-
-     ! The sequence up to the next title, complemented through the table
-     ! and stored from the end, so it reads reversed.
-     k = size(seq) + 1
-     do while (i <= n)
-        if (input(i) == GT) exit
-        if (comp(input(i)) /= 0) then
-           k = k - 1
-           seq(k) = comp(input(i))
+  ! Read and process
+  allocate(data(100))  ! Allocate enough lines so that we don't have to grow the array for the test
+  readFile: do
+     read(*, "(a)", iostat=stat) line
+     if (stat /= 0) exit readFile
+     if (line(1:1) == EndStr) then
+        if (insection) then
+           write(*, "(a)") trim(title)
+           call printReverseFasta
+        else
+           insection = .true.
         end if
-        i = i + 1
-     end do
-
-     ! Re-wrapped at LW.
-     nseq = size(seq) + 1 - k
-     lines = nseq / LW
-     nout = 0
-     do start = k, k + (lines - 1) * LW, LW
-        output(nout+1:nout+LW) = seq(start:start+LW-1)
-        output(nout+LW+1) = EOL
-        nout = nout + LW + 1
-     end do
-     last = nseq - lines * LW
-     if (last > 0) then
-        output(nout+1:nout+last) = seq(size(seq)-last+1:size(seq))
-        output(nout+last+1) = EOL
-        nout = nout + last + 1
+        title = line
+        bcount = 0
+        cycle readFile
      end if
-     write(out) output(1:nout)
-  end do
-  close(out)
+     bcount = bcount + 1
+     if (bcount > size(data)) then ! Included for completeness - it shouldn't be called in the test
+        allocate(w(size(data)))
+        w = data
+        deallocate(data)
+        allocate(data(2*size(w)))
+        data(1:size(w)) = w
+        deallocate(w)
+     end if
+     data(bcount) = line
+  end do readFile
 
+  write(*, "(a)") trim(title)
+  call printReverseFasta
+  
 contains
 
-  ! The complement of each letter, upper or lower case, as an upper-case
-  ! letter; zero for every other byte, which is dropped.
-  subroutine make_table()
-    character(len=*), parameter :: from = 'ACGTUMRWSYKVHDBN'
-    character(len=*), parameter :: to   = 'TGCAAKYWSRMBDHVN'
-    integer :: j
+  subroutine printReverseFasta
+    ! Output the data in reverse order and with the complement
+    character, dimension(65:121), parameter :: Complement = (/ "T", "V", "G", &
+         "H", "E", "F", "C", "D", "I", "J", "M", "L", "K", "N", "O", "P",  &
+         "Q", "Y", "S", "A", "A", "B", "W", "X", "R", (" ", stat = 90, 96),  &
+         "T", "V", "G", "H", "E", "F", "C", "D", "I", "J", "M", "L", "K",  &
+         "N", "O", "P", "Q", "Y", "S", "A", "A", "B", "W", "X", "R" /)
 
-    comp = 0
-    do j = 1, len(from)
-       comp(iachar(from(j:j))) = iachar(to(j:j), int8)
-       comp(iachar(from(j:j)) + 32) = iachar(to(j:j), int8)
+    integer :: fLine, fChar, bLine, bChar
+    character :: c
+
+    fLine = 1
+    fChar = 1
+    bLine = bcount
+    bChar = len_trim(data(bLine))
+    do
+       if (fLine > bLine .or. fLine == bLine .and. fChar >= bChar) exit
+       c = data(fLine)(fChar:fChar)
+       data(fLine)(fChar:fChar) = Complement(iachar(data(bLine)(bChar:bChar)))
+       data(bLine)(bChar:bChar) = Complement(iachar(c))
+       fChar = fChar + 1
+       if (fChar > LineWidth) then
+          fChar = 1
+          fLine = fLine + 1
+       end if
+       bChar = bChar - 1
+       if (bChar == 0) then
+          bChar = LineWidth
+          bLine = bLine - 1
+       end if
     end do
-  end subroutine make_table
-
+    if (fLine == bLine .and. fChar == bChar)  &
+         data(fLine)(fChar:fChar) = Complement(iachar(data(fLine)(fChar:fChar)))
+    do fLine = 1, bcount-1
+       write(*, "(a)") data(fLine)
+    end do
+    write(*, "(a)") trim(data(bcount))
+  end subroutine printReverseFasta
 end program revcomp

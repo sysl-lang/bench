@@ -43,7 +43,17 @@ SMALL[pidigits]=27
 typeset -A DNF
 DNF=(regexredux:sysl-idiomatic "sysl.regex replace_all is quadratic (FINDINGS.md §9): not finished in hours at the timed size"
      regexredux:sysl-idiomatic-dev "sysl.regex replace_all is quadratic (FINDINGS.md §9): not finished in hours at the timed size")
+
+# Programs absent from a column, with the reason: not built, verified or timed, and shown in the
+# report as DNF cells. Empty: where a language has no Game entry that runs here unmodified, an
+# original program is written for this benchmark instead (SOURCES.md).
+typeset -A ABSENT
+DNF+=(${(kv)ABSENT})
 export BENCH_DNF=${(j:,:)${(k)DNF}}
+
+# The Fortran compiler: LLVM flang. Intel's ifx, the Game's, has no macOS release; flang beat gfortran
+# by geometric mean over the column's programs (SOURCES.md, "Fortran"). FORTRAN=gfortran builds with GCC.
+export FORTRAN=${FORTRAN:-flang}
 
 # BENCH_PROGRAMS names a subset to build or verify (default: every program).
 (( ${+BENCH_PROGRAMS} )) && PROGRAMS=(${=BENCH_PROGRAMS})

@@ -1,87 +1,214 @@
 --  The Computer Language Benchmarks Game
 --  https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
 --
---  A port to Ada of the C program contributed by Greg Buchholz.
+--  Contributed by Jim Rogers
+--  Modified by Pascal Obry, Gautier de Montmollin, Georg Bauhaus, Jonathan Parker
 
-with Ada.Command_Line;
-with Ada.Streams;
-with Ada.Text_IO;
-with Ada.Text_IO.Text_Streams;
-with Interfaces;
+pragma Restrictions (No_Abort_Statements);
+pragma Restrictions (Max_Asynchronous_Select_Nesting => 0);
+
+with Ada.Command_Line;      use Ada.Command_Line;
+
+with Interfaces;            use Interfaces;
+with Ada.Streams.Stream_IO; use Ada.Streams;
 
 procedure Mandelbrot is
-   use Interfaces;
-   use type Ada.Streams.Stream_Element_Offset;
 
-   W : constant Integer := Integer'Value (Ada.Command_Line.Argument (1));
-   H : constant Integer := W;
+   type Real is digits 15;
+   type M8 is mod 8;
+   type PCount is range 0 .. 2**20 - 1;
 
-   Iter  : constant := 50;
-   Limit : constant Long_Float := 2.0;
+   Iter        : constant := 50;
+   Limit       : constant := 4.0;
+   Size        : constant Positive := Positive'Value (Argument (1));
+   Two_on_Size : constant Real := 2.0 / Real (Size);
 
-   Out_Stream : constant Ada.Text_IO.Text_Streams.Stream_Access :=
-     Ada.Text_IO.Text_Streams.Stream (Ada.Text_IO.Standard_Output);
+   subtype Output_Index is Stream_Element_Offset range 1 .. Stream_Element_Offset'Last;
+   subtype Output_Queue is Stream_Element_Array;
+   type Output is access Output_Queue;
 
-   Row_Bytes : constant Ada.Streams.Stream_Element_Offset :=
-     Ada.Streams.Stream_Element_Offset ((W + 7) / 8);
-   Row       : Ada.Streams.Stream_Element_Array (1 .. Row_Bytes);
-   Pos       : Ada.Streams.Stream_Element_Offset;
+   task type X_Step is
+      entry Compute_Z (Y1, Y2 : PCount);
+      entry Get_Output (Result : out Output);
+   end X_Step;
 
-   Bit_Num  : Integer := 0;
-   Byte_Acc : Unsigned_8 := 0;
+   procedure Allocate_Output_Queue (Y1, Y2 : PCount; Result : out Output);
+   pragma Precondition
+     (Output_Index'First = 1);
+   pragma Postcondition
+     (Result'First = Output_Index'First and
+      Result'Last = Output_Index'Max
+        (0, Stream_Element_Offset (Integer (Y2 - Y1) * (Size / 8 + Boolean'Pos (Size mod 8 > 0)))));
 
-   Zr, Zi, Cr, Ci, Tr, Ti : Long_Float;
-   I : Integer;
+   procedure Compute (Y1, Y2 : PCount; Result : Output)
+   is
+      subtype Instruction_Stream_Index is Integer range 1 .. 2;
+      pragma Assert (Instruction_Stream_Index'First = 1);
 
-   function Img (V : Integer) return String is
-      Text : constant String := Integer'Image (V);
+      Bit_Num  : M8         := 0;
+      Byte_Acc : Unsigned_8 := 0;
+      Byte_Acc_Storage : array (Instruction_Stream_Index) of Unsigned_8;
+      Last     : Stream_Element_Offset := Result'First - 1;
    begin
-      return Text (Text'First + 1 .. Text'Last);
-   end Img;
-begin
-   Ada.Text_IO.Put_Line ("P4");
-   Ada.Text_IO.Put_Line (Img (W) & " " & Img (H));
-   Ada.Text_IO.Flush;
+      for Y in Y1 .. Y2 - 1 loop
+         for X in 0 .. Size / Instruction_Stream_Index'Last - 1 loop
+            declare
+               Cr_1 : constant Real := Two_on_Size * (Real (2*X)) - 1.5;
+               Ci_1 : constant Real := Two_on_Size * (Real (Y)) - 1.0;
+               Zr_1 : Real := Cr_1;
+               Zi_1 : Real := Ci_1;
+               ZZi_1 : Real := Zi_1 * Zi_1;
+               ZZr_1 : Real := Zr_1 * Zr_1;
+               Z_1_Exceeded_Limit : Boolean := False;
+               Tmp_1 : Real;
 
-   for Yi in 0 .. H - 1 loop
-      Pos := 0;
-      for Xi in 0 .. W - 1 loop
-         Zr := 0.0;
-         Zi := 0.0;
-         Tr := 0.0;
-         Ti := 0.0;
-         Cr := 2.0 * Long_Float (Xi) / Long_Float (W) - 1.5;
-         Ci := 2.0 * Long_Float (Yi) / Long_Float (H) - 1.0;
+               Cr_2 : constant Real := Two_on_Size * (Real (2*X + 1)) - 1.5;
+               Ci_2 : constant Real := Two_on_Size * (Real (Y)) - 1.0;
+               Zr_2 : Real := Cr_2;
+               Zi_2 : Real := Ci_2;
+               ZZi_2 : Real := Zi_2 * Zi_2;
+               ZZr_2 : Real := Zr_2 * Zr_2;
+               Z_2_Exceeded_Limit : Boolean := False;
+               Tmp_2 : Real;
+            begin
+               for I in 1 .. Iter loop
 
-         I := 0;
-         while I < Iter and then Tr + Ti <= Limit * Limit loop
-            Zi := 2.0 * Zr * Zi + Ci;
-            Zr := Tr - Ti + Cr;
-            Tr := Zr * Zr;
-            Ti := Zi * Zi;
-            I := I + 1;
+                  Tmp_1 := Zr_1 * Zi_1;
+                  Tmp_2 := Zr_2 * Zi_2;
+                  Zr_1 := Cr_1 - ZZi_1;
+                  Zr_2 := Cr_2 - ZZi_2;
+                  Zi_1 := Ci_1 + Tmp_1 + Tmp_1;
+                  Zi_2 := Ci_2 + Tmp_2 + Tmp_2;
+                  Zr_1 := Zr_1 + ZZr_1;
+                  Zr_2 := Zr_2 + ZZr_2;
+
+                  if not Z_1_Exceeded_Limit then
+                     if ZZi_1 + ZZr_1 > Limit then
+                        Z_1_Exceeded_Limit := True;
+                     end if;
+                  end if;
+                  if not Z_1_Exceeded_Limit then
+                     ZZr_1 := Zr_1 * Zr_1;
+                     ZZi_1 := Zi_1 * Zi_1;
+                  end if;
+
+                  if not Z_2_Exceeded_Limit then
+                     if ZZi_2 + ZZr_2 > Limit then
+                        Z_2_Exceeded_Limit := True;
+                     end if;
+                  end if;
+                  if not Z_2_Exceeded_Limit then
+                     ZZr_2 := Zr_2 * Zr_2;
+                     ZZi_2 := Zi_2 * Zi_2;
+                  end if;
+
+                  exit when Z_2_Exceeded_Limit and Z_1_Exceeded_Limit;
+               end loop;
+
+               if Z_1_Exceeded_Limit then
+                  Byte_Acc := Shift_Left (Byte_Acc, 1) or 16#00#;
+               else
+                  Byte_Acc := Shift_Left (Byte_Acc, 1) or 16#01#;
+               end if;
+               Byte_Acc_Storage (1) := Byte_Acc;
+
+               if Z_2_Exceeded_Limit then
+                  Byte_Acc := Shift_Left (Byte_Acc, 1) or 16#00#;
+               else
+                  Byte_Acc := Shift_Left (Byte_Acc, 1) or 16#01#;
+               end if;
+               Byte_Acc_Storage (2) := Byte_Acc;
+            end;
+
+            for j in Byte_Acc_Storage'Range loop
+
+               Bit_Num := Bit_Num + 1;
+
+               if Bit_Num = 0 then
+                  Last := Last + 1;
+                  Result (Last) := Stream_Element (Byte_Acc_Storage (j));
+                  Byte_Acc := 0;
+               end if;
+
+            end loop;
          end loop;
 
-         Byte_Acc := Shift_Left (Byte_Acc, 1);
-         if Tr + Ti <= Limit * Limit then
-            Byte_Acc := Byte_Acc or 1;
-         end if;
-
-         Bit_Num := Bit_Num + 1;
-
-         if Bit_Num = 8 then
-            Pos := Pos + 1;
-            Row (Pos) := Ada.Streams.Stream_Element (Byte_Acc);
-            Byte_Acc := 0;
-            Bit_Num := 0;
-         elsif Xi = W - 1 then
-            Byte_Acc := Shift_Left (Byte_Acc, 8 - W mod 8);
-            Pos := Pos + 1;
-            Row (Pos) := Ada.Streams.Stream_Element (Byte_Acc);
-            Byte_Acc := 0;
-            Bit_Num := 0;
-         end if;
+         case M8 (Size mod 8) is
+            when 0 =>
+               null;
+            when 1 | 3 | 5 | 7 =>
+               pragma Assert (False);  -- odd Size not covered
+               null;
+            when 2 | 4 | 6 =>
+               Byte_Acc_Storage (2) := Shift_Left (Byte_Acc, 8 - (Size mod 8));
+               Last := Last + 1;
+               Result (Last) := Stream_Element (Byte_Acc_Storage (2));
+               Byte_Acc := 0;
+               Bit_Num  := 0;
+         end case;
       end loop;
-      Out_Stream.all.Write (Row (1 .. Pos));
-   end loop;
+   end Compute;
+
+   task body X_Step is
+      Y1, Y2 : PCount;
+      Data   : Output;
+   begin
+      accept Compute_Z (Y1, Y2 : PCount) do
+         X_Step.Y1 := Y1;
+         X_Step.Y2 := Y2;
+      end Compute_Z;
+
+      Allocate_Output_Queue (Y1, Y2, Result => Data);
+      Compute (Y1, Y2, Result => Data);
+
+      accept Get_Output (Result : out Output) do
+         Result := Data;
+      end Get_Output;
+   end X_Step;
+
+   procedure Allocate_Output_Queue (Y1, Y2 : PCount; Result : out Output) is
+      Limit : constant Natural := Natural'Max
+        (0,
+         Integer (Y2 - Y1) * (Size / 8 + Boolean'Pos (Size mod 8 > 0)));
+   begin
+      Result := new Output_Queue (1 .. Output_Index'Base (Limit));
+   end Allocate_Output_Queue;
+
+begin
+   pragma Assert (Size mod 2 = 0, "Size must be even at present");
+
+   declare
+      subtype Worker_Index is Natural range 0 .. 32;
+      Chunk_Size : constant Positive :=
+        (Size + Worker_Index'Last) / Worker_Index'Last;
+      Worker     : array (Worker_Index) of X_Step;
+      pragma       Assert (Worker'Length * Chunk_Size >= Size);
+      pragma       Assert (Worker'First = 0);
+   begin
+      for P in Worker'Range loop
+         Worker (P).Compute_Z
+           (Y1 => PCount (P * Chunk_Size),
+            Y2 => PCount (Positive'Min ((P + 1) * Chunk_Size, Size)));
+      end loop;
+
+      declare
+         Stdout : Stream_IO.File_Type;
+         Header : constant String := "P4" & ASCII.LF &
+           Argument (1) & " " & Argument (1) & ASCII.LF;
+         Buffer : Output;
+
+         Header_Bytes : Stream_Element_Array (1 .. Header'Length);
+         pragma Import (Ada, Header_Bytes);
+         for Header_Bytes'Address use Header'Address;
+      begin
+         Stream_IO.Open (Stdout, Stream_IO.Out_File, "/dev/stdout");
+         Stream_IO.Write (Stdout, Header_Bytes);
+         for P in Worker'Range loop
+            Worker (P).Get_Output (Result => Buffer);
+            Stream_IO.Write (Stdout, Buffer.all);
+         end loop;
+      end;
+   end;
+
 end Mandelbrot;
+

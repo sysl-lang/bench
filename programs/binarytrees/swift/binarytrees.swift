@@ -1,11 +1,11 @@
-// The Computer Language Benchmark Game
-// https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
+// The Computer Language Benchmarks Game
+// http://benchmarksgame.alioth.debian.org/
 //
-// contributed by Ralph Ganszky
-//
-// Adapted for this suite: the Dispatch worker queue is replaced by a sequential loop.
-// *reset*
+// based on programs by Marcel Ibes and Ralph Ganszky
+// contributed by Isaac Gouy
 
+
+import Dispatch
 import Foundation
 
 class TreeNode {
@@ -25,10 +25,10 @@ class TreeNode {
     }
 }
 
-func createTree(_ depth: Int) -> TreeNode? {
+func bottomUpTree(_ depth: Int) -> TreeNode? {
     if depth > 0 {
-	let node = TreeNode(left: createTree(depth-1),
-			    right: createTree(depth-1))
+	let node = TreeNode(left: bottomUpTree(depth-1),
+			    right: bottomUpTree(depth-1))
 	return node
     } else {
 	let node = TreeNode(left: nil, right: nil)
@@ -36,34 +36,76 @@ func createTree(_ depth: Int) -> TreeNode? {
     }
 }
 
+func inner(depth: Int, iterations: Int) -> String {
+    var chk = 0
+    for _ in 0..<iterations {
+        let a = bottomUpTree(depth)
+        chk += a!.check()
+    }
+    return "\(iterations)\t trees of depth \(depth)\t check: \(chk)"
+}
+
 let n: Int
+
 if CommandLine.argc > 1 {
     n = Int(CommandLine.arguments[1]) ?? 10
 } else {
     n = 10
 }
+
 let minDepth = 4
 let maxDepth = (n > minDepth + 2) ? n : minDepth + 2
+var messages: [Int:String] = [:]
+let depth = maxDepth+1
 
-// Create big tree in first pool
-let tree = createTree(maxDepth+1)
-let check = tree!.check()
-print("stretch tree of depth \(maxDepth+1)\t check: \(check)")
+let group = DispatchGroup()
 
-// Cleal first pool and allocate long living tree
-let longLivingTree = createTree(maxDepth)
+let workerQueue = DispatchQueue.init(label: "workerQueue", qos: .userInitiated, attributes: .concurrent)
+let messageQueue = DispatchQueue.init(label: "messageQueue", qos: .userInitiated)
 
-// Allocate binary trees of increasing depth up to maxDepth depth
-for currentDepth in stride(from: minDepth, through: maxDepth, by: 2) {
-    let iterations = 1 << (maxDepth - currentDepth + minDepth)
-    var totalChecksum = 0
-    for _ in 1...iterations {
-        let tree1 = createTree(currentDepth)
-        totalChecksum += tree1!.check()
+group.enter()
+workerQueue.async {
+    let tree = bottomUpTree(depth)
+    
+    messageQueue.async {
+        messages[0] = "stretch tree of depth \(depth)\t check: \(tree!.check())"
+        group.leave()
     }
-    print("\(iterations)\t trees of depth \(currentDepth)\t check: \(totalChecksum)")
 }
 
-// Check long living tree and print out check info
-print("long lived tree of depth \(maxDepth)\t check: \(longLivingTree!.check())")
+group.enter()
+workerQueue.async {
+    let longLivedTree = bottomUpTree(maxDepth)
+    
+    messageQueue.async {
+        messages[Int.max] = "long lived tree of depth \(maxDepth)\t check: \(longLivedTree!.check())"
+        group.leave()
+    }
+}
 
+group.enter()
+workerQueue.async {
+    for halfDepth in (minDepth / 2)..<(maxDepth/2+1) {
+        let depth = halfDepth * 2
+        let iterations = 1 << (maxDepth - depth + minDepth)
+
+        group.enter()
+        workerQueue.async {
+            let msg = inner(depth: depth, iterations: iterations)
+            messageQueue.async {
+                messages[depth] = msg
+                group.leave()
+            }
+        }
+    }
+    
+    messageQueue.async {
+        group.leave()
+    }
+}
+
+group.wait()
+
+for msg in messages.sorted(by: { $0.0 < $1.0 }) {
+    print(msg.value)
+}

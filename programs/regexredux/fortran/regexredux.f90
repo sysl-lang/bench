@@ -5,13 +5,14 @@
 ! translation of GCC #5 by Jeremy Zerfas & Zoltan Herczeg
 ! compilation: ifort -O3 -xHost -ipo -qopenmp regexredux.f90
 !
-! Adapted for this suite: built with gfortran and no -fopenmp, so the !$omp
-! directives are comments and it runs on one thread. The PCRE2_SIZE
+! Original, written for this benchmark, starting from the Game's only
+! Fortran entry, regexredux.ifc, which does not run as published here:
+! standard input is read with POSIX read(2), because gfortran and flang cannot
+! reopen the preconnected unit for stream access, and the PCRE2_SIZE
 ! arguments of pcre2_compile and pcre2_jit_match (lengths and offsets) are
-! declared integer(c_size_t), as the C prototypes in the comments say,
-! where the archive program passes them as c_int. Standard input is opened
-! as /dev/stdin, because gfortran cannot reopen the preconnected unit for
-! stream access.
+! declared integer(c_size_t), as the C prototypes in the comments say, where
+! the archive passes them as c_int. Built with OpenMP, so its !$omp
+! directives run the matching on several threads, as in the Game's entry.
 
 
 module pcre2_mod
@@ -245,9 +246,21 @@ program regexredux
     type(const_str), dimension(:), allocatable :: count_info
     type(const_str), dimension(:, :), allocatable :: replace_info
 
-    type(var_str) :: input, temp, sequences, prereplace_string, &
+    type(var_str), target :: input, temp, sequences, prereplace_string, &
         postreplace_string
-    integer :: input_size, info_count, i, in
+    integer :: input_size, info_count, i
+    integer(c_long) :: got
+
+    interface
+        ! ssize_t read(int fd, void *buf, size_t count)
+        function c_read(fd, buf, count) bind(C, name='read') result(n)
+            import :: c_int, c_ptr, c_size_t, c_long
+            integer(c_int), value :: fd
+            type(c_ptr), value :: buf
+            integer(c_size_t), value :: count
+            integer(c_long) :: n
+        end function c_read
+    end interface
 
     type(c_ptr) :: mdata, mcontext, stack, regex, c_match
     integer(c_size_t), pointer :: match(:)
@@ -274,11 +287,23 @@ program regexredux
         const_str('\|[^|][^|]*\|'), const_str('-') &
     ], [2, 5])
 
-    open(newunit=in, file="/dev/stdin", action="read", form="unformatted", access="stream")
-    inquire(unit=in, size=input_size)
-    allocate(character(len=input_size) :: input%data)
-    read(in) input%data
-    close(in)
+    ! All of standard input, read with POSIX read(2) into a buffer doubled as
+    ! it fills (the entry reopens the preconnected unit for stream access,
+    ! which gfortran and flang refuse; flang's stream I/O on /dev/stdin also
+    ! misreports its size).
+    allocate(character(len=16777216) :: input%data)
+    input_size = 0
+    do
+        if (input_size == len(input%data)) then
+            allocate(character(len=2 * len(input%data)) :: temp%data)
+            temp%data(1:input_size) = input%data(1:input_size)
+            call move_alloc(temp%data, input%data)
+        end if
+        got = c_read(0_c_int, c_loc(input%data(input_size + 1:)), &
+            int(len(input%data) - input_size, c_size_t))
+        if (got <= 0) exit
+        input_size = input_size + int(got)
+    end do
 
     input%size = input_size
 

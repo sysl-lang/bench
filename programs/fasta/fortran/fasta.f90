@@ -4,13 +4,35 @@
 ! fasta implementation - translated from the lua program
 ! contributed by Simon Geard, 18/1/05
 ! modified by Andrei Jirnyi
+!
+! Building info.
+! ==============
+!
+! Linux  - using the Intel Fortran90 compiler:
+!
+!          ifort -fast -opt-streaming-stores always fasta3.f90
+!          time ./a.out 25000000 > /dev/null
+
+
+module line_by_line
+  interface
+     function puts(str) bind(C)
+       use, intrinsic :: ISO_C_BINDING
+       integer(kind=c_int) :: puts
+       character(kind=c_char), dimension(*) :: str
+     end function puts
+  end interface
+end module line_by_line
 
 program fasta
-  implicit none
+  use iso_fortran_env
+  use line_by_line
 
-  integer, parameter :: dp = kind(1.d0)
+ implicit none
+  integer num
+  character(len=8) argv
   integer, parameter :: IM = 139968, IA = 3877, IC = 29573
-  integer, parameter :: LW = 60, BUFSIZE = 65536
+  integer, parameter :: LW=60
   character(len=*), parameter :: alu = &
 'GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGG' // &
 'GAGGCCGAGGCGGGCGGATCACCTGAGGTCAGGAGTTCGAGA' // &
@@ -21,106 +43,132 @@ program fasta
 'AGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA'
   character(len=1), parameter :: EOL = achar(10)
 
-  real(dp), parameter :: iub_p(15) = [0.27_dp, 0.12_dp, 0.12_dp, 0.27_dp, &
-       [0.02_dp, 0.02_dp, 0.02_dp, 0.02_dp, 0.02_dp, 0.02_dp, 0.02_dp, 0.02_dp, &
-        0.02_dp, 0.02_dp, 0.02_dp]]
-  real(dp), parameter :: homosapiens_p(4) = [0.3029549426680_dp, 0.1979883004921_dp, &
-       0.1975473066391_dp, 0.3015094502008_dp]
+  type pair
+     character(len=1),dimension(:),allocatable :: c
+     real,dimension(:),allocatable :: p
+  end type pair
+  
+  type(pair) :: homosapiens
+  type(pair) :: iub
+  
+  iub = mkpair(15, c='acgtBDHKMNRSVWY',&
+       &       p=[.27,.12,.12,.27,(.02,num=1,11)])
+  homosapiens = mkpair(4, c='acgt',&
+                     & p = [0.3029549426680, 0.1979883004921, &
+                            0.1975473066391, 0.3015094502008])
 
-  integer :: num, out, nbuf = 0, last = 42
-  character(len=12) :: argv
-  character(len=1) :: obuf(BUFSIZE)
+  call getarg(1,argv)
+  read(argv,*) num
+ 
+  call makeRepeatFasta('ONE','Homo sapiens alu',alu,num*2)
 
-  call get_command_argument(1, argv)
-  read(argv, *) num
+  call makeRandomFasta('TWO','IUB ambiguity codes',iub,num*3)
 
-  open(newunit=out, file='/dev/stdout', access='stream', form='unformatted', action='write')
+  call makeRandomFasta('THREE','Homo sapiens frequency',homosapiens,num*5)
 
-  call put('>ONE Homo sapiens alu' // EOL)
-  call makeRepeatFasta(alu, num*2)
-
-  call put('>TWO IUB ambiguity codes' // EOL)
-  call makeRandomFasta('acgtBDHKMNRSVWY', iub_p, num*3)
-
-  call put('>THREE Homo sapiens frequency' // EOL)
-  call makeRandomFasta('acgt', homosapiens_p, num*5)
-
-  if (nbuf > 0) write(out) obuf(1:nbuf)
-  close(out)
-
+     
 contains
 
-  ! Appends s to the output buffer, writing the buffer out when it is full.
-  subroutine put(s)
-    character(len=*), intent(in) :: s
-    integer :: i
-
-    if (nbuf + len(s) > BUFSIZE) then
-       write(out) obuf(1:nbuf)
-       nbuf = 0
-    end if
-    do i = 1, len(s)
-       obuf(nbuf + i) = s(i:i)
+  type(pair) function mkpair(n,c,p)
+    integer, intent(in) :: n
+    character(len=n) :: c
+    real :: p(n), z
+    integer :: i,k
+    allocate(mkpair%c(0:n-1))
+    allocate(mkpair%p(n-1))
+    z = 0
+    k = 1
+    do i=1,n-1
+       mkpair%c(i-1) = c(i:i)
+       mkpair%p(i) = z+p(i)
+       z = z+p(i)
     end do
-    nbuf = nbuf + len(s)
-  end subroutine put
+    mkpair%c(n-1) = c(n:n)
+    mkpair%p = mkpair%p 
+  end function mkpair
+  
+  real function getRandom (max)
+    real :: max
+    integer, save :: last = 42
+    last = mod(last * IA + IC, IM)
+    getRandom = real(last)*max/IM
+  end function getRandom
 
-  subroutine makeRandomFasta(chars, probs, n)
-     character(len=*), intent(in) :: chars
-     real(dp), intent(in) :: probs(:)
+  subroutine makeRandomFasta(id,desc,a,n)
+     character(len=*), intent(in) :: id
+     character(len=*), intent(in) :: desc
+     type(pair), intent(inout) :: a
      integer, intent(in) :: n
-     real(dp) :: p(size(probs)), v
-     character(len=LW+1) :: line
-     integer :: i, j, k, m, nsym, todo
+     character(len=LW) :: title
+     character(len=1) :: line(LW+1) = achar(0)
+     equivalence(title, line)
+     integer :: j,l,istat
+     character(1), dimension(0:size(a%c)-1) :: chars
+     real, dimension(size(a%p)) :: probs
+     
+     probs = a%p * IM
+     chars = a%c
 
-     ! Cumulative probabilities, summed as the C program sums them.
-     nsym = size(probs)
-     p(1) = probs(1)
-     do i = 2, nsym
-        p(i) = probs(i) + p(i-1)
+     write(title,'(4a)') '>',id,' ',desc
+     line(len(trim(title))+1) = achar(0)
+     istat = puts(line)
+     j = 0
+     l = 0
+     do
+        j = j+1
+        l = l+1
+        line(j) = chars(count(getRandom(IM*1.0) >= probs))
+        if(l == n) then  ! last line, exit
+           line(j+1) = achar(0)
+           istat = puts(line)
+           exit
+        end if
+        if(j == LW) then ! write another line
+           j = 0
+           istat = puts(line)
+        end if
      end do
 
-     todo = n
-     do while (todo > 0)
-        m = min(LW, todo)
-        do j = 1, m
-           last = mod(last * IA + IC, IM)
-           v = 1.0_dp * last / IM
-           ! Count the cumulative probabilities below v: the C program's
-           ! linear lookup, which scans the whole table without branching.
-           k = 1
-           do i = 1, nsym - 1
-              if (v > p(i)) k = k + 1
-           end do
-           line(j:j) = chars(k:k)
-        end do
-        line(m+1:m+1) = EOL
-        call put(line(1:m+1))
-        todo = todo - m
-     end do
   end subroutine makeRandomFasta
 
-  subroutine makeRepeatFasta(s, n)
+  subroutine makeRepeatFasta(id,desc,s,n)
+     character(len=*), intent(in) :: id
+     character(len=*), intent(in) :: desc
      character(len=*), intent(in) :: s
      integer, intent(in) :: n
-     character(len=len(s)+LW) :: ss
-     character(len=LW+1) :: line
-     integer :: k, m, todo
+     integer :: j, k, l, kn, istat
+     integer, parameter :: length = 60
+     character(len=LW) :: title
+     character(len=1) :: line(LW+1) = achar(0)
+     equivalence(title, line)
+     intrinsic len
 
-     ! The sequence followed by its own first line, so every output line
-     ! is one contiguous slice, as in the C program.
-     ss = s // s(1:LW)
-     k = 1
-     todo = n
-     do while (todo > 0)
-        m = min(LW, todo)
-        line(1:m) = ss(k:k+m-1)
-        line(m+1:m+1) = EOL
-        call put(line(1:m+1))
-        k = k + m
-        if (k > len(s)) k = k - len(s)
-        todo = todo - m
+     write(title,'(4a)') '>',id,' ',desc
+     line(len(trim(title))+1) = achar(0)
+     istat = puts(line)
+
+     k = 1; kn = len(s)
+     
+     j = 0 ! in output line
+     k = 0 ! in repeat seq
+     l = 0 ! generated count
+     do
+        j = j+1
+        k = k+1
+        l = l+1
+        if(k>kn) k=1
+        line(j) = s(k:k)
+        if(l == n) then
+           line(j+1) = achar(0)
+           istat = puts(line)
+           exit
+        end if
+        if(j == LW) then
+           j = 0
+           istat = puts(line)
+        end if
      end do
+
   end subroutine makeRepeatFasta
 
 end program fasta
