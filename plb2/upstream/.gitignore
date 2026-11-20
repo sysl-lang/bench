@@ -1,0 +1,10 @@
+.*.swp
+*.o
+*.class
+*.dwarf
+*.json
+*.dll
+*.fasl
+*.cmi
+*.cmx
+*.mod
