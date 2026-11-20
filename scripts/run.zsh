@@ -41,7 +41,15 @@ for prog in $PROGRAMS; do
       continue
     fi
 
-    if ! run_program $prog $lang small | cmp -s - expected/ref/$prog.out; then
+    # The Game's pidigits-4 (Go) prints whole lines of ten digits only, as published, so its output
+    # for 27 digits lacks the last, padded line. Go is checked at 20 digits against the reference's
+    # first two lines; its timed size, 10000, is a multiple of ten and is checked in full below.
+    if [[ $prog == pidigits && $lang == go ]]; then
+      small_ok=0; [[ $($(exe $prog $lang) 20 | cmp - <(head -n 2 expected/ref/$prog.out) && print ok) == ok ]] && small_ok=1
+    else
+      small_ok=0; run_program $prog $lang small | cmp -s - expected/ref/$prog.out && small_ok=1
+    fi
+    if (( ! small_ok )); then
       print "WRONG    $prog/$lang at the small size"
       failures=$((failures + 1))
       continue

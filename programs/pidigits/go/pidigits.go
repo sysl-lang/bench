@@ -7,9 +7,6 @@
  * contributed by Zhao Zhiqiang.
  *
  * Modified by Antonio Petri to use strings.Builder
- *
- * Adapted for this suite: the last, short line printed when n is not a
- * multiple of ten, as the C program prints it.
  */
 
 package main
@@ -107,10 +104,5 @@ func main() {
         }
 
         eliminate_digit(d)
-    }
-
-    // The last line when n is not a multiple of ten, padded as the C program pads it.
-    if n%10 != 0 {
-        fmt.Fprintf(w, "%-10s\t:%d\n", sb.String(), n)
     }
 }

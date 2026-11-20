@@ -3,14 +3,6 @@
  *
  * contributed by Mark van Weert
  * based on Go#6 C++#2
- *
- * Adapted for this suite: one goroutine. runtime.NumCPU() replaced by 1, so
- * there is one table per k, filled by rolling the code one base at a time,
- * and calc32/calc64 are called rather than started with go. The bases shifted
- * into the key at each step are the last nsize of the k-mer
- * (data[idx+size-nsize+i]); the archive shifts in data[idx+i], which is right
- * only when the stride (NumCPU) is at least k, and with one goroutine counted
- * wrong k-mers.
  */
 
 package main
@@ -21,6 +13,7 @@ import (
     "io"
     "math"
     "os"
+    "runtime"
     "sort"
     "strings"
     "sync"
@@ -149,7 +142,7 @@ func WriteCount(data []byte, nucleotide string) string {
 }
 
 func startCount32(data []byte, size int) map[uint32]*int {
-    maps := make([]map[uint32]*int, 1)
+    maps := make([]map[uint32]*int, runtime.NumCPU())
 
     wg := sync.WaitGroup{}
 
@@ -157,7 +150,7 @@ func startCount32(data []byte, size int) map[uint32]*int {
     for i := 0; i < len(maps); i++ {
         maps[i] = make(map[uint32]*int)
         wg.Add(1)
-        calc32(data, maps[i], i, size, &wg)
+        go calc32(data, maps[i], i, size, &wg)
     }
 
     wg.Wait()
@@ -179,7 +172,7 @@ func startCount32(data []byte, size int) map[uint32]*int {
 }
 
 func startCount64(data []byte, size int) map[uint64]*int {
-    maps := make([]map[uint64]*int, 1)
+    maps := make([]map[uint64]*int, runtime.NumCPU())
 
     wg := sync.WaitGroup{}
 
@@ -187,7 +180,7 @@ func startCount64(data []byte, size int) map[uint64]*int {
     for i := 0; i < len(maps); i++ {
         maps[i] = make(map[uint64]*int)
         wg.Add(1)
-        calc64(data, maps[i], i, size, &wg)
+        go calc64(data, maps[i], i, size, &wg)
     }
 
     wg.Wait()
@@ -210,7 +203,7 @@ func startCount64(data []byte, size int) map[uint64]*int {
 
 func calc32(data []byte, result map[uint32]*int, begin int, size int, wg *sync.WaitGroup) {
     var key uint32
-    goroutineCount := uint(1)
+    goroutineCount := uint(runtime.NumCPU())
 
     // Init key
     for i := 0; i < size; i++ {
@@ -238,7 +231,7 @@ func calc32(data []byte, result map[uint32]*int, begin int, size int, wg *sync.W
         // Update the key with 1 byte at a time
         for i := uint(0); i < nsize; i++ {
             key <<= 2
-            key |= uint32(data[idx+uint(size)-nsize+i])
+            key |= uint32(data[idx+i])
         }
 
         // Mask out excess information
@@ -261,7 +254,7 @@ func calc32(data []byte, result map[uint32]*int, begin int, size int, wg *sync.W
 
 func calc64(data []byte, result map[uint64]*int, begin int, size int, wg *sync.WaitGroup) {
     var key uint64
-    goroutineCount := uint(1)
+    goroutineCount := uint(runtime.NumCPU())
 
     // Init key
     for i := 0; i < size; i++ {
@@ -292,7 +285,7 @@ func calc64(data []byte, result map[uint64]*int, begin int, size int, wg *sync.W
         }
         for i := uint(0); i < nsize; i++ {
             key <<= 2
-            key |= uint64(data[idx+uint(size)-nsize+i])
+            key |= uint64(data[idx+i])
         }
 
         // Mask out excess information

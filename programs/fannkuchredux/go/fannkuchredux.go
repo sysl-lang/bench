@@ -6,10 +6,6 @@
  * flag.Arg hack by Isaac Gouy
  * Stack allocation and atomic synchronization by Jan Pfeifer (2020)
  *
- * Adapted for this suite: one goroutine. Each chunk is run in turn by main
- * instead of by a goroutine the previous chunk starts, and
- * runtime.GOMAXPROCS(4) removed.
- *
  */
 
 package main
@@ -18,6 +14,7 @@ import (
     "flag"
     "fmt"
     "log"
+    "runtime"
     "strconv"
     "sync/atomic"
 )
@@ -40,9 +37,11 @@ var (
     chk = int64(0)
 )
 
-func fannkuch(idxMin int) {
+func fannkuch(idxMin int, ch chan bool) {
     idxMax := idxMin + CHUNKSZ
-    if idxMax > Fact[n] {
+    if idxMax < Fact[n] {
+        go fannkuch(idxMax, ch)
+    } else {
         idxMax = Fact[n]
     }
 
@@ -132,6 +131,7 @@ func fannkuch(idxMin int) {
     for newFlips > res {
         newFlips = atomic.SwapInt64(&res, newFlips)
     }
+    ch <- true
 }
 
 func printResult(n int, res int64, chk int64) {
@@ -146,6 +146,8 @@ func main() {
     if n > MAX_N {
         log.Fatalf("Max value accepted for N: %d", MAX_N)
     }
+    runtime.GOMAXPROCS(4)
+
     Fact = make([]int, n+1)
     Fact[0] = 1
     for i := 1; i < len(Fact); i++ {
@@ -156,9 +158,12 @@ func main() {
     CHUNKSZ += CHUNKSZ % 2
     NTASKS = (Fact[n] + CHUNKSZ - 1) / CHUNKSZ
 
-    // Every chunk in turn on the main goroutine.
+    ch := make(chan bool, NTASKS)
+    go fannkuch(0, ch)
+
+    // Wait for all results to be calculated.
     for i := 0; i < NTASKS; i++ {
-        fannkuch(i * CHUNKSZ)
+        <-ch
     }
 
     printResult(n, res, chk)

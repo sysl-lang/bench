@@ -11,130 +11,125 @@
  * 3) Handling out of order results in the file writer.
 
  * modified by Sean Lake
- *
- * modified by Rodrigo Corsi
- * 1)two goroutines per cpu
- * 2)each goroutine generate one line and increment counter (atomic int32)
-
-
- * modified by Anton Yuzhaninov
- *
- * Adapted for this suite: one goroutine. main renders every row in turn
- * instead of the 2 x NumCPU workers taking rows from an atomic counter, and
- * runtime.GOMAXPROCS removed. Each coordinate is 2*x/size as the C program
- * computes it, not x*(2/size): the archive's rounding put boundary pixels on
- * the other side, and its output differed from the Game's at 200 and from
- * C's at 6000.
  */
 
 package main
 
 import (
-    "bufio"
-    "flag"
-    "fmt"
-    "os"
-    "strconv"
+   "bufio"
+   "flag"
+   "fmt"
+   "os"
+   "runtime"
+   "strconv"
+   "sync"
 )
 
-const limit = 4.0        // abs(z) < 2
-const maxIter = 50       // number of iterations
-const defaultSize = 4000 // bitmap size if not given as command-line argument
+/* targeting a q6600 system, two cpu workers per core */
+const pool = 8
+const log2pool = 3
 
-var rows [][]byte
+const LIMIT = 2.0
+const ITER = 50 // Benchmark parameter
+const SIZE = 16000
+
 var bytesPerRow int
-var initial_r []float64
-var initial_i []float64
 
-// renderRow returns rendered row of pixels
-// pixels packed in one byte for PBM image
-func renderRow(y0 *int32) []byte {
-    var i, j, x int
-    var res, b byte
-    var Zr1, Zr2, Zi1, Zi2, Tr1, Tr2, Ti1, Ti2 float64
+// This func is responsible for rendering a row of pixels,
+// and when complete writing it out to the file.
 
-    row := make([]byte, bytesPerRow)
+func renderRow(w, h, y0, maxiter int, wg *sync.WaitGroup, fieldChan chan<- []byte) {
 
-    for xByte := range row {
-        res = 0
-        Ci := initial_i[*y0]
-        for i = 0; i < 8; i += 2 {
-            x = xByte << 3 // * 8
-            Cr1 := initial_r[x+i]
-            Cr2 := initial_r[x+i+1]
+   var Zr, Zi, Tr, Ti, Cr float64
+   var x, i int
 
-            Zr1 = Cr1
-            Zi1 = Ci
+   //All fields have at least floor( h / pool ) rows
+   //numRows := h / pool //Uncomment if pool is not a power of 2
+   numRows := h >> log2pool //Comment out if pool is not a power of 2
 
-            Zr2 = Cr2
-            Zi2 = Ci
+   //Add one more row if this renderer needs to cover the extra row
+   /*if y0 < h % pool { //Uncomment if pool is not a power of 2
+      numRows++
+   }*/
+   if y0 < h&int(pool-1) { //Comment out if pool is not a power of 2
+      numRows++
+   }
 
-            b = 0
+   field := make([]byte, numRows*bytesPerRow)
 
-            for j = 0; j < maxIter; j++ {
-                Tr1 = Zr1 * Zr1
-                Ti1 = Zi1 * Zi1
-                Zi1 = 2*Zr1*Zi1 + Ci
-                Zr1 = Tr1 - Ti1 + Cr1
+   for y := 0; y < numRows; y++ {
 
-                if Tr1+Ti1 > limit {
-                    b |= 2
-                    if b == 3 {
-                        break
-                    }
-                }
+      offset := bytesPerRow * y
+      //uncomment if pool is not a power of 2
+      //Ci := (float64((y * pool + y0) << 1)/float64(h) - 1.0)
+      //comment out if pool is not a power of 2
+      Ci := (float64((y<<log2pool+y0)<<1)/float64(h) - 1.0)
 
-                Tr2 = Zr2 * Zr2
-                Ti2 = Zi2 * Zi2
-                Zi2 = 2*Zr2*Zi2 + Ci
-                Zr2 = Tr2 - Ti2 + Cr2
+      for x = 0; x < w; x++ {
+         Zr, Zi, Tr, Ti = 0, 0, 0, 0
+         Cr = (float64(x<<1)/float64(w) - 1.5)
 
-                if Tr2+Ti2 > limit {
-                    b |= 1
-                    if b == 3 {
-                        break
-                    }
-                }
-            }
-            res = (res << 2) | b
-        }
-        row[xByte] = ^res
-    }
-    return row
+         for i = 0; i < maxiter && Tr+Ti <= LIMIT*LIMIT; i++ {
+            Zr, Zi = Tr-Ti+Cr, 2*Zr*Zi+Ci
+            Tr, Ti = Zr*Zr, Zi*Zi
+         }
+
+         // Store the value in the array of ints
+         if Tr+Ti <= LIMIT*LIMIT {
+            field[offset+(x>>3)] |= (byte(1) << uint(7-(x&int(7))))
+         }
+      }
+   }
+   //Signal finish
+   wg.Done()
+   fieldChan <- field
 }
 
 func main() {
-    // Get input, if any...
-    size := defaultSize
-    flag.Parse()
-    if flag.NArg() > 0 {
-        size, _ = strconv.Atoi(flag.Arg(0))
-    }
+   runtime.GOMAXPROCS(pool)
 
-    bytesPerRow = size >> 3
+   size := SIZE // Contest settings
+   maxiter := ITER
 
-    // Precompute the initial real and imaginary values for each x and y
-    // coordinate in the image.
-    initial_r = make([]float64, size)
-    initial_i = make([]float64, size)
-    for xy := 0; xy < size; xy++ {
-        i := 2.0 * float64(xy) / float64(size)
-        initial_r[xy] = i - 1.5
-        initial_i[xy] = i - 1.0
-    }
+   // Get input, if any...
+   flag.Parse()
+   if flag.NArg() > 0 {
+      size, _ = strconv.Atoi(flag.Arg(0))
+   }
+   w, h := size, size
+   bytesPerRow = w / 8
 
-    rows = make([][]byte, size)
+   out := bufio.NewWriter(os.Stdout)
+   defer out.Flush()
+   fmt.Fprintf(out, "P4\n%d %d\n", w, h)
 
-    // Every row in turn on the main goroutine.
-    for y := int32(0); y < int32(size); y++ {
-        rows[y] = renderRow(&y)
-    }
+   fieldChans := make([]chan []byte, pool)
 
-    out := bufio.NewWriter(os.Stdout)
-    defer out.Flush()
-    fmt.Fprintf(out, "P4\n%d %d\n", size, size)
+   /* Wait group for finish */
+   wg := new(sync.WaitGroup)
+   // start pool workers, and assign all work
+   for y := 0; y < pool; y++ {
+      wg.Add(1)
+      fc := make(chan []byte)
+      fieldChans[y] = fc
+      go renderRow(w, h, y, maxiter, wg, fc)
+   }
 
-    for y := 0; y < size; y++ {
-        out.Write(rows[y])
-    }
+   fields := make([][]byte, pool)
+
+   /* wait for the file workers to finish, then write */
+   wg.Wait()
+   for y := 0; y < pool; y++ {
+      fields[y] = <-fieldChans[y]
+   }
+
+   //Interlace the fields for write out
+   var rowEnd int
+   for rowStart := 0; rowStart < len(fields[0]); rowStart = rowEnd {
+      rowEnd = rowStart + bytesPerRow
+      for fieldNum := 0; fieldNum < pool &&
+         rowStart < len(fields[fieldNum]); fieldNum++ {
+         out.Write(fields[fieldNum][rowStart:rowEnd])
+      }
+   }
 }
