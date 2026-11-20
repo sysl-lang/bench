@@ -1,9 +1,14 @@
-// The Computer Language Benchmarks Game
-// https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
-//
-// A port of the C program (contributed by Kevin Carson) to C3.
+// The Computer Language Benchmarks Game: binary-trees. Original, written for this benchmark. It
+// mirrors the Game's fastest C program that builds here (binarytrees.gcc-2, Jeremy Zerfas): every node
+// is allocated separately from a library memory pool (APR's there; C3's standard ArenaAllocator here,
+// over one block sized for the deepest tree it will hold), a pool is cleared after each tree instead
+// of freeing nodes one by one, and the work is threaded as gcc-2 threads it: one thread per depth
+// builds and checks that depth's trees in its own pool while the main thread builds and checks the
+// long-lived tree; the results are printed in depth order once every thread has joined.
 module binarytrees;
 import std::io;
+import std::thread;
+import std::core::mem::allocators;
 
 struct TreeNode
 {
@@ -11,62 +16,82 @@ struct TreeNode
 	TreeNode* right;
 }
 
-fn TreeNode* new_tree_node(TreeNode* left, TreeNode* right)
+// Bytes an arena needs for a tree of the given depth: each node with the arena's size header,
+// aligned to 16.
+fn sz pool_bytes(long depth) => (sz)((2L << depth) * 32 + 64);
+
+fn TreeNode* create_tree(long depth, ArenaAllocator* pool)
 {
-	TreeNode* node = mem::alloc(TreeNode);
-	node.left = left;
-	node.right = right;
+	TreeNode* node = pool.acquire(TreeNode::size, NO_ZERO, 0)!!;
+	if (depth > 0)
+	{
+		node.left = create_tree(depth - 1, pool);
+		node.right = create_tree(depth - 1, pool);
+	}
+	else
+	{
+		node.left = null;
+		node.right = null;
+	}
 	return node;
 }
 
-fn long item_check(TreeNode* tree)
+fn long check(TreeNode* node)
 {
-	if (tree.left == null) return 1;
-	return 1 + item_check(tree.left) + item_check(tree.right);
+	if (node.left) return check(node.left) + check(node.right) + 1;
+	return 1;
 }
 
-fn TreeNode* bottom_up_tree(uint depth)
-{
-	if (depth > 0) return new_tree_node(bottom_up_tree(depth - 1), bottom_up_tree(depth - 1));
-	return new_tree_node(null, null);
-}
+const long MIN_DEPTH = 4;
+long max_depth;
+long[32] checks;
 
-fn void delete_tree(TreeNode* tree)
+fn int depth_worker(void* arg)
 {
-	if (tree.left != null)
+	long depth = (long)(iptr)arg;
+	char[] block = mem::new_array(char, pool_bytes(depth));
+	ArenaAllocator pool;
+	pool.init(block);
+	long iterations = 1L << (max_depth - depth + MIN_DEPTH);
+	long total = 0;
+	for (long i = 0; i < iterations; i++)
 	{
-		delete_tree(tree.left);
-		delete_tree(tree.right);
+		pool.clear();
+		total += check(create_tree(depth, &pool));
 	}
-	mem::free(tree);
+	checks[(depth - MIN_DEPTH) / 2] = total;
+	mem::free(block);
+	return 0;
 }
 
 fn int main(String[] args)
 {
-	uint n = args[1].to_uint()!!;
-	uint min_depth = 4;
-	uint max_depth = min_depth + 2 > n ? min_depth + 2 : n;
-	uint stretch_depth = max_depth + 1;
+	long n = args[1].to_long()!!;
+	max_depth = MIN_DEPTH + 2 > n ? MIN_DEPTH + 2 : n;
 
-	TreeNode* stretch_tree = bottom_up_tree(stretch_depth);
-	io::printfn("stretch tree of depth %d\t check: %d", stretch_depth, item_check(stretch_tree));
-	delete_tree(stretch_tree);
+	char[] block = mem::new_array(char, pool_bytes(max_depth + 1));
+	ArenaAllocator pool;
+	pool.init(block);
+	long stretch_depth = max_depth + 1;
+	io::printfn("stretch tree of depth %d\t check: %d", stretch_depth, check(create_tree(stretch_depth, &pool)));
+	pool.clear();
 
-	TreeNode* long_lived_tree = bottom_up_tree(max_depth);
-
-	for (uint depth = min_depth; depth <= max_depth; depth += 2)
+	Thread[32] threads;
+	int nthreads = 0;
+	for (long depth = MIN_DEPTH; depth <= max_depth; depth += 2)
 	{
-		long iterations = 1L << (max_depth - depth + min_depth);
-		long check = 0;
-		for (long i = 1; i <= iterations; i++)
-		{
-			TreeNode* temp_tree = bottom_up_tree(depth);
-			check += item_check(temp_tree);
-			delete_tree(temp_tree);
-		}
-		io::printfn("%d\t trees of depth %d\t check: %d", iterations, depth, check);
+		threads[nthreads].create(&depth_worker, (void*)(iptr)depth)!!;
+		nthreads++;
 	}
 
-	io::printfn("long lived tree of depth %d\t check: %d", max_depth, item_check(long_lived_tree));
+	long long_lived_check = check(create_tree(max_depth, &pool));
+
+	for (int i = 0; i < nthreads; i++) (void)threads[i].join();
+
+	for (long depth = MIN_DEPTH; depth <= max_depth; depth += 2)
+	{
+		io::printfn("%d\t trees of depth %d\t check: %d", 1L << (max_depth - depth + MIN_DEPTH), depth, checks[(depth - MIN_DEPTH) / 2]);
+	}
+	io::printfn("long lived tree of depth %d\t check: %d", max_depth, long_lived_check);
 	return 0;
 }

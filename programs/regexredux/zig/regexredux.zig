@@ -1,7 +1,10 @@
-// The Computer Language Benchmarks Game: regex-redux. Zig has no regular-expression library of its
-// own, so this is the C program (regexredux.gcc-5, Jeremy Zerfas and Zoltan Herczeg) ported to Zig
-// over the same library: PCRE2, each pattern JIT-compiled and matched with pcre2_jit_match. One
-// thread.
+// The Computer Language Benchmarks Game: regex-redux. Original, written for this benchmark. Zig has no
+// regular-expression library of its own, so it mirrors the Game's fastest C program (regexredux.gcc-5,
+// Jeremy Zerfas and Zoltan Herczeg) over the same library: PCRE2, each pattern JIT-compiled and matched with pcre2_jit_match. Threaded
+// as gcc-5 is with OpenMP: once the descriptions and newlines are removed, one thread applies the five
+// substitutions in turn while the other threads count the nine variants, each taking the next
+// pattern; each thread has its own match context, JIT stack and match data; the counts are printed in
+// pattern order.
 const std = @import("std");
 
 extern "c" fn printf(fmt: [*:0]const u8, ...) c_int;
@@ -77,8 +80,15 @@ fn replace(pattern: []const u8, replacement: []const u8, src: *const Str, dst: *
     dst.append(src.data[pos..src.size]);
 }
 
-pub export fn main() c_int {
-    const variants = [_][:0]const u8{
+fn newMatcher() Matcher {
+    const mcontext = pcre2_match_context_create_8(null).?;
+    const stack = pcre2_jit_stack_create_8(16384, 16384, null).?;
+    pcre2_jit_stack_assign_8(mcontext, null, stack);
+    const mdata = pcre2_match_data_create_8(16, null).?;
+    return .{ .mcontext = mcontext, .mdata = mdata, .ovector = pcre2_get_ovector_pointer_8(mdata) };
+}
+
+const variants = [_][:0]const u8{
         "agggtaaa|tttaccct",
         "[cgt]gggtaaa|tttaccc[acg]",
         "a[act]ggtaaa|tttacc[agt]t",
@@ -88,50 +98,37 @@ pub export fn main() c_int {
         "agggt[cgt]aa|tt[acg]accct",
         "agggta[cgt]a|t[acg]taccct",
         "agggtaa[cgt]|[acg]ttaccct",
-    };
-    const substs = [_][2][]const u8{
+};
+const substs = [_][2][]const u8{
         .{ "tHa[Nt]", "<4>" },
         .{ "aND|caN|Ha[DS]|WaS", "<3>" },
         .{ "a[NSt]|BY", "<2>" },
         .{ "<[^>]*>", "|" },
-        .{ "\\|[^|][^|]*\\|", "-" },
-    };
+    .{ "\\|[^|][^|]*\\|", "-" },
+};
 
-    // Read the whole of standard input.
-    var input = Str.init(16384);
+var counts: [variants.len]c_int = undefined;
+var next_variant = std.atomic.Value(usize).init(0);
+
+fn countVariants(sequences: *const Str) void {
+    const m = newMatcher();
     while (true) {
-        input.reserve(1);
-        const r = read(0, input.data + input.size, input.capacity - input.size);
-        if (r <= 0) break;
-        input.size += @intCast(r);
-    }
-
-    const mcontext = pcre2_match_context_create_8(null).?;
-    const stack = pcre2_jit_stack_create_8(16384, 16384, null).?;
-    pcre2_jit_stack_assign_8(mcontext, null, stack);
-    const mdata = pcre2_match_data_create_8(16, null).?;
-    const m = Matcher{ .mcontext = mcontext, .mdata = mdata, .ovector = pcre2_get_ovector_pointer_8(mdata) };
-
-    // Remove the descriptions and the newlines.
-    var sequences = Str.init(16384);
-    replace(">.*\\n|\\n", "", &input, &sequences, m);
-    const input_size = input.size;
-    free(input.data);
-
-    // Count every variant.
-    for (variants) |v| {
-        const code = compile(v);
+        const i = next_variant.fetchAdd(1, .monotonic);
+        if (i >= variants.len) return;
+        const code = compile(variants[i]);
         var count: c_int = 0;
         var pos: usize = 0;
-        while (pcre2_jit_match_8(code, sequences.data, sequences.size, pos, 0, mdata, mcontext) >= 0) {
+        while (pcre2_jit_match_8(code, sequences.data, sequences.size, pos, 0, m.mdata, m.mcontext) >= 0) {
             count += 1;
             pos = m.ovector[1];
         }
         pcre2_code_free_8(code);
-        _ = printf("%s %d\n", v.ptr, count);
+        counts[i] = count;
     }
+}
 
-    // Apply the substitutions, one after another, between two buffers.
+fn substitute(sequences: *const Str, result: *usize) void {
+    const m = newMatcher();
     var pre = Str.init(sequences.capacity);
     var post = Str.init(sequences.capacity);
     pre.append(sequences.data[0..sequences.size]);
@@ -142,7 +139,40 @@ pub export fn main() c_int {
         post = t;
         post.size = 0;
     }
+    result.* = pre.size;
+}
 
-    _ = printf("\n%d\n%d\n%d\n", @as(c_int, @intCast(input_size)), @as(c_int, @intCast(sequences.size)), @as(c_int, @intCast(pre.size)));
+pub export fn main() c_int {
+
+    // Read the whole of standard input.
+    var input = Str.init(16384);
+    while (true) {
+        input.reserve(1);
+        const r = read(0, input.data + input.size, input.capacity - input.size);
+        if (r <= 0) break;
+        input.size += @intCast(r);
+    }
+
+    const m = newMatcher();
+
+    // Remove the descriptions and the newlines.
+    var sequences = Str.init(16384);
+    replace(">.*\\n|\\n", "", &input, &sequences, m);
+    const input_size = input.size;
+    free(input.data);
+
+    // One thread substitutes; the others (as many as there are cores, at most one per pattern) count.
+    var subst_size: usize = 0;
+    const subst_thread = std.Thread.spawn(.{}, substitute, .{ &sequences, &subst_size }) catch unreachable;
+    const cores = std.Thread.getCpuCount() catch 1;
+    const ncount = @max(1, @min(cores - 1, variants.len));
+    var threads: [variants.len]std.Thread = undefined;
+    for (threads[0 .. ncount - 1]) |*th| th.* = std.Thread.spawn(.{}, countVariants, .{&sequences}) catch unreachable;
+    countVariants(&sequences);
+    for (threads[0 .. ncount - 1]) |*th| th.join();
+    for (variants, 0..) |v, i| _ = printf("%s %d\n", v.ptr, counts[i]);
+    subst_thread.join();
+
+    _ = printf("\n%d\n%d\n%d\n", @as(c_int, @intCast(input_size)), @as(c_int, @intCast(sequences.size)), @as(c_int, @intCast(subst_size)));
     return 0;
 }

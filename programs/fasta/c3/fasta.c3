@@ -1,26 +1,21 @@
-// The Computer Language Benchmarks Game
-// https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
-//
-// A port of the C program (by Drake Diedrich) to C3.
 module fasta;
 import std::io;
 import libc;
 
-const uint IM = 139968;
-const uint IA = 3877;
-const uint IC = 29573;
-const uint SEED = 42;
-const int LINELEN = 60;
+const IM = 139968;
+const IA = 3877;
+const IC = 29573;
+const SEED = 42;
 
-uint seed = SEED;
+int seed = SEED;
 
-fn double fasta_rand(double max) @inline
+fn float fasta_rand(float max_val)
 {
 	seed = (seed * IA + IC) % IM;
-	return max * seed / IM;
+	return max_val * seed / IM;
 }
 
-String alu =
+String alu @private =
 	"GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGG"
 	"GAGGCCGAGGCGGGCGGATCACCTGAGGTCAGGAGTTCGAGA"
 	"CCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACTAAAAAT"
@@ -29,95 +24,82 @@ String alu =
 	"AGGCGGAGGTTGCAGTGAGCCGAGATCGCGCCACTGCACTCC"
 	"AGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA";
 
+
 String iub = "acgtBDHKMNRSVWY";
-double[15] iub_p = {
-	0.27, 0.12, 0.12, 0.27,
-	0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02
-};
+double[] iub_p = {
+	0.27,
+	0.12,
+	0.12,
+	0.27,
+	0.02,
+	0.02,
+	0.02,
+	0.02,
+	0.02,
+	0.02,
+	0.02,
+	0.02,
+	0.02,
+	0.02,
+	0.02 };
 
 String homosapiens = "acgt";
-double[4] homosapiens_p = {
+double[] homosapiens_p = {
 	0.3029549426680,
 	0.1979883004921,
 	0.1975473066391,
 	0.3015094502008
 };
 
+const LINELEN = 60;
+
+// slowest character-at-a-time output
 fn void repeat_fasta(String seq, int n)
 {
-	int len = (int)seq.len;
-	char* buffer = mem::alloc_array(char, (usz)(len + LINELEN));
-	mem::copy(buffer, seq.ptr, len);
-	mem::copy(buffer + len, seq.ptr, LINELEN);
-
-	libc::CFile out = libc::stdout();
-	int t = 0;
-	int whole_lines = n / LINELEN;
-	for (int i = 0; i < whole_lines; i++)
+	sz len = seq.len;
+	int i @noinit;
+	for (i = 0; i < n; i++)
 	{
-		int wrote = (int)libc::fwrite(&buffer[t % len], 1, LINELEN, out);
-		libc::putc('\n', out);
-		t += wrote;
+		io::putchar(seq[i % len]);
+		if (i % LINELEN == LINELEN - 1) io::putchar('\n');
 	}
-	libc::fwrite(&buffer[t % len], 1, (usz)(n - t), out);
-	mem::free(buffer);
-	if (n % LINELEN != 0) libc::putc('\n', out);
+	if (i % LINELEN != 0) io::putchar('\n');
 }
 
-fn int linear_lookup(int len, double* p, double v) @inline
+fn void random_fasta(String symb, double[] probability, int n)
 {
-	int i = 0;
-	for (int j = 0; j < len - 1; j++) if (v > p[j]) i++;
-	return i;
-}
-
-fn void random_fasta(String symb, double* probability, int n)
-{
-	int len = (int)symb.len;
-	double* p = mem::alloc_array(double, (usz)len);
-	char* buffer = mem::alloc_array(char, LINELEN + 2);
-	buffer[LINELEN] = '\n';
-	libc::CFile out = libc::stdout();
-
-	p[0] = probability[0];
-	for (int i = 1; i < len; i++) p[i] = probability[i] + p[i - 1];
-
-	int lines = n / LINELEN;
-	for (int i = 0; i < lines; i++)
-	{
-		for (int k = 0; k < LINELEN; k++)
-		{
-			double v = fasta_rand(1.0);
-			buffer[k] = symb[linear_lookup(len, p, v)];
-		}
-		libc::fwrite(buffer, 1, LINELEN + 1, out);
-	}
-	int remainder = n - lines * LINELEN;
-	for (int k = 0; k < remainder; k++)
+	assert(symb.len == probability.len);
+	int len = probability.len;
+	int i @noinit;
+	for (i = 0; i < n; i++)
 	{
 		double v = fasta_rand(1.0);
-		buffer[k] = symb[linear_lookup(len, p, v)];
+		/* slowest idiomatic linear lookup.  Fast if len is short though. */
+		int j @noinit;
+		for (j = 0; j < len - 1; j++)
+		{
+			v -= probability[j];
+			if (v < 0) break;
+		}
+		io::putchar(symb[j]);
+		if (i % LINELEN == LINELEN - 1) io::putchar('\n');
 	}
-	libc::fwrite(buffer, 1, (usz)remainder, out);
-	if (n % LINELEN != 0) libc::putc('\n', out);
-	mem::free(buffer);
-	mem::free(p);
+	if (i % LINELEN != 0) io::putchar('\n');
 }
 
-fn int main(String[] args)
+fn int main(int argc, char **argv)
 {
 	int n = 1000;
-	if (args.len > 1) n = args[1].to_int()!!;
+	if (argc > 1) n = libc::atoi(argv[1]);
 
-	libc::CFile out = libc::stdout();
-	libc::fputs(">ONE Homo sapiens alu\n", out);
+	io::printf(">ONE Homo sapiens alu\n");
 	repeat_fasta(alu, n * 2);
 
-	libc::fputs(">TWO IUB ambiguity codes\n", out);
-	random_fasta(iub, &iub_p, n * 3);
+	io::printf(">TWO IUB ambiguity codes\n");
+	random_fasta(iub, iub_p, n * 3);
 
-	libc::fputs(">THREE Homo sapiens frequency\n", out);
-	random_fasta(homosapiens, &homosapiens_p, n * 5);
-	libc::fflush(out);
+	io::printf(">THREE Homo sapiens frequency\n");
+	random_fasta(homosapiens, homosapiens_p, n * 5);
+
 	return 0;
 }

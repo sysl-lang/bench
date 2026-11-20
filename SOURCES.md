@@ -66,7 +66,7 @@ included, must do (README rule 3).
 | revcomp | Rust | `revcomp.rust-2.rust` | `rayon::join` replaced by a local sequential `join` |
 | revcomp | Swift | `revcomp.swift` | the Dispatch reader, worker and writer queues replaced by a sequential loop |
 
-### Go, D and Odin
+### Go and D
 
 Go's programs come from the same archive (`*.go` files, BSD-3, headers kept; each adapted file says
 how in its header). Each is **the Game's fastest Go entry for the program on CPU time**, the measure
@@ -85,13 +85,12 @@ Go has no optimisation level: `GOARM64=v8.7 go build`, run with `GOMAXPROCS=1` (
 | knucleotide | `knucleotide.go-7.go` | 7.58 / 28.88, fastest | a built-in `map[uint32]*int` / `map[uint64]*int` keyed by the 2k-bit code. `runtime.NumCPU()` replaced by 1, so there is one table per k, rolled one base at a time, and the workers called rather than started with `go`. The roll shifts in the k-mer's last base (`data[idx+size-nsize+i]`); the archive shifts in `data[idx+i]`, right only when the goroutine count is at least k, and with one goroutine it counted wrong k-mers (AUDIT.md G5) |
 | revcomp | `revcomp.go-2.go` | 2.22 / 2.32, lowest CPU | unchanged: single-threaded. The fastest on wall clock, `-6` (1.93 / 3.43), is threaded |
 
-**D and Odin are not in the archive.** Every D and Odin program is **a port of the C program, written
-for this suite** (same algorithm and data layout, idiomatic for the language): `nbody`,
-`spectralnorm`, `fannkuchredux`, `binarytrees`, `mandelbrot`, `fasta`, `knucleotide` and `revcomp`, in
-both languages, from the same C file as the C row above. k-nucleotide counts into D's built-in
-associative array `uint[ulong]` and Odin's built-in `map[u64]u32`, keyed by the 2k-bit code. D uses
-`core.stdc` stdio and `malloc` where the C program does; Odin uses `core:bufio` over stdin and stdout
-and `new`/`free`.
+**D is not in the archive.** Every D program was **a port of the C program, written for this suite**
+(same algorithm and data layout): `nbody`, `spectralnorm`, `fannkuchredux`, `binarytrees`,
+`mandelbrot`, `fasta`, `knucleotide` and `revcomp`, from the same C file as the C row above.
+k-nucleotide counted into D's built-in associative array `uint[ulong]`, keyed by the 2k-bit code; D
+used `core.stdc` stdio and `malloc` where the C program does. Odin's programs are in "Zig, Odin and
+C3" below.
 
 ### Java
 
@@ -110,16 +109,12 @@ change, and every one is single-threaded as published.
 | knucleotide | `knucleotide.java-8.java` | unchanged (a `HashMap<String,Integer>` keyed by the k-mer as a string, sorted by count) |
 | revcomp | `revcomp.java-4.java` | unchanged |
 
-### C3, Eiffel
+### Eiffel
 
-**C3 and Eiffel are not in the archive.** Every C3 and Eiffel program is **a port of the C program, written
-for this suite**, from the same C file as the C row above (same algorithm and data layout, idiomatic for
-the language).
+**Eiffel is not in the archive.** Every Eiffel program is **a port of the C program, written for this
+suite**, from the same C file as the C row above (same algorithm and data layout, idiomatic for the
+language). C3's programs are in "Zig, Odin and C3" below.
 
-- **C3**: `libc` `putc`, `fwrite` and `fgets` for output and input where the C program uses stdio; `mem::alloc`
-  and `mem::free` for the tree nodes. k-nucleotide counts into the standard library's `HashMap{ulong, uint}`
-  keyed by the 2k-bit code and sorts with `libc::qsort`. reverse-complement fills a growing buffer in
-  order through the complement table and writes it back reversed, where the C program fills from the end.
 - **Eiffel** (EiffelStudio's `ec`): arrays are `ARRAY [REAL_64]` and `ARRAY [INTEGER]` (n-body keeps one
   array per field, because a second class for the body would put a second file in the directory);
   binary-trees has a second class `TREE_NODE`; output goes through `io`. k-nucleotide counts into
@@ -127,6 +122,123 @@ the language).
   a frequency table with an insertion sort. reverse-complement, like C3's, builds the sequence in order
   and writes it back reversed. Each program has an `.ecf` project file with two targets, `release` and
   `contracts` (README rule 7).
+
+### Zig, Odin and C3
+
+**None of the three is in the Game's archive.** Each cell holds either a **published program used
+exactly as published** (not one byte changed; only its file name, its build flags and the libraries
+it links are this suite's), or, where no published program builds and produces the Game's output
+unmodified, an **original program written for this benchmark**, marked as such in its first line and
+below, to the Game's rules for that benchmark and in the decomposition of the Game's fastest C entry
+that builds here (the `fastest-c-rust` branch's `programs/<p>/c`: `nbody.gcc-6`, `spectralnorm.gcc-3`,
+`fannkuchredux.gcc-5`, `binarytrees.gcc-2`, `mandelbrot.gcc-5`, `fasta.gcc-3`, `knucleotide.gcc`,
+`revcomp.gcc-9`, `regexredux.gcc-5`, `pidigits.gcc-2`), threaded where that entry is. A published
+program is preferred whenever one runs unmodified.
+
+**Sources searched** (2026-11-20), in this order: the languages' own example and benchmark
+collections; then maintained multi-language suites.
+
+- **C3**: [c3lang/c3c](https://github.com/c3lang/c3c) `resources/examples/` at `b93e1be`, MIT
+  ("Unless specified otherwise, the code in this repository is MIT licensed. The exception is the
+  compiler source code (the source code under `src`)", c3c's README; copyright (c) 2022-2026
+  Christoffer Lernö and contributors). It has fasta, mandelbrot, fannkuch-redux (two), nbodies and
+  spectralnorm.
+- **Zig and Odin**: [hanabi1224/Programming-Language-Benchmarks](https://github.com/hanabi1224/Programming-Language-Benchmarks)
+  `bench/algorithm/` at `ad18b20`, MIT (copyright (c) 2021 hanabi1224; full notice below). Odin's own
+  [odin-lang/examples](https://github.com/odin-lang/examples) and Odin's repository have none of the
+  ten programs; Zig's project publishes none.
+- **Passed over for its licence**: [tiehuis/zig-benchmarks-game](https://github.com/tiehuis/zig-benchmarks-game)
+  (all ten programs in Zig) has no licence, so it may not be copied; hanabi's `fasta/1.zig`,
+  `nbody/1.zig`, `spectral-norm/1.zig` and `fannkuch-redux/1.zig` say they are taken from it.
+
+**Every published candidate, and why it was or was not used** (each built unmodified with the
+toolchain below and run at the small size against the Game's output, then at the timed and the
+Game's sizes against C's):
+
+| program | candidate | result |
+|---|---|---|
+| all ten | hanabi's Zig programs (`binarytrees/1`, `fannkuch-redux/1`, `2`, `2-m`, `3-i`, `knucleotide/1`, `1-m`, `mandelbrot/1`, `nbody/2`, `3`, `pidigits/1`, `spectral-norm/2`, `2-m`) | **none builds with Zig 0.17.1**: they are written for Zig 0.14 (`std.io.getStdOut`, `std.process.args`, `argsAlloc` are gone; `3-i` has a spacing Zig now rejects). Several would also fail the Game's output unchanged: `mandelbrot/1` prints an MD5 of the image, the k-nucleotide programs open a file named by their argument, `pidigits/1` uses `std.math.big` where the Game's entries use GMP, and `fannkuch-redux/3-i` is x86 assembly |
+| binarytrees | hanabi `binarytrees/1.odin` (Branimir Maksimovic) | **used, unmodified**: output matches at 10, 18 and 21. Single-threaded as published |
+| nbody | hanabi `nbody/1-i.odin` (Branimir Maksimovic) | **used, unmodified**: matches at 1,000 and 50,000,000. Single-threaded, as the Game's fastest C n-body is |
+| nbody | hanabi `nbody/1.odin` | does not build (`runtime.args__` is now a union and cannot be indexed). It ties `1-i` on hanabi's published times (353 against 357 ms) |
+| spectralnorm, mandelbrot | hanabi `spectral-norm/1.odin`, `mandelbrot/1.odin` | do not build (`runtime.args__` is now a union); `mandelbrot/1.odin` also prints an MD5 |
+| knucleotide | hanabi `knucleotide/1.odin` | does not build (`os.stream_from_handle` is gone); it also opens a file named by its argument |
+| mandelbrot | c3c `mandelbrot.c3` | **used, unmodified**: matches at 200, 6,000 and 16,000. Single-threaded |
+| fasta | c3c `fasta.c3` | **used, unmodified**: matches at 1,000 and 25,000,000. Single-threaded, as `fasta.gcc-3` is |
+| fannkuchredux | c3c `fannkuch-redux.c3` | **used, unmodified**: matches at 7, 11 and 12. Single-threaded. `fannkuch-redux2.c3` is the same program in other syntax and also passes; the first was taken |
+| nbody | c3c `nbodies.c3` | **used, unmodified**: matches at 1,000 and 50,000,000. Single-threaded |
+| spectralnorm | c3c `spectralnorm.c3` | **wrong output** (1.259503018 for 100, where the Game's is 1.274219991: its `eval_At_times_u` indexes A, not its transpose); it also stores all of A, which the Game's rules forbid |
+
+**The cells** ("published" = unmodified; "original" = written for this benchmark):
+
+| program | Zig | Odin | C3 |
+|---|---|---|---|
+| nbody | original | published: hanabi `nbody/1-i.odin` | published: c3c `nbodies.c3` |
+| spectralnorm | original | original | original |
+| fannkuchredux | original | original | published: c3c `fannkuch-redux.c3` |
+| binarytrees | original | published: hanabi `binarytrees/1.odin` | original |
+| mandelbrot | original | original | published: c3c `mandelbrot.c3` |
+| fasta | original | original | published: c3c `fasta.c3` |
+| knucleotide | original | original | original |
+| revcomp | original | original | original |
+| regexredux | original | original | original |
+| pidigits | original | original | original |
+
+URLs of the published files:
+`https://github.com/hanabi1224/Programming-Language-Benchmarks/blob/ad18b203dd1769724f4eea94fc3ac1e99f6593e0/bench/algorithm/binarytrees/1.odin`,
+`…/bench/algorithm/nbody/1-i.odin`;
+`https://github.com/c3lang/c3c/blob/b93e1be491099e74cfe7bc3156ad9d0f6da5f3f4/resources/examples/mandelbrot.c3`,
+`…/fasta.c3`, `…/fannkuch-redux.c3`, `…/nbodies.c3`.
+
+**What each original program does**, so a reviewer can check it against the C entry it mirrors. The
+same design is written in each language that needed it; "all cores" is the processor count the
+language's library reports (18 here: 6 performance, 12 efficiency).
+
+| program | mirrors | technique |
+|---|---|---|
+| nbody (Zig) | `nbody.gcc-6` (single-threaded) | the bodies as an array of structs; each pair's distance, `dt / (d² · d)` and both velocity updates in one loop, then the positions. Not the approximate reciprocal square root of `gcc-9` (x86 only, and not in the C entry that builds here) |
+| spectralnorm (all three) | `spectralnorm.gcc-3` | `u[j] / A(i,j)` with A's integer denominator computed on the fly; each product's rows split into one contiguous range per core (gcc-3's `omp parallel for`, static); rows summed in C's order, so the result does not depend on the thread count. Odin: `#no_bounds_check` on the row loops |
+| fannkuchredux (Zig, Odin) | `fannkuchredux.gcc-5` | the n! permutations in blocks of consecutive indices; each block's first permutation rebuilt from its index in the factorial number system, the rest stepped with the count array; a flip keeps the first value out of the array and reverses only the elements between; sign by index parity. 720 blocks per core taken from an atomic counter (gcc-5 hands 12 blocks to OpenMP's static schedule), so the efficiency cores do not hold up the rest. Odin: `#no_bounds_check` on the worker |
+| binarytrees (Zig, C3) | `binarytrees.gcc-2` | every node allocated separately from a library pool, cleared after each tree (APR there; Zig's `std.heap.ArenaAllocator`, C3's `std::core::mem::allocators::ArenaAllocator` over one block); one thread per depth with its own pool, the long-lived tree built and checked on the main thread meanwhile; printed in depth order |
+| mandelbrot (Zig, Odin) | `mandelbrot.gcc-5` | the eight pixels of an output byte as one eight-lane `f64` vector (`@Vector(8, f64)`, `#simd[8]f64`; gcc-5 uses four-lane GCC vectors), fifty iterations with the escape test every fifth, the x coordinates computed once; rows taken from an atomic counter by one thread per core (gcc-5: OpenMP `schedule(guided)`); the image written in one call. Coordinates are C's `2x/w − 1.5`, which match the Game's output with Zig's and Odin's default (unfused) arithmetic. Odin: `#no_bounds_check` on the row loop |
+| fasta (Zig, Odin) | `fasta.gcc-3` (single-threaded) | a table of the symbol for each of the generator's 139,968 states, built once from the cumulative probabilities in single precision as gcc-3 builds it, so each symbol is one generator step and one load; 100-line buffers with the newlines in place, written whole; the repeated sequence laid out once as `len(alu)` lines and written in whole copies. Odin: `#no_bounds_check` on the fill loops |
+| knucleotide (all three) | `knucleotide.gcc` | the sequence encoded two bits a base; for each length the key rolled one base at a time and counted in the language's library hash table: Zig `std.HashMap` with gcc's hash `key ^ key >> 7` and khash's 77% load, C3 `HashMap` with that hash on a `typedef Key = ulong` and a 0.77 load factor, Odin's built-in `map[u64]u32` (a built-in map takes no custom hash); the seven tables built at once, one thread each, longest first (gcc's OpenMP sections), each report written to its own buffer and printed in order |
+| revcomp (all three) | `revcomp.gcc-9` | the input read whole; each record's output cut into chunks of lines filled by one thread per core; characters complemented two at a time through a 65,536-entry table of byte pairs; a record of full 60-character lines read straight from the input with no newline-removal pass (gcc-9's fast path), any other first copied without newlines; output written in one call |
+| regexredux (all three) | `regexredux.gcc-5` | PCRE2 with its JIT (`pcre2_jit_compile`, `pcre2_jit_match`) through the language's C interface; once headers and newlines are removed, one thread runs the five substitutions in turn while the others count the nine variants, each taking the next pattern from an atomic counter (gcc-5's `omp single nowait` and `omp for schedule(dynamic) ordered`); each thread its own match context, 16 KB JIT stack and match data; counts printed in pattern order. Odin's `core:text/regex` and C3's `std::encoding::experimental::regex` are not used, since every fastest Game entry calls PCRE2's JIT |
+| pidigits (all three) | `pidigits.gcc-2` (single-threaded) | two numerators and a denominator (the `lua-5` arrangement): `n1/d` and `n2/d` by `mpz_tdiv_q`, a digit when they agree, else the next term by `mpz_mul_si`/`mpz_add`; GMP called directly (`__gmpz_*`) |
+
+**Toolchains and flags** (build.zsh): Zig 0.17.1 `zig build-exe -O ReleaseFast -mcpu=native -lc`
+(no `-fsingle-threaded`, since its programs start threads); Odin dev-2026-11 `odin build -file
+-o:speed -microarch:native`; C3 0.8.6 `c3c compile -O3` (its unsafe mode: no bounds checks or
+contracts). Libraries: GMP 6.3.0 (pidigits) and Homebrew's PCRE2 10.49 with its JIT (regex-redux:
+Zig `-L$PCRE2/lib -lpcre2-8`, Odin `-extra-linker-flags:-L$PCRE2/lib` with `foreign import
+"system:pcre2-8"`, C3 `-L $PCRE2/lib -l pcre2-8`). Checks turned off in the originals: Odin's
+`#no_bounds_check` where marked above (C has none); Zig ReleaseFast and C3 `-O3` have none to begin
+with.
+
+**hanabi1224/Programming-Language-Benchmarks licence** (applies to the two published Odin files):
+
+> MIT License
+>
+> Copyright (c) 2021 hanabi1224
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+> associated documentation files (the "Software"), to deal in the Software without restriction,
+> including without limitation the rights to use, copy, modify, merge, publish, distribute,
+> sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or
+> substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+> NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+> NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+> DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+> OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**c3c licence** (applies to the four published C3 files): the same MIT text, "Copyright (c) 2022-2026
+Christoffer Lernö and contributors".
 
 ### Ada
 
@@ -179,10 +291,8 @@ Homebrew's copy outright (build.zsh's `PCRE2_FLAGS`).
 | Java | `regexredux.java-2.java` (the JVM form of the fastest Java, `graalvmaot-4`) | PCRE2, JIT, through `java.lang.foreign` | the jextract-generated `jextract_pcre2.pcre2_h` (not in the archive) replaced by a nested class of hand-written downcalls to the same seven functions; the executor's tasks called in turn. Run as every Java program here, on the JVM, so the time includes startup and JIT warm-up. The JVM warns on stderr that a restricted method was called; it does not affect the output |
 | Nim | none (not in the archive) | standard `std/re`, which is PCRE2 with the JIT | written for this suite. `std/re` opens `libpcre2-8.0.dylib` by name at run time, which finds macOS's JIT-less copy; `regexredux.nim.cfg` beside the source overrides that `dynlib` and links Homebrew's |
 | Fortran | `regexredux.ifc` (the Game's only Fortran, a translation of `gcc-5`) | PCRE2, JIT, through `bind(C)` interfaces | built with gfortran and no `-fopenmp`, so its `!$omp` directives are comments and it runs on one thread. The `PCRE2_SIZE` arguments of `pcre2_compile` and `pcre2_jit_match` declared `integer(c_size_t)` where the archive passes `c_int`, and standard input opened as `/dev/stdin` because gfortran cannot reopen the preconnected unit for stream access |
-| Zig | none | PCRE2, JIT | Zig has no regex library: **a port of the C program** above to Zig, same calls |
+| Zig, Odin, C3 | none | PCRE2, JIT | **original, written for this benchmark** after `gcc-5`, threaded as it is: see "Zig, Odin and C3" |
 | D | none | standard `std.regex`, every pattern compiled to native code at compile time with `ctRegex` | written for this suite |
-| Odin | none | standard `core:text/regex` (compiled to its own VM), walked with its match iterator | written for this suite. `.` matches a newline in Odin's regex, so the header pattern is spelled `>[^\n]*\n\|\n` |
-| C3 | none | standard `std::encoding::experimental::regex` (POSIX ERE, musl's TNFA matcher) | written for this suite. The header pattern is compiled with `NEWLINE`, so `.` stops at a newline as in Perl |
 | Ada | `regexredux.gnat-5.gnat` passed over | GNAT's `GNAT.Regpat` | written for this suite. **The Game's only working Ada entry (`gnat-5`) was not adapted**: it is not a regex program — it hand-translates each pattern into GNAT's SPITBOL pattern combinators (`BreakX`, `Any`, `Break`) — and it is five compilation units built on Ada tasks. `gnat-6` (PCRE, tasks) fails the Game's output check. A newline in the pattern is written `\n`, because `GNAT.Regpat.Compile` refuses a literal one ("junk on end") |
 | Eiffel | none | Gobo's `RX_PCRE_REGULAR_EXPRESSION` (a PCRE-syntax matcher written in Eiffel), which ships with EiffelStudio | written for this suite; `regexredux.ecf` adds `$ISE_LIBRARY/library/gobo/gobo_regexp.ecf`. EiffelStudio's own PCRE binding is in its `unstable` tree and was not used. **It does not finish at the timed size**: the substitutions from `<[^>]*>` on hold memory in proportion to the run of text a `[^…]*` crosses (1.87 GB at the 10 MB input with a full collection after every step, 70 MB through the first two), so the 100 MB input is killed for memory after printing the nine counts. It verifies at the small size and its 10 MB output matches C's |
 
@@ -245,7 +355,8 @@ Several archive entries print no padded last line when the count is not a multip
 | Java | `java.math.BigInteger` | `pidigits.java-3.java` | the archive program calls GMP through a JNI wrapper library; its operations rewritten as `BigInteger` ones, the structure and output buffer kept; padding |
 | Ada | GMP (`pragma Import`) | `pidigits.gnat-2.gnat` | `mpz_addmul_ui`/`mpz_submul_ui` take `unsigned_long` (the archive passed a 32-bit `unsigned` for a C `unsigned long`); `printf` imported as `C_Variadic_1`, since arm64 macOS passes variadic arguments on the stack |
 | Fortran | GMP (`bind(C)`) | `pidigits.ifc-4.ifc` | unchanged |
-| Zig, Nim, D, Odin, C3 | GMP (extern declarations of the `__gmpz_*` symbols) | none | **ports of the C program, written for this suite**; output through C stdio (Zig, D, C3), `stdout` (Nim) or a `bufio` writer (Odin) |
+| Nim, D | GMP (extern declarations of the `__gmpz_*` symbols) | none | **ports of the C program, written for this suite**; output through C stdio (D) or `stdout` (Nim) |
+| Zig, Odin, C3 | GMP (extern declarations of the `__gmpz_*` symbols) | none | **original, written for this benchmark** after `pidigits.gcc-2`: see "Zig, Odin and C3" |
 | Eiffel | GMP (`C inline` externals over `gmp.h`) | none | **a port of the C program, written for this suite**: each `mpz_t` a `malloc`ed block held as a `POINTER`; preconditions on the digit and the term, a loop invariant on the count. The `.ecf` names GMP's directories through `$GMP_INCLUDE` and `$GMP_LIB`, which build.zsh exports |
 | c-tuned, rust-tuned | GMP | `pidigits.gcc`, `pidigits.rust-3.rust` | copies of the plain programs. One division per candidate digit (`mpz_tdiv_qr`: the 4num digit agrees exactly when the remainder plus `num` is below `den`), with C's output written in one call, measured slower than the plain programs' two divisions (0.260 s against 0.244 s for C, 0.261 against 0.243 for Rust) |
 | sysl-idiomatic | `sysl.math.bigint` | none | written for this suite: operators between `BigInt`s, the `_long` family (`mul_long`) for a small operand |

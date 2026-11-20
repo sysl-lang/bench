@@ -1,92 +1,145 @@
-// The Computer Language Benchmarks Game: fannkuch-redux. A port of the C program (Ledrug Katz's),
-// written for this suite: Tompkin-Paige iterative permutation generation, flipping until a 1 leads.
+// The Computer Language Benchmarks Game: fannkuch-redux. Original, written for this benchmark: every
+// permutation in the order the Game fixes, flipping until a 1 leads. It mirrors the Game's fastest C
+// program that builds here (fannkuchredux.gcc-5, Jeremy Zerfas): the n! permutations are cut into
+// blocks of consecutive indices shared out between threads, and a flip keeps the first value out of
+// the array and reverses only the elements between. Here the blocks are smaller (720 per core) and
+// taken from an atomic counter, where gcc-5 hands twelve blocks to OpenMP's static schedule, so the
+// slower efficiency cores do not leave the others waiting. Bounds checks are off in the worker
+// (#no_bounds_check), as C has none. A thread rebuilds the first permutation
+// of its block from the block's index (in the factorial number system) and steps through the rest
+// with the count array; a permutation's sign in the checksum is its index's parity. The per-thread
+// checksums and maxima are combined at the end.
 package main
 
 import "core:fmt"
 import "core:os"
 import "core:strconv"
+import "core:sync"
+import "core:thread"
 
-s, t: [16]i32
-max_flips: i32 = 0
-max_n: int
-odd: i32 = 0
-checksum: i32 = 0
+MAX_N :: 16
 
-flip :: proc() -> i32 {
-	for i in 0 ..< max_n {
-		t[i] = s[i]
-	}
-	i: i32 = 1
+n: int
+fact: [MAX_N + 1]int
+block_size, nblocks: int
+next_block: int
+total_checksum: int
+total_max: int
+result_mutex: sync.Mutex
+
+worker :: proc() #no_bounds_check {
+	p, pp: [MAX_N]u8
+	count: [MAX_N]int
+	checksum, max_flips := 0, 0
+
 	for {
-		x, y := 0, int(t[0])
-		for x < y {
-			c := t[x]
-			t[x] = t[y]
-			t[y] = c
-			x += 1
-			y -= 1
-		}
-		i += 1
-		if t[t[0]] == 0 {
+		block := sync.atomic_add(&next_block, 1)
+		if block >= nblocks {
 			break
 		}
-	}
-	return i
-}
+		first := block * block_size
+		last := min(first + block_size, fact[n])
 
-rotate :: proc(n: int) {
-	c := s[0]
-	for i in 1 ..= n {
-		s[i - 1] = s[i]
-	}
-	s[n] = c
-}
-
-// Tompkin-Paige iterative perm generation
-tk :: proc(n: int) {
-	i := 0
-	c: [16]i32
-
-	for i < n {
-		rotate(i)
-		if int(c[i]) >= i {
-			c[i] = 0
-			i += 1
-			continue
+		// The permutation whose index is `first`.
+		for i in 0 ..< n {
+			p[i] = u8(i)
+		}
+		idx := first
+		for i := n - 1; i > 0; i -= 1 {
+			d := idx / fact[i]
+			count[i] = d
+			idx %= fact[i]
+			for j in 0 ..= i {
+				pp[j] = p[j]
+			}
+			for j in 0 ..= i {
+				p[j] = pp[j + d] if j + d <= i else pp[j + d - i - 1]
+			}
 		}
 
-		c[i] += 1
-		i = 1
-		odd = ~odd
-		if s[0] != 0 {
-			f: i32 = 1
-			if s[s[0]] != 0 {
-				f = flip()
+		index := first
+		for {
+			if p[0] != 0 {
+				pp = p
+				// The first value is kept out of the array: each flip puts it at its own index and
+				// reverses only the elements between.
+				flips := 1
+				f := int(p[0])
+				for pp[f] != 0 {
+					new_f := int(pp[f])
+					pp[f] = u8(f)
+					if f > 2 {
+						lo, hi := 1, f - 1
+						for lo < hi {
+							pp[lo], pp[hi] = pp[hi], pp[lo]
+							lo += 1
+							hi -= 1
+						}
+					}
+					f = new_f
+					flips += 1
+				}
+				max_flips = max(max_flips, flips)
+				checksum += flips if index % 2 == 0 else -flips
 			}
-			if f > max_flips {
-				max_flips = f
+			index += 1
+			if index >= last {
+				break
 			}
-			checksum += -f if odd != 0 else f
+
+			// The next permutation in the count-array order.
+			head := p[1]
+			p[1] = p[0]
+			p[0] = head
+			k := 1
+			count[k] += 1
+			for count[k] > k {
+				count[k] = 0
+				k += 1
+				nxt := p[1]
+				p[0] = nxt
+				for j in 1 ..< k {
+					p[j] = p[j + 1]
+				}
+				p[k] = head
+				head = nxt
+				count[k] += 1
+			}
 		}
 	}
+	sync.mutex_lock(&result_mutex)
+	total_checksum += checksum
+	total_max = max(total_max, max_flips)
+	sync.mutex_unlock(&result_mutex)
 }
 
 main :: proc() {
 	if len(os.args) < 2 {
-		fmt.eprintfln("usage: %s number", os.args[0])
 		os.exit(1)
 	}
-
-	max_n, _ = strconv.parse_int(os.args[1])
-	if max_n < 3 || max_n > 15 {
-		fmt.eprintln("range: must be 3 <= n <= 12")
+	n, _ = strconv.parse_int(os.args[1])
+	if n < 3 || n > 15 {
 		os.exit(1)
 	}
-
-	for i in 0 ..< max_n {
-		s[i] = i32(i)
+	fact[0] = 1
+	for i in 1 ..= n {
+		fact[i] = fact[i - 1] * i
 	}
-	tk(max_n)
 
-	fmt.printf("%d\nPfannkuchen(%d) = %d\n", checksum, max_n, max_flips)
+	nthreads := max(os.get_processor_core_count(), 1)
+	nblocks = min(fact[n], 720 * nthreads)
+	block_size = (fact[n] + nblocks - 1) / nblocks
+	nblocks = (fact[n] + block_size - 1) / block_size
+
+	threads := make([]^thread.Thread, nthreads - 1)
+	for &t in threads {
+		t = thread.create_and_start(worker)
+	}
+	worker()
+	for t in threads {
+		thread.join(t)
+		thread.destroy(t)
+	}
+
+	fmt.printf("%d\nPfannkuchen(%d) = %d\n", total_checksum, n, total_max)
 }

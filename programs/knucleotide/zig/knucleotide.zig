@@ -1,15 +1,28 @@
-// The Computer Language Benchmarks Game: k-nucleotide. Same algorithm as the C version:
-// one pass per oligonucleotide length over the encoded sequence, counting 2-bit keys in a hash
-// map (here the standard library's AutoHashMap), run sequentially.
+// The Computer Language Benchmarks Game: k-nucleotide. Original, written for this benchmark after
+// the Game's fastest C program (knucleotide.gcc, Jeremy Zerfas): one pass per oligonucleotide length
+// over the encoded sequence, rolling the 2k-bit key one base at a time and counting it in a library
+// hash table (Zig's std.HashMap, with gcc's hash `key ^ key >> 7` and khash's 77% load). The seven tables (two frequency tables,
+// five counts) are built at once, one thread each, as the Game's fastest C program builds them in
+// OpenMP sections; each writes its report into its own buffer, and the buffers are printed in order.
 const std = @import("std");
 
 extern "c" fn printf(fmt: [*:0]const u8, ...) c_int;
+extern "c" fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
 extern "c" fn malloc(n: usize) ?*anyopaque;
 extern "c" fn realloc(p: ?*anyopaque, n: usize) ?*anyopaque;
 
 const alloc = std.heap.c_allocator;
-const Map = std.AutoHashMap(u64, u32);
+// The C program's khash table: its hash `key ^ key >> 7`, and khash's 77% maximum load.
+const KeyContext = struct {
+    pub fn hash(_: KeyContext, key: u64) u64 {
+        return key ^ (key >> 7);
+    }
+    pub fn eql(_: KeyContext, a: u64, b: u64) bool {
+        return a == b;
+    }
+};
+const Map = std.HashMap(u64, u32, KeyContext, 77);
 
 // A=0, C=1, G=2, T=3, for either case.
 inline fn codeForNucleotide(c: u8) u8 {
@@ -43,7 +56,12 @@ fn countAll(poly: []const u8, len: usize) Map {
     return map;
 }
 
-fn frequencies(poly: []const u8, len: usize) void {
+const Report = struct {
+    buf: [1024]u8 = undefined,
+    len: usize = 0,
+};
+
+fn frequencies(poly: []const u8, len: usize, r: *Report) void {
     var map = countAll(poly, len);
     defer map.deinit();
 
@@ -67,18 +85,18 @@ fn frequencies(poly: []const u8, len: usize) void {
         }
         name[len] = 0;
         const pct: f32 = 100.0 * @as(f32, @floatFromInt(e.value)) / total;
-        _ = printf("%s %.3f\n", @as([*:0]const u8, &name), @as(f64, pct));
+        r.len += @intCast(snprintf(r.buf[r.len..].ptr, r.buf.len - r.len, "%s %.3f\n", @as([*:0]const u8, &name), @as(f64, pct)));
     }
-    _ = printf("\n");
+    r.len += @intCast(snprintf(r.buf[r.len..].ptr, r.buf.len - r.len, "\n"));
 }
 
-fn count(poly: []const u8, oligo: []const u8) void {
+fn count(poly: []const u8, oligo: []const u8, r: *Report) void {
     var map = countAll(poly, oligo.len);
     defer map.deinit();
     var key: u64 = 0;
     for (oligo) |c| key = (key << 2) | codeForNucleotide(c);
     const n: u64 = map.get(key) orelse 0;
-    _ = printf("%llu\t%.*s\n", @as(c_ulonglong, n), @as(c_int, @intCast(oligo.len)), oligo.ptr);
+    r.len += @intCast(snprintf(&r.buf, r.buf.len, "%llu\t%.*s\n", @as(c_ulonglong, n), @as(c_int, @intCast(oligo.len)), oligo.ptr));
 }
 
 pub export fn main() c_int {
@@ -116,12 +134,21 @@ pub export fn main() c_int {
     }
     const polynucleotide = poly[0..plen];
 
-    frequencies(polynucleotide, 1);
-    frequencies(polynucleotide, 2);
-    count(polynucleotide, "GGT");
-    count(polynucleotide, "GGTA");
-    count(polynucleotide, "GGTATT");
-    count(polynucleotide, "GGTATTTTAATT");
-    count(polynucleotide, "GGTATTTTAATTTATAGT");
+    var reports: [7]Report = @splat(.{});
+    const oligos = [_][]const u8{ "GGT", "GGTA", "GGTATT", "GGTATTTTAATT", "GGTATTTTAATTTATAGT" };
+    var threads: [7]std.Thread = undefined;
+    // The longest first, as the C program orders its sections.
+    var k: usize = oligos.len;
+    while (k > 0) {
+        k -= 1;
+        threads[2 + k] = std.Thread.spawn(.{}, count, .{ polynucleotide, oligos[k], &reports[2 + k] }) catch unreachable;
+    }
+    threads[1] = std.Thread.spawn(.{}, frequencies, .{ polynucleotide, 2, &reports[1] }) catch unreachable;
+    threads[0] = std.Thread.spawn(.{}, frequencies, .{ polynucleotide, 1, &reports[0] }) catch unreachable;
+    for (&threads) |*t| t.join();
+    for (&reports) |*r| {
+        r.buf[r.len] = 0;
+        _ = printf("%s", @as([*:0]const u8, @ptrCast(&r.buf)));
+    }
     return 0;
 }

@@ -1,25 +1,30 @@
-// The Computer Language Benchmarks Game: fasta. A port of the C program (Drake Diedrich's),
-// written for this suite: the 139968-state generator, each symbol chosen by a linear scan of the
-// cumulative probabilities, output through a buffered writer.
+// The Computer Language Benchmarks Game: fasta. Original, written for this benchmark. It mirrors the
+// Game's fastest C program (fasta.gcc-3, Drake Diedrich), which is single-threaded: the symbol for
+// each of the generator's IM states is looked up in a table built once from the cumulative
+// probabilities (in single precision, as gcc-3 builds it), so the inner loop is one generator step
+// and one load; whole buffers of 100 lines are filled with the newlines already in place and written
+// in one call each; the repeated sequence is laid out once as len(alu) lines and written in whole
+// copies. Bounds checks are off in the fill loops (#no_bounds_check), as C has none.
 package main
 
-import "core:bufio"
-import "core:fmt"
-import "core:io"
 import "core:os"
 import "core:strconv"
 
-IM :: u32(139968)
-IA :: u32(3877)
-IC :: u32(29573)
-SEED :: u32(42)
+IM :: 139968
+IA :: 3877
+IC :: 29573
 LINELEN :: 60
+BUFLINES :: 100
 
-seed := SEED
+seed: u32 = 42
 
-fasta_rand :: #force_inline proc(max: f64) -> f64 {
+next_state :: #force_inline proc "contextless" () -> u32 {
 	seed = (seed * IA + IC) % IM
-	return max * f64(seed) / f64(IM)
+	return seed
+}
+
+put :: proc(data: []u8) {
+	os.write(os.stdout, data)
 }
 
 ALU :: "GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGG" +
@@ -30,70 +35,73 @@ ALU :: "GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGG" +
 	"AGGCGGAGGTTGCAGTGAGCCGAGATCGCGCCACTGCACTCC" +
 	"AGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA"
 
-IUB :: "acgtBDHKMNRSVWY"
-IUB_P := [15]f64{0.27, 0.12, 0.12, 0.27, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02}
-
-HOMOSAPIENS :: "acgt"
-HOMOSAPIENS_P := [4]f64{0.3029549426680, 0.1979883004921, 0.1975473066391, 0.3015094502008}
-
-repeat_fasta :: proc(w: io.Writer, seq: string, n: int) {
-	length := len(seq)
-	buffer := make([]u8, length + LINELEN)
-	defer delete(buffer)
-	copy(buffer, seq)
-	copy(buffer[length:], seq[:LINELEN])
-
-	t := 0
-	whole_lines := n / LINELEN
-	for _ in 0 ..< whole_lines {
-		io.write(w, buffer[t % length:][:LINELEN])
-		io.write_byte(w, '\n')
-		t += LINELEN
-	}
-	io.write(w, buffer[t % length:][:n - t])
-	if n % LINELEN != 0 {
-		io.write_byte(w, '\n')
-	}
-}
-
-linear_lookup :: #force_inline proc(p: []f64, v: f64) -> int {
-	i := 0
-	for j in 0 ..< len(p) - 1 {
-		if v > p[j] {
-			i += 1
-		}
-	}
-	return i
-}
-
-random_fasta :: proc(w: io.Writer, symb: string, probability: []f64, n: int) {
-	length := len(symb)
-	p := make([]f64, length)
-	defer delete(p)
-	buffer: [LINELEN + 2]u8
-	buffer[LINELEN] = '\n'
-
-	p[0] = probability[0]
-	for i in 1 ..< length {
-		p[i] = probability[i] + p[i - 1]
-	}
-
-	i := 0
-	for ; i < n / LINELEN; i += 1 {
+repeat_fasta :: proc(seq: string, n: int) {
+	l := len(seq)
+	// l lines of LINELEN, each starting where the previous ended: one whole period of the output.
+	buf := make([]u8, (LINELEN + 1) * l)
+	defer delete(buf)
+	for i in 0 ..< l {
 		for k in 0 ..< LINELEN {
-			v := fasta_rand(1.0)
-			buffer[k] = symb[linear_lookup(p, v)]
+			buf[i * (LINELEN + 1) + k] = seq[(i * LINELEN + k) % l]
 		}
-		io.write(w, buffer[:LINELEN + 1])
+		buf[(i + 1) * (LINELEN + 1) - 1] = '\n'
 	}
-	remainder := n - (i * LINELEN)
-	for k in 0 ..< remainder {
-		v := fasta_rand(1.0)
-		buffer[k] = symb[linear_lookup(p, v)]
+	whole := n / (l * LINELEN)
+	for _ in 0 ..< whole {
+		put(buf)
 	}
-	io.write(w, buffer[:remainder])
+	remaining := n - whole * l * LINELEN
+	put(buf[:remaining + remaining / LINELEN])
 	if n % LINELEN != 0 {
-		io.write_byte(w, '\n')
+		put({'\n'})
+	}
+}
+
+table: [IM]u8
+line_buf: [(LINELEN + 1) * BUFLINES]u8
+
+random_fasta :: proc(symb: string, prob: []f32, n: int) #no_bounds_check {
+	sum := prob[0]
+	j := 0
+	for i := 0; i < IM && j < len(symb); i += 1 {
+		r := 1.0 * f64(i) / f64(IM)
+		if r >= f64(sum) {
+			j += 1
+			if j < len(prob) {
+				sum += prob[j]
+			}
+		}
+		table[i] = symb[min(j, len(symb) - 1)]
+	}
+	buf := line_buf[:]
+	for l in 0 ..< BUFLINES {
+		buf[l * (LINELEN + 1) + LINELEN] = '\n'
+	}
+
+	buffers := n / LINELEN / BUFLINES
+	for _ in 0 ..< buffers {
+		for l in 0 ..< BUFLINES {
+			base := l * (LINELEN + 1)
+			for k in 0 ..< LINELEN {
+				buf[base + k] = table[next_state()]
+			}
+		}
+		put(buf)
+	}
+	lines := n / LINELEN - buffers * BUFLINES
+	for l in 0 ..< lines {
+		base := l * (LINELEN + 1)
+		for k in 0 ..< LINELEN {
+			buf[base + k] = table[next_state()]
+		}
+	}
+	partial := n - LINELEN * lines - buffers * BUFLINES * LINELEN
+	for k in 0 ..< partial {
+		buf[lines * (LINELEN + 1) + k] = table[next_state()]
+	}
+	put(buf[:lines * (LINELEN + 1) + partial])
+	if n % LINELEN != 0 {
+		put({'\n'})
 	}
 }
 
@@ -102,20 +110,13 @@ main :: proc() {
 	if len(os.args) > 1 {
 		n, _ = strconv.parse_int(os.args[1])
 	}
+	iub_p := []f32{0.27, 0.12, 0.12, 0.27, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02}
+	homosapiens_p := []f32{0.3029549426680, 0.1979883004921, 0.1975473066391, 0.3015094502008}
 
-	out: bufio.Writer
-	bufio.writer_init(&out, os.to_stream(os.stdout))
-	defer bufio.writer_destroy(&out)
-	w := bufio.writer_to_stream(&out)
-
-	io.write_string(w, ">ONE Homo sapiens alu\n")
-	repeat_fasta(w, ALU, n * 2)
-
-	io.write_string(w, ">TWO IUB ambiguity codes\n")
-	random_fasta(w, IUB, IUB_P[:], n * 3)
-
-	io.write_string(w, ">THREE Homo sapiens frequency\n")
-	random_fasta(w, HOMOSAPIENS, HOMOSAPIENS_P[:], n * 5)
-
-	bufio.writer_flush(&out)
+	put(transmute([]u8)string(">ONE Homo sapiens alu\n"))
+	repeat_fasta(ALU, n * 2)
+	put(transmute([]u8)string(">TWO IUB ambiguity codes\n"))
+	random_fasta("acgtBDHKMNRSVWY", iub_p, n * 3)
+	put(transmute([]u8)string(">THREE Homo sapiens frequency\n"))
+	random_fasta("acgt", homosapiens_p, n * 5)
 }

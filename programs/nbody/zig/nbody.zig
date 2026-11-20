@@ -1,5 +1,7 @@
-// The Computer Language Benchmarks Game: n-body. Same algorithm as the C version.
-// The C library supplies argument parsing and output, as in the C program.
+// The Computer Language Benchmarks Game: n-body. Original, written for this benchmark. It mirrors the
+// Game's fastest C program that builds here (nbody.gcc-6, Christoph Bauer), which is single-threaded:
+// the bodies as an array of structs, each pair's distance, magnitude and velocity updates in one
+// loop, then the positions. The C library supplies argument parsing and output, as in the C program.
 const std = @import("std");
 
 extern "c" fn printf(fmt: [*:0]const u8, ...) c_int;

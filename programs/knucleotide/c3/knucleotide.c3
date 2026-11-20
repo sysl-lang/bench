@@ -1,14 +1,36 @@
-// The Computer Language Benchmarks Game
-// https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
-//
-// A port of the C program (contributed by Jeremy Zerfas) to C3, counting into
-// the standard library's HashMap keyed by the 2k-bit code of each oligonucleotide.
+// The Computer Language Benchmarks Game: k-nucleotide. Original, written for this benchmark. It
+// mirrors the Game's fastest C program (knucleotide.gcc, Jeremy Zerfas): one pass per oligonucleotide
+// length over the encoded sequence, rolling the 2k-bit key one base at a time and counting it in a
+// library hash table (C3's standard HashMap, its key hashed by gcc's `key ^ key >> 7` and loaded to
+// khash's 77%). The seven tables (two frequency tables, five counts) are built at once, one thread
+// each, as gcc builds them in OpenMP sections; each writes its report into its own buffer, and the
+// buffers are printed in order.
 module knucleotide;
 import std::io;
 import std::collections::map;
+import std::thread;
 import libc;
 
-alias OligoMap = HashMap{ulong, uint};
+typedef Key = ulong;
+fn uint Key.hash(self) => (uint)(self ^ (self >> 7));
+
+alias OligoMap = HashMap{Key, uint};
+
+struct Task
+{
+	char* poly;
+	sz length;
+	sz oligo_length;
+	String oligo;
+	char[1024] out;
+	usz out_len;
+}
+
+fn void Task.print(&self, String format, args...)
+{
+	char[] s = io::bprintf(self.out[self.out_len..], format, ...args)!!;
+	self.out_len += s.len;
+}
 
 struct Element
 {
@@ -40,24 +62,28 @@ fn void count_oligonucleotides(OligoMap* table, char* poly, sz length, sz oligo_
 	for (sz i = oligo_length - 1; i < length; i++)
 	{
 		key = (key << 2 & mask) | poly[i];
-		uint* count = table.get_or_create_ref(key);
+		uint* count = table.get_or_create_ref((Key)key);
 		*count += 1;
 	}
 }
 
-fn void generate_frequencies(char* poly, sz length, sz oligo_length)
+fn int generate_frequencies(void* arg)
 {
+	Task* task = arg;
+	char* poly = task.poly;
+	sz length = task.length;
+	sz oligo_length = task.oligo_length;
 	OligoMap table;
-	table.init(mem);
+	table.init(mem, load_factor: 0.77);
 
 	count_oligonucleotides(&table, poly, length, oligo_length);
 
 	sz size = table.len();
 	Element* elements = mem::alloc_array(Element, (usz)size);
 	sz n = 0;
-	table.@each(; ulong key, uint value)
+	table.@each(; Key key, uint value)
 	{
-		elements[n++] = { key, value };
+		elements[n++] = { (ulong)key, value };
 	};
 	table.free();
 
@@ -73,17 +99,22 @@ fn void generate_frequencies(char* poly, sz length, sz oligo_length)
 			key >>= 2;
 		}
 		String name = (String)oligo[:oligo_length];
-		io::printfn("%s %.3f", name, 100.0f * (float)elements[i].value / (float)(length - oligo_length + 1));
+		task.print("%s %.3f\n", name, 100.0f * (float)elements[i].value / (float)(length - oligo_length + 1));
 	}
 	mem::free(elements);
-	io::printn();
+	task.print("\n");
+	return 0;
 }
 
-fn void generate_count(char* poly, sz length, String oligo)
+fn int generate_count(void* arg)
 {
+	Task* task = arg;
+	char* poly = task.poly;
+	sz length = task.length;
+	String oligo = task.oligo;
 	sz oligo_length = (sz)oligo.len;
 	OligoMap table;
-	table.init(mem);
+	table.init(mem, load_factor: 0.77);
 
 	count_oligonucleotides(&table, poly, length, oligo_length);
 
@@ -91,9 +122,10 @@ fn void generate_count(char* poly, sz length, String oligo)
 	for (sz i = 0; i < oligo_length; i++) key = (key << 2) | code_for_nucleotide(oligo[i]);
 
 	uint count = 0;
-	if (try found = table.get(key)) count = found;
-	io::printfn("%d\t%s", count, oligo);
+	if (try found = table.get((Key)key)) count = found;
+	task.print("%d\t%s\n", count, oligo);
 	table.free();
+	return 0;
 }
 
 fn int main(String[] args)
@@ -124,13 +156,25 @@ fn int main(String[] args)
 		}
 	}
 
-	generate_frequencies(poly, length, 1);
-	generate_frequencies(poly, length, 2);
-	generate_count(poly, length, "GGT");
-	generate_count(poly, length, "GGTA");
-	generate_count(poly, length, "GGTATT");
-	generate_count(poly, length, "GGTATTTTAATT");
-	generate_count(poly, length, "GGTATTTTAATTTATAGT");
+	String[5] oligos = { "GGT", "GGTA", "GGTATT", "GGTATTTTAATT", "GGTATTTTAATTTATAGT" };
+	Task[7] tasks;
+	Thread[7] threads;
+	// The longest first, as the C program orders its sections.
+	for (int k = 4; k >= 0; k--)
+	{
+		tasks[2 + k] = { .poly = poly, .length = length, .oligo = oligos[k] };
+		threads[2 + k].create(&generate_count, &tasks[2 + k])!!;
+	}
+	for (int k = 1; k >= 0; k--)
+	{
+		tasks[k] = { .poly = poly, .length = length, .oligo_length = (sz)k + 1 };
+		threads[k].create(&generate_frequencies, &tasks[k])!!;
+	}
+	for (int k = 0; k < 7; k++)
+	{
+		(void)threads[k].join();
+		io::print((String)tasks[k].out[:tasks[k].out_len]);
+	}
 
 	mem::free(poly);
 	return 0;

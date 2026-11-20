@@ -1,6 +1,9 @@
-// The Computer Language Benchmarks Game: pidigits. A port of the C program (Mr Ledrug's), written
-// for this suite: Gibbons' spigot over GMP through a foreign import of gmp.h's __gmpz_* symbols,
-// output through a buffered writer.
+// The Computer Language Benchmarks Game: pidigits. Original, written for this benchmark. It mirrors
+// the Game's fastest C program (pidigits.gcc-2, Michael Ganss, Oleksii Prudkyi and Craig Russell, from
+// Mike Pall and Wim Couwenberg's pidigits.lua-5), which is single-threaded: the spigot kept as two
+// numerators n1, n2 and a denominator d; a digit is emitted when n1/d and n2/d agree, otherwise the
+// next term is produced. GMP through a foreign import of gmp.h's __gmpz_* symbols; output gathered in
+// a buffered writer.
 package main
 
 import "core:bufio"
@@ -20,82 +23,76 @@ Mpz :: struct {
 @(default_calling_convention = "c")
 foreign gmp {
 	__gmpz_init :: proc(x: ^Mpz) ---
-	__gmpz_init_set_ui :: proc(x: ^Mpz, v: c.ulong) ---
+	__gmpz_init_set_si :: proc(x: ^Mpz, v: c.long) ---
 	__gmpz_add :: proc(r, a, b: ^Mpz) ---
-	__gmpz_mul_ui :: proc(r, a: ^Mpz, b: c.ulong) ---
-	__gmpz_addmul_ui :: proc(r, a: ^Mpz, b: c.ulong) ---
-	__gmpz_submul_ui :: proc(r, a: ^Mpz, b: c.ulong) ---
+	__gmpz_mul :: proc(r, a, b: ^Mpz) ---
+	__gmpz_mul_si :: proc(r, a: ^Mpz, b: c.long) ---
 	__gmpz_tdiv_q :: proc(q, n, d: ^Mpz) ---
-	__gmpz_get_ui :: proc(x: ^Mpz) -> c.ulong ---
+	__gmpz_get_si :: proc(x: ^Mpz) -> c.long ---
 	__gmpz_cmp :: proc(a, b: ^Mpz) -> c.int ---
 }
 
-tmp1, tmp2, acc, den, num: Mpz
-
-extract_digit :: proc(nth: c.ulong) -> c.ulong {
-	// joggling between tmp1 and tmp2, so GMP won't have to use temp buffers
-	__gmpz_mul_ui(&tmp1, &num, nth)
-	__gmpz_add(&tmp2, &tmp1, &acc)
-	__gmpz_tdiv_q(&tmp1, &tmp2, &den)
-	return __gmpz_get_ui(&tmp1)
-}
-
-eliminate_digit :: proc(d: c.ulong) {
-	__gmpz_submul_ui(&acc, &den, d)
-	__gmpz_mul_ui(&acc, &acc, 10)
-	__gmpz_mul_ui(&num, &num, 10)
-}
-
-next_term :: proc(k: c.ulong) {
-	k2 := k * 2 + 1
-	__gmpz_addmul_ui(&acc, &num, 2)
-	__gmpz_mul_ui(&acc, &acc, k2)
-	__gmpz_mul_ui(&den, &den, k2)
-	__gmpz_mul_ui(&num, &num, k)
-}
+n1, n2, d, u, v, w: Mpz
 
 main :: proc() {
-	n := 27
-	if len(os.args) > 1 {
-		n, _ = strconv.parse_int(os.args[1])
-	}
+	n, _ := strconv.parse_int(os.args[1])
 
 	out: bufio.Writer
 	bufio.writer_init(&out, os.to_stream(os.stdout))
 	defer bufio.writer_destroy(&out)
-	w := bufio.writer_to_stream(&out)
+	stream := bufio.writer_to_stream(&out)
 
-	__gmpz_init(&tmp1)
-	__gmpz_init(&tmp2)
-	__gmpz_init_set_ui(&acc, 0)
-	__gmpz_init_set_ui(&den, 1)
-	__gmpz_init_set_ui(&num, 1)
+	__gmpz_init(&u)
+	__gmpz_init(&v)
+	__gmpz_init_set_si(&w, 0)
+	__gmpz_init_set_si(&n1, 4)
+	__gmpz_init_set_si(&n2, 3)
+	__gmpz_init_set_si(&d, 1)
 
+	k: c.long = 1
 	i := 0
-	k: c.ulong = 0
-	for i < n {
-		k += 1
-		next_term(k)
-		if __gmpz_cmp(&num, &acc) > 0 do continue
-
-		d := extract_digit(3)
-		if d != extract_digit(4) do continue
-
-		io.write_byte(w, u8('0' + d))
-		i += 1
-		if i % 10 == 0 {
-			io.write_string(w, "\t:")
-			io.write_int(w, i)
-			io.write_byte(w, '\n')
+	buf: [32]u8
+	for {
+		__gmpz_tdiv_q(&u, &n1, &d)
+		__gmpz_tdiv_q(&v, &n2, &d)
+		if __gmpz_cmp(&u, &v) == 0 {
+			io.write_byte(stream, u8('0' + __gmpz_get_si(&u)))
+			i += 1
+			if i % 10 == 0 {
+				io.write_string(stream, "\t:")
+				io.write_string(stream, strconv.write_int(buf[:], i64(i), 10))
+				io.write_byte(stream, '\n')
+			}
+			if i == n {
+				break
+			}
+			// extract
+			__gmpz_mul_si(&u, &u, -10)
+			__gmpz_mul(&u, &d, &u)
+			__gmpz_mul_si(&n1, &n1, 10)
+			__gmpz_add(&n1, &n1, &u)
+			__gmpz_mul_si(&n2, &n2, 10)
+			__gmpz_add(&n2, &n2, &u)
+		} else {
+			// produce
+			k2 := k * 2
+			__gmpz_mul_si(&u, &n1, k2 - 1)
+			__gmpz_add(&v, &n2, &n2)
+			__gmpz_mul_si(&w, &n1, k - 1)
+			__gmpz_add(&n1, &u, &v)
+			__gmpz_mul_si(&u, &n2, k + 2)
+			__gmpz_add(&n2, &w, &u)
+			__gmpz_mul_si(&d, &d, k2 + 1)
+			k += 1
 		}
-		eliminate_digit(d)
 	}
-
-	if n % 10 != 0 {
-		for _ in 0 ..< 10 - n % 10 do io.write_byte(w, ' ')
-		io.write_string(w, "\t:")
-		io.write_int(w, n)
-		io.write_byte(w, '\n')
+	if i % 10 != 0 {
+		for _ in 0 ..< 10 - n % 10 {
+			io.write_byte(stream, ' ')
+		}
+		io.write_string(stream, "\t:")
+		io.write_string(stream, strconv.write_int(buf[:], i64(n), 10))
+		io.write_byte(stream, '\n')
 	}
 	bufio.writer_flush(&out)
 }

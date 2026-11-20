@@ -1,6 +1,8 @@
-// The Computer Language Benchmarks Game: k-nucleotide. A port of the C program (Jeremy Zerfas's),
-// written for this suite: one pass per oligonucleotide length over the encoded sequence, counting
-// 2k-bit keys in a hash table (Odin's built-in map keyed by u64), run sequentially.
+// The Computer Language Benchmarks Game: k-nucleotide. Original, written for this benchmark after the
+// C program (Jeremy Zerfas's): one pass per oligonucleotide length over the encoded sequence, counting
+// 2k-bit keys in a hash table (Odin's built-in map keyed by u64). The seven tables (two frequency
+// tables, five counts) are built at once, one thread each, as the Game's fastest C program builds them
+// in OpenMP sections; each writes its report into its own builder, printed in order at the end.
 package main
 
 import "core:bufio"
@@ -8,6 +10,7 @@ import "core:fmt"
 import "core:os"
 import "core:slice"
 import "core:strings"
+import "core:thread"
 
 Element :: struct {
 	key:   u64,
@@ -31,7 +34,7 @@ count_all :: proc(poly: []u8, length: int) -> map[u64]u32 {
 	return counts
 }
 
-frequencies :: proc(poly: []u8, length: int) {
+frequencies :: proc(poly: []u8, length: int, out: ^strings.Builder) {
 	counts := count_all(poly, length)
 	defer delete(counts)
 	elements := make([dynamic]Element, 0, len(counts))
@@ -56,19 +59,19 @@ frequencies :: proc(poly: []u8, length: int) {
 			key >>= 2
 		}
 		pct := f32(100.0) * f32(e.value) / f32(len(poly) - length + 1)
-		fmt.printf("%s %.3f\n", string(name[:length]), pct)
+		fmt.sbprintf(out, "%s %.3f\n", string(name[:length]), pct)
 	}
-	fmt.printf("\n")
+	fmt.sbprintf(out, "\n")
 }
 
-count :: proc(poly: []u8, oligo: string) {
+count :: proc(poly: []u8, oligo: string, out: ^strings.Builder) {
 	counts := count_all(poly, len(oligo))
 	defer delete(counts)
 	key: u64 = 0
 	for i in 0 ..< len(oligo) {
 		key = (key << 2) | u64(CODES[oligo[i] & 7])
 	}
-	fmt.printf("%d\t%s\n", counts[key], oligo)
+	fmt.sbprintf(out, "%d\t%s\n", counts[key], oligo)
 }
 
 main :: proc() {
@@ -104,11 +107,31 @@ main :: proc() {
 		}
 	}
 
-	frequencies(poly[:], 1)
-	frequencies(poly[:], 2)
-	count(poly[:], "GGT")
-	count(poly[:], "GGTA")
-	count(poly[:], "GGTATT")
-	count(poly[:], "GGTATTTTAATT")
-	count(poly[:], "GGTATTTTAATTTATAGT")
+	Task :: struct {
+		poly:   []u8,
+		length: int,
+		oligo:  string,
+		out:    strings.Builder,
+	}
+	oligos := [5]string{"GGT", "GGTA", "GGTATT", "GGTATTTTAATT", "GGTATTTTAATTTATAGT"}
+	tasks: [7]Task
+	threads: [7]^thread.Thread
+	// The longest first, as the C program orders its sections.
+	for k := 4; k >= 0; k -= 1 {
+		tasks[2 + k] = Task{poly[:], len(oligos[k]), oligos[k], strings.builder_make()}
+		threads[2 + k] = thread.create_and_start_with_poly_data(&tasks[2 + k], proc(t: ^Task) {
+			count(t.poly, t.oligo, &t.out)
+		})
+	}
+	for k := 1; k >= 0; k -= 1 {
+		tasks[k] = Task{poly[:], k + 1, "", strings.builder_make()}
+		threads[k] = thread.create_and_start_with_poly_data(&tasks[k], proc(t: ^Task) {
+			frequencies(t.poly, t.length, &t.out)
+		})
+	}
+	for k in 0 ..< 7 {
+		thread.join(threads[k])
+		thread.destroy(threads[k])
+		os.write(os.stdout, tasks[k].out.buf[:])
+	}
 }

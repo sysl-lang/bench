@@ -1,6 +1,9 @@
-// The Computer Language Benchmarks Game: fasta. Same algorithm as the C version
-// (linear symbol lookup, LINELEN-wide lines). Output goes through a 64 KiB buffer that is
-// written with write(2), standing in for the stdio buffering the C version uses.
+// The Computer Language Benchmarks Game: fasta. Original, written for this benchmark. It mirrors the
+// Game's fastest C program (fasta.gcc-3, Drake Diedrich), which is single-threaded: the symbol for
+// each of the generator's IM states is looked up in a table built once from the cumulative
+// probabilities (in single precision, as gcc-3 builds it), so the inner loop is one generator step
+// and one load; whole buffers of 100 lines are filled with the newlines already in place and written
+// with write(2); the repeated sequence is laid out once as len(alu) lines and written in whole copies.
 const std = @import("std");
 
 extern "c" fn atoi(s: [*:0]const u8) c_int;
@@ -10,37 +13,22 @@ const IM: u32 = 139968;
 const IA: u32 = 3877;
 const IC: u32 = 29573;
 const LINELEN = 60;
+const BUFLINES = 100;
 
 var seed: u32 = 42;
 
-inline fn fastaRand() f64 {
+inline fn nextState() u32 {
     seed = (seed * IA + IC) % IM;
-    return 1.0 * @as(f64, @floatFromInt(seed)) / @as(f64, @floatFromInt(IM));
-}
-
-var obuf: [1 << 16]u8 = undefined;
-var olen: usize = 0;
-
-fn flush() void {
-    var off: usize = 0;
-    while (off < olen) {
-        const r = write(1, obuf[off..].ptr, olen - off);
-        if (r <= 0) break;
-        off += @intCast(r);
-    }
-    olen = 0;
+    return seed;
 }
 
 fn put(data: []const u8) void {
-    if (olen + data.len > obuf.len) flush();
-    @memcpy(obuf[olen..][0..data.len], data);
-    olen += data.len;
-}
-
-fn putc(c: u8) void {
-    if (olen == obuf.len) flush();
-    obuf[olen] = c;
-    olen += 1;
+    var off: usize = 0;
+    while (off < data.len) {
+        const r = write(1, data[off..].ptr, data.len - off);
+        if (r <= 0) return;
+        off += @intCast(r);
+    }
 }
 
 const alu =
@@ -52,78 +40,75 @@ const alu =
     "AGGCGGAGGTTGCAGTGAGCCGAGATCGCGCCACTGCACTCC" ++
     "AGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA";
 
-const iub = "acgtBDHKMNRSVWY";
-const iub_p = [_]f64{ 0.27, 0.12, 0.12, 0.27, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02 };
-
-const homosapiens = "acgt";
-const homosapiens_p = [_]f64{ 0.3029549426680, 0.1979883004921, 0.1975473066391, 0.3015094502008 };
-
 fn repeatFasta(seq: []const u8, n: usize) void {
     const len = seq.len;
-    var buffer: [len_max]u8 = undefined;
-    @memcpy(buffer[0..len], seq);
-    @memcpy(buffer[len..][0..LINELEN], seq[0..LINELEN]);
-
-    var t: usize = 0;
-    const whole_lines = n / LINELEN;
-    var i: usize = 0;
-    while (i < whole_lines) : (i += 1) {
-        put(buffer[t % len ..][0..LINELEN]);
-        putc('\n');
-        t += LINELEN;
+    // len lines of LINELEN, each starting where the previous ended: one whole period of the output.
+    var buf: [(LINELEN + 1) * alu.len]u8 = undefined;
+    for (0..len) |i| {
+        for (0..LINELEN) |k| buf[i * (LINELEN + 1) + k] = seq[(i * LINELEN + k) % len];
+        buf[(i + 1) * (LINELEN + 1) - 1] = '\n';
     }
-    put(buffer[t % len ..][0 .. n - t]);
-    if (n % LINELEN != 0) putc('\n');
+    const whole = n / (len * LINELEN);
+    for (0..whole) |_| put(&buf);
+    const remaining = n - whole * len * LINELEN;
+    put(buf[0 .. remaining + remaining / LINELEN]);
+    if (n % LINELEN != 0) put("\n");
 }
 
-const len_max = alu.len + LINELEN;
-
-fn linearLookup(p: []const f64, v: f64) usize {
+fn buildTable(symb: []const u8, prob: []const f32) [IM]u8 {
+    var table: [IM]u8 = undefined;
+    var sum: f32 = prob[0];
+    var j: usize = 0;
     var i: usize = 0;
-    for (p[0 .. p.len - 1]) |pj| {
-        if (v > pj) i += 1;
-    }
-    return i;
-}
-
-fn randomFasta(symb: []const u8, probability: []const f64, n: usize) void {
-    var p: [16]f64 = undefined;
-    const len = symb.len;
-    var buffer: [LINELEN + 1]u8 = undefined;
-    buffer[LINELEN] = '\n';
-
-    p[0] = probability[0];
-    for (1..len) |i| p[i] = probability[i] + p[i - 1];
-
-    const lines = n / LINELEN;
-    for (0..lines) |_| {
-        for (0..LINELEN) |k| {
-            const v = fastaRand();
-            buffer[k] = symb[linearLookup(p[0..len], v)];
+    while (i < IM and j < symb.len) : (i += 1) {
+        const r: f64 = 1.0 * @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(IM));
+        if (r >= sum) {
+            j += 1;
+            if (j < prob.len) sum += prob[j];
         }
-        put(&buffer);
+        table[i] = symb[@min(j, symb.len - 1)];
     }
-    const remainder = n - lines * LINELEN;
-    for (0..remainder) |k| {
-        const v = fastaRand();
-        buffer[k] = symb[linearLookup(p[0..len], v)];
+    return table;
+}
+
+var table_buf: [IM]u8 = undefined;
+var line_buf: [(LINELEN + 1) * BUFLINES]u8 = undefined;
+
+fn randomFasta(symb: []const u8, prob: []const f32, n: usize) void {
+    table_buf = buildTable(symb, prob);
+    const table = &table_buf;
+    const buf = &line_buf;
+    for (0..BUFLINES) |l| buf[l * (LINELEN + 1) + LINELEN] = '\n';
+
+    const buffers = n / LINELEN / BUFLINES;
+    for (0..buffers) |_| {
+        for (0..BUFLINES) |l| {
+            const line = buf[l * (LINELEN + 1) ..][0..LINELEN];
+            for (line) |*c| c.* = table[nextState()];
+        }
+        put(buf);
     }
-    put(buffer[0..remainder]);
-    if (n % LINELEN != 0) putc('\n');
+    const lines = n / LINELEN - buffers * BUFLINES;
+    for (0..lines) |l| {
+        const line = buf[l * (LINELEN + 1) ..][0..LINELEN];
+        for (line) |*c| c.* = table[nextState()];
+    }
+    const partial = n - LINELEN * lines - buffers * BUFLINES * LINELEN;
+    for (buf[lines * (LINELEN + 1) ..][0..partial]) |*c| c.* = table[nextState()];
+    put(buf[0 .. lines * (LINELEN + 1) + partial]);
+    if (n % LINELEN != 0) put("\n");
 }
 
 pub export fn main(argc: c_int, argv: [*][*:0]u8) c_int {
     const n: usize = if (argc > 1) @intCast(atoi(argv[1])) else 1000;
+    const iub_p = [_]f32{ 0.27, 0.12, 0.12, 0.27, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02 };
+    const homosapiens_p = [_]f32{ 0.3029549426680, 0.1979883004921, 0.1975473066391, 0.3015094502008 };
 
     put(">ONE Homo sapiens alu\n");
     repeatFasta(alu, n * 2);
-
     put(">TWO IUB ambiguity codes\n");
-    randomFasta(iub, &iub_p, n * 3);
-
+    randomFasta("acgtBDHKMNRSVWY", &iub_p, n * 3);
     put(">THREE Homo sapiens frequency\n");
-    randomFasta(homosapiens, &homosapiens_p, n * 5);
-
-    flush();
+    randomFasta("acgt", &homosapiens_p, n * 5);
     return 0;
 }

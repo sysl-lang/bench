@@ -20,13 +20,13 @@ GMP_FLAGS=(c "-I$GMP_INCLUDE -L$GMP_LIB -lgmp" c-tuned "-I$GMP_INCLUDE -L$GMP_LI
            odin "-extra-linker-flags:-L$GMP_LIB"
            ada "-largs -L$GMP_LIB" fortran "-L$GMP_LIB -lgmp" c3 "-L $GMP_LIB -l gmp")
 
-# regex-redux's C, C++, Rust, Zig, Fortran, Go and sysl-tuned programs link PCRE2 (C++ also includes Boost).
+# regex-redux's C, C++, Rust, Zig, Odin, C3, Fortran, Go and sysl-tuned programs link PCRE2 (C++ also includes Boost).
 # Homebrew's copy is named outright: macOS has a libpcre2-8 of its own, built without the JIT.
 PCRE2=/opt/homebrew/opt/pcre2
 typeset -A PCRE2_FLAGS
 PCRE2_FLAGS=(c "-I$PCRE2/include -L$PCRE2/lib -lpcre2-8" c-tuned "-I$PCRE2/include -L$PCRE2/lib -lpcre2-8"
              cpp "-I$PCRE2/include -I/opt/homebrew/opt/boost/include -L$PCRE2/lib -lpcre2-8"
-             rust "-L $PCRE2/lib" rust-tuned "-L $PCRE2/lib" zig "-L$PCRE2/lib -lpcre2-8"
+             rust "-L $PCRE2/lib" rust-tuned "-L $PCRE2/lib" zig "-L$PCRE2/lib -lpcre2-8" odin "-extra-linker-flags:-L$PCRE2/lib" c3 "-L $PCRE2/lib -l pcre2-8"
              fortran "-L$PCRE2/lib -lpcre2-8" sysl-tuned "--link-path $PCRE2/lib")
 
 failed=0
@@ -56,7 +56,8 @@ for prog in $PROGRAMS; do
               # codegen-units=1, as the Benchmarks Game builds Rust (AUDIT.md A2).
               rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native -C codegen-units=1 $dir/$prog.rs -o $out $libs >$out.log 2>&1 ;;
       swift)  swiftc -O $dir/$prog.swift -o $out $libs >$out.log 2>&1 ;;
-      zig)    (cd $dir && zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded -lc --cache-dir $BUILD/.zig-cache --global-cache-dir $BUILD/.zig-global -femit-bin=$out $libs $prog.zig) >$out.log 2>&1 ;;
+      # Zig without -fsingle-threaded: its programs start threads, as the Game's fastest entries do.
+      zig)    (cd $dir && zig build-exe -O ReleaseFast -mcpu=native -lc --cache-dir $BUILD/.zig-cache --global-cache-dir $BUILD/.zig-global -femit-bin=$out $libs $prog.zig) >$out.log 2>&1 ;;
       go)     # Plain `go build`, as the Benchmarks Game builds Go. GOARM64=v8.7 is this machine's
               # architecture level (clang -mcpu=native reads +v8.7a), as the Game sets GOAMD64=v2 and
               # every other language here builds for the host (AUDIT.md G2). cgo finds GMP (pidigits)

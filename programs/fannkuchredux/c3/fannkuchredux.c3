@@ -1,75 +1,74 @@
-// The Computer Language Benchmarks Game
-// https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
-//
-// A port of the C program (contributed by Ledrug Katz) to C3.
-module fannkuchredux;
+module fannkuch;
 import std::io;
+import std::math;
+import libc;
 
-int[16] s;
-int[16] t;
-int maxflips = 0;
-int max_n;
-int odd = 0;
-int checksum = 0;
-
-fn int flip()
+fn int fannkuchredux(int n)
 {
-	for (int k = 0; k < max_n; k++) t[k] = s[k];
-	int i = 1;
-	do
+	int* perm = mem::alloc_array(int, n);
+	int* perm1 = mem::alloc_array(int, n);
+	int* count = mem::alloc_array(int, n);
+	int max_flips_count;
+	int perm_count;
+	int checksum;
+
+	for (int i = 0; i < n; i++) perm1[i] = i;
+
+	int r = n;
+
+	while (1)
 	{
-		int x = 0;
-		int y = t[0];
-		while (x < y)
+		for (; r != 1; r--) count[r - 1] = r;
+
+		for (int i = 0; i < n; i++) perm[i] = perm1[i];
+
+		int flips_count = 0;
+		int k;
+
+		while (!((k = perm[0]) == 0))
 		{
-			int c = t[x];
-			t[x++] = t[y];
-			t[y--] = c;
+			int k2 = (k + 1) >> 1;
+			for (int i = 0; i < k2; i++)
+			{
+				int temp = perm[i];
+				perm[i] = perm[k - i];
+				perm[k - i] = temp;
+			}
+			flips_count++;
 		}
-		i++;
+
+		max_flips_count = max(max_flips_count, flips_count);
+		checksum += perm_count % 2 == 0 ? flips_count : -flips_count;
+
+		/* Use incremental change to generate another permutation */
+		while (1)
+		{
+			if (r == n)
+			{
+				io::printf("%d\n", checksum);
+				return max_flips_count;
+			}
+
+			int perm0 = perm1[0];
+			int i = 0;
+			while (i < r)
+			{
+				int j = i + 1;
+				perm1[i] = perm1[j];
+				i = j;
+			}
+			perm1[r] = perm0;
+			count[r] = count[r] - 1;
+			if (count[r] > 0) break;
+			r++;
+		}
+		perm_count++;
 	}
-	while (t[t[0]] != 0);
-	return i;
 }
 
-fn void rotate(int n) @inline
+fn int main(int argc, char** argv)
 {
-	int c = s[0];
-	for (int i = 1; i <= n; i++) s[i - 1] = s[i];
-	s[n] = c;
-}
-
-// Tompkin-Paige iterative perm generation
-fn void tk(int n)
-{
-	int i = 0;
-	int[16] c;
-	while (i < n)
-	{
-		rotate(i);
-		if (c[i] >= i)
-		{
-			c[i++] = 0;
-			continue;
-		}
-
-		c[i]++;
-		i = 1;
-		odd = ~odd;
-		if (s[0] != 0)
-		{
-			int f = s[s[0]] != 0 ? flip() : 1;
-			if (f > maxflips) maxflips = f;
-			checksum += odd != 0 ? -f : f;
-		}
-	}
-}
-
-fn int main(String[] args)
-{
-	max_n = args[1].to_int()!!;
-	for (int i = 0; i < max_n; i++) s[i] = i;
-	tk(max_n);
-	io::printfn("%d\nPfannkuchen(%d) = %d", checksum, max_n, maxflips);
+	int n = argc > 1 ? libc::atoi(argv[1]) : 7;
+	io::printf("Pfannkuchen(%d) = %d\n", n, fannkuchredux(n));
 	return 0;
 }
