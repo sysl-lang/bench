@@ -1,310 +1,211 @@
-/* The Computer Language Benchmarks Game 
- * https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
+/* The Computer Language Benchmarks Game https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
  *
- * contributed by Mark van Weert
- * based on Go#6 C++#2
+ * contributed by Bert Gijsbers.
+ * based on work by Dirk Moerenhout, Jason Alan Palmer and the Go Authors.
  */
 
 package main
 
 import (
     "bufio"
+    "bytes"
     "fmt"
-    "io"
-    "math"
     "os"
     "runtime"
     "sort"
     "strings"
-    "sync"
 )
 
-var toNum = strings.NewReplacer("A", string(0), "C", string(1), "T", string(2), "G", string(3), )
-var toChar = []byte{'A', 'C', 'T', 'G'}
+var toNum = strings.NewReplacer(
+    "A", string(0),
+    "C", string(1),
+    "G", string(3),
+    "T", string(2),
+)
+
+var toChar = strings.NewReplacer(
+    string(0), "A",
+    string(1), "C",
+    string(3), "G",
+    string(2), "T",
+)
+
+var empty string
+
+var jobs = []struct {
+    length   int
+    sequence string
+    result   chan string
+}{
+    {1, empty, make(chan string, 1)},
+    {2, empty, make(chan string, 1)},
+    {0, "GGT", make(chan string, 1)},
+    {0, "GGTA", make(chan string, 1)},
+    {0, "GGTATT", make(chan string, 1)},
+    {0, "GGTATTTTAATT", make(chan string, 1)},
+    {0, "GGTATTTTAATTTATAGT", make(chan string, 1)},
+}
 
 func main() {
-//    start := time.Now()
     dna := input()
-
-    fmt.Println(WriteFrequencies(dna, 1))
-    fmt.Println(WriteFrequencies(dna, 2))
-    fmt.Println(WriteCount(dna, "GGT"))
-    fmt.Println(WriteCount(dna, "GGTA"))
-    fmt.Println(WriteCount(dna, "GGTATT"))
-    fmt.Println(WriteCount(dna, "GGTATTTTAATT"))
-    fmt.Println(WriteCount(dna, "GGTATTTTAATTTATAGT"))
-//    fmt.Println(time.Since(start))
-}
-
-// input returns the transformed data
-func input() []byte {
-    data := readStdin()
-
-    // A = 0, C = 1, T = 2, G = 3
-    for idx := range data {
-        data[idx] = data[idx] >> 1 & 3
+    scheduler(dna)
+    for i := range jobs {
+        fmt.Println(<-jobs[i].result)
     }
-    return data
 }
 
-// readStdin returns the data marked with >THREE from stdin
-func readStdin() []byte {
-    // Create a reader for stdin
-    reader := bufio.NewReaderSize(os.Stdin, 1<<20)
-    var lineCount int
+func scheduler(dna []byte) {
+    command := make(chan int, len(jobs))
+    for i := runtime.NumCPU(); i > 0; i-- {
+        go worker(dna, command)
+    }
+
+    for i := range jobs {
+        // longest job first, shortest job last
+        command <- len(jobs) - 1 - i
+    }
+    close(command)
+}
+
+func worker(dna []byte, command <-chan int) {
+    for k := range command {
+        if jobs[k].length > 0 {
+            jobs[k].result <- frequencyReport(dna, jobs[k].length)
+        } else {
+            jobs[k].result <- sequenceReport(dna, jobs[k].sequence)
+        }
+    }
+}
+
+func input() (data []byte) {
+    data = readThird()
+    for i := 0; i < len(data); i++ {
+        data[i] = data[i] >> 1 & 3
+    }
+    return
+}
+
+func readThird() (data []byte) {
+    in, lineCount := findThree()
+    data = make([]byte, 0, lineCount*61)
     for {
-        // Keep reading until we encounter the start marker >THREE
-        line, err := reader.ReadSlice('\n')
+        line, err := in.ReadSlice('\n')
+        if err != nil && (line == nil || len(line) == 0) || line[0] == '>' {
+            break
+        }
+        last := len(line) - 1
+        if line[last] == '\n' {
+            line = line[0:last]
+        }
+        data = append(data, line...)
+    }
+    return
+}
+
+func findThree() (in *bufio.Reader, lineCount int) {
+    in = bufio.NewReaderSize(os.Stdin, 1<<20)
+    for {
+        line, err := in.ReadSlice('\n')
         if err != nil {
-            panic(err)
+            panic("read error")
         }
-
-        if len(line) == 0 {
-            continue
-        }
-
         lineCount++
-
         if line[0] == '>' && strings.HasPrefix(string(line), ">THREE") {
-            data := make([]byte, 0, lineCount*61)
-            for {
-                // Read from the three section
-                line, err := reader.ReadSlice('\n')
-                if err != nil && err != io.EOF {
-                    panic(err)
-                } else if err == io.EOF || len(line) == 0 {
-                    // End of input reached
-                    return data
-                }
-                // Append the read data to the data slice
-                data = append(data, line[:len(line)-1]...)
-            }
+            break
         }
     }
+    return
 }
 
-// WriteFrequencies returns the frequencies of the nucleotides with the given length
-func WriteFrequencies(data []byte, size int) string {
-    // Get counts
-    counts := startCount32(data, size)
-
-    // Store the map keys and values in a struct to sort them
-    type kv struct {
-        Key   uint32
-        Value int
-    }
-    var sortedCounts []kv
-    for k, v := range counts {
-        sortedCounts = append(sortedCounts, kv{k, *v})
-    }
-
-    sort.Slice(sortedCounts, func(i, j int) bool {
-        return sortedCounts[i].Value > sortedCounts[j].Value
-    })
-
-    sum := float32(len(data) - size + 1)
-    var result string
-    for _, count := range sortedCounts {
-        result += fmt.Sprintf("%v %.3f\n", decompress32(count.Key, size), 100.0*float32(count.Value)/sum)
-    }
-
-    return result
+type sequence struct {
+    nucs  string
+    count uint32
 }
 
-// WriteCount returns the number of given nucleotides in the data
-func WriteCount(data []byte, nucleotide string) string {
-    size := len(nucleotide)
+type sequenceSlice []sequence
 
-    if len(nucleotide) <= 16 {
-        // Get counts nucleotide key can fit in an uint32
-        counts := startCount32(data, size)
+func (ss sequenceSlice) Len() int {
+    return len(ss)
+}
 
-        key := compress32([]byte(toNum.Replace(nucleotide)))
+func (ss sequenceSlice) Swap(i, j int) {
+    ss[i], ss[j] = ss[j], ss[i]
+}
 
-        count := counts[key]
-        if count == nil {
-            count = new(int)
-        }
+func (ss sequenceSlice) Less(i, j int) bool {
+    if ss[i].count == ss[j].count {
+        return ss[i].nucs > ss[j].nucs
+    }
+    return ss[i].count > ss[j].count
+}
 
-        return fmt.Sprintf("%v\t%v", *count, nucleotide)
+func frequencyReport(dna []byte, length int) string {
+    var sortedSeqs sequenceSlice
+    counts := count32(dna, length)
+    for num, pointer := range counts {
+        sortedSeqs = append(
+            sortedSeqs,
+            sequence{toChar.Replace(string(decompress32(num, length))), *pointer},
+        )
+    }
+    sort.Sort(sortedSeqs)
 
+    var buf bytes.Buffer
+    for _, sequence := range sortedSeqs {
+        buf.WriteString(fmt.Sprintf(
+            "%v %.3f\n", sequence.nucs,
+            100.0*float32(sequence.count)/float32(len(dna)-length+1)),
+        )
+    }
+    return buf.String()
+}
+
+func sequenceReport(dna []byte, sequence string) string {
+    var pointer *uint32
+    if len(sequence) <= 16 {
+        counts := count32(dna, len(sequence))
+        pointer = counts[compress32([]byte(toNum.Replace(sequence)))]
     } else {
-        // Get counts for longer nucleotides
-        counts := startCount64(data, size)
-        key := compress64([]byte(toNum.Replace(nucleotide)))
-        count := counts[key]
-        if count == nil {
-            count = new(int)
-        }
-
-        return fmt.Sprintf("%v\t%v", *count, nucleotide)
+        counts := count64(dna, len(sequence))
+        pointer = counts[compress64([]byte(toNum.Replace(sequence)))]
     }
+    var sequenceCount uint32
+    if pointer != nil {
+        sequenceCount = *pointer
+    }
+    return fmt.Sprintf("%v\t%v", sequenceCount, sequence)
 }
 
-func startCount32(data []byte, size int) map[uint32]*int {
-    maps := make([]map[uint32]*int, runtime.NumCPU())
-
-    wg := sync.WaitGroup{}
-
-    // Create a map for each goroutine we will spawn
-    for i := 0; i < len(maps); i++ {
-        maps[i] = make(map[uint32]*int)
-        wg.Add(1)
-        go calc32(data, maps[i], i, size, &wg)
-    }
-
-    wg.Wait()
-
-    // Add counts from all goroutines to the first map
-    for i := 1; i < len(maps); i++ {
-        for i2, val := range maps[i] {
-            if val == nil {
-                continue
-            }
-            if maps[0][i2] == nil {
-                maps[0][i2] = new(int)
-            }
-            *maps[0][i2] += *val
-        }
-    }
-
-    return maps[0]
-}
-
-func startCount64(data []byte, size int) map[uint64]*int {
-    maps := make([]map[uint64]*int, runtime.NumCPU())
-
-    wg := sync.WaitGroup{}
-
-    // Create a map for each goroutine we will spawn
-    for i := 0; i < len(maps); i++ {
-        maps[i] = make(map[uint64]*int)
-        wg.Add(1)
-        go calc64(data, maps[i], i, size, &wg)
-    }
-
-    wg.Wait()
-
-    // Add counts from all goroutines to the first map
-    for i := 1; i < len(maps); i++ {
-        for i2, val := range maps[i] {
-            if val == nil {
-                continue
-            }
-            if maps[0][i2] == nil {
-                maps[0][i2] = new(int)
-            }
-            *maps[0][i2] += *val
-        }
-    }
-
-    return maps[0]
-}
-
-func calc32(data []byte, result map[uint32]*int, begin int, size int, wg *sync.WaitGroup) {
-    var key uint32
-    goroutineCount := uint(runtime.NumCPU())
-
-    // Init key
-    for i := 0; i < size; i++ {
-        key <<= 2
-        key |= uint32(data[i+begin])
-    }
-
-    // Create a map to do the counts in. 
-    // We don't use the map we are passed but instead return a copy of this
-
-    p := new(int)
-    *p++
-    result[key] = p
-
-    nsize := uint(size)
-    if goroutineCount < nsize {
-        nsize = goroutineCount
-    }
-
-    mask := ^uint32(math.MaxUint32 << uint(2*size))
-
-    start := uint(begin) + goroutineCount
-    end := uint(len(data) + 1 - size)
-    for idx := start; idx < end; idx += goroutineCount {
-        // Update the key with 1 byte at a time
-        for i := uint(0); i < nsize; i++ {
-            key <<= 2
-            key |= uint32(data[idx+i])
-        }
-
-        // Mask out excess information
-        key &= mask
-
-        // Get pointer to the count for this key from the map
-        // For a low number of different keys using a map with 
-        // pointers is faster than just using a value map and do: m[key]++
-        p, ok := result[key]
+func count32(dna []byte, length int) map[uint32]*uint32 {
+    counts := make(map[uint32]*uint32)
+    key := compress32(dna[0 : length-1])
+    mask := uint32(1)<<uint(2*length) - 1
+    for index := length - 1; index < len(dna); index++ {
+        key = key<<2&mask | uint32(dna[index])
+        pointer, ok := counts[key]
         if !ok {
-            p = new(int)
-            result[key] = p
+            pointer = new(uint32)
+            counts[key] = pointer
         }
-        *p++
+        *pointer++
     }
-
-    // Signal done
-    wg.Done()
+    return counts
 }
 
-func calc64(data []byte, result map[uint64]*int, begin int, size int, wg *sync.WaitGroup) {
-    var key uint64
-    goroutineCount := uint(runtime.NumCPU())
-
-    // Init key
-    for i := 0; i < size; i++ {
-        key <<= 2
-        key |= uint64(data[i+begin])
-    }
-
-    // Create a map to do the counts in. We don't use the map 
-    // we are passed but instead return a copy of this
-
-    p := new(int)
-    *p++
-    result[key] = p
-
-    nsize := uint(size)
-    if goroutineCount < nsize {
-        nsize = goroutineCount
-    }
-
-    mask := ^uint64(math.MaxUint64 << uint(2*size))
-
-    start := uint(begin) + goroutineCount
-    end := uint(len(data) + 1 - size)
-    for idx := start; idx < end; idx += goroutineCount {
-        // Update the key with 1 byte at a time
-        if uint(len(data)) < idx+nsize {
-            continue
-        }
-        for i := uint(0); i < nsize; i++ {
-            key <<= 2
-            key |= uint64(data[idx+i])
-        }
-
-        // Mask out excess information
-        key &= mask
-
-        // Get pointer to the count for this key from the map
-        // For a low number of different keys using a map with 
-        // pointers is faster than just using a value map and do: m[key]++
-        p, ok := result[key]
+func count64(dna []byte, length int) map[uint64]*uint32 {
+    counts := make(map[uint64]*uint32)
+    key := compress64(dna[0 : length-1])
+    mask := uint64(1)<<uint(2*length) - 1
+    for index := length - 1; index < len(dna); index++ {
+        key = key<<2&mask | uint64(dna[index])
+        pointer, ok := counts[key]
         if !ok {
-            p = new(int)
-            result[key] = p
+            pointer = new(uint32)
+            counts[key] = pointer
         }
-        *p++
+        *pointer++
     }
-
-    // Signal done
-    wg.Done()
-
+    return counts
 }
 
 func compress64(sequence []byte) uint64 {
@@ -323,11 +224,11 @@ func compress32(sequence []byte) uint32 {
     return num
 }
 
-func decompress32(num uint32, length int) string {
-    var sequence = make([]byte, length)
+func decompress32(num uint32, length int) (sequence []byte) {
+    sequence = make([]byte, length)
     for i := 0; i < length; i++ {
-        sequence[length-i-1] = toChar[byte(num&3)]
+        sequence[length-i-1] = byte(num & 3)
         num = num >> 2
     }
-    return string(sequence)
+    return
 }

@@ -87,7 +87,7 @@ Every program is checked at the Game's own size against the Game's published out
 | binarytrees | `binarytrees.go-2.go` | 14.36 / 14.94 | none |
 | mandelbrot | `mandelbrot.go-2.go` | 6.87 / 27.30 | `-4` (3.78) and `-1` (5.04): both compute each coordinate as `x*(2/size)`, which rounds some boundary pixels the other way from the Game's reference; on this machine their output is wrong at 200 (the Game's own output file) and at 6,000. Both build and run; the output is not the Game's |
 | fasta | `fasta.go-2.go` | 1.48 / 5.49 | none |
-| knucleotide | `knucleotide.go-7.go` | 8.20 / 29.84 | none. It sizes its workers from `runtime.NumCPU()` and is right only when that is at least the largest k (18): this machine has 18 CPUs, so it is correct here (AUDIT.md G5) |
+| knucleotide | `knucleotide.go-6.go` | 8.30 / 30.04 | `-7` (8.20, the fastest): it splits each k-mer count across `runtime.NumCPU()` goroutines and gives wrong output below 18 CPUs (the largest k), so its answer depends on the machine; it happens to be right on this 18-CPU one. `-6` starts `NumCPU` workers that take whole jobs from a channel, so the count changes only the schedule; its output is C's at 25,000,000 with `GOMAXPROCS` forced to 1, 4 and 18 (AUDIT.md G5) |
 | revcomp | `revcomp.go-6.go` | 2.12 / 2.19 | none |
 | regexredux | `regexredux.go-4.go` | 14.49 / 35.00 | `-5` (3.25, the fastest): imports `github.com/GRbit/go-pcre` and calls `MustCompileJIT`. Homebrew's PCRE1 (`pcre` 8.45) was installed for it and `go-pcre` v1.0.0 is the only release with the `Matcher` method the file calls (v1.0.1 to v1.0.3 have not); it builds, then panics on its first call (`study error`), PCRE1's JIT being unavailable here |
 | pidigits | `pidigits.go-4.go` | 1.02 / 0.99 | none |
