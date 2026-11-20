@@ -1,5 +1,7 @@
-import sysl.math.max
+import sysl.cpu_count
+import sysl.math.{max, min}
 import sysl.text.parse_int
+import sysl.threads.scope
 
 enum Tree
     Leaf
@@ -14,6 +16,24 @@ check(t: &Tree) -> int
         Leaf -> 1
         Node(l, r) -> 1 + check(l) + check(r)
 
+// The trees of one depth are shared out among one thread per processor, as the Game's Rust and C++
+// programs share them: thread p builds and checks its own stretch of the iterations, and the depth's
+// total is the sum of the threads' once all of them have finished.
+total(depth: int, iterations: int) -> int
+    val parts = min(iterations, int(cpu_count()))
+    var checks: []int = [0; parts]
+
+    scope((s) ->
+        for p in 0..<parts
+            s.spawn(() ->
+                for _ in p * iterations / parts..<(p + 1) * iterations / parts do checks[p] += check(make(depth))))
+
+    var sum = 0
+
+    for c in checks do sum += c
+
+    sum
+
 main(args: []string)
     val n = parse_int(args[1]).unwrap()
     val min_depth = 4
@@ -25,10 +45,7 @@ main(args: []string)
 
     for var depth = min_depth; depth <= max_depth; depth += 2
         val iterations = 1 << (max_depth - depth + min_depth)
-        var total = 0
 
-        for _ in 0..<iterations do total += check(make(depth))
-
-        print(f"$iterations\t trees of depth $depth\t check: $total")
+        print(f"$iterations\t trees of depth $depth\t check: ${total(depth, iterations)}")
 
     print(f"long lived tree of depth $max_depth\t check: ${check(long_lived)}")

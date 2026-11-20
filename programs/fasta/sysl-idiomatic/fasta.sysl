@@ -1,8 +1,13 @@
+import sysl.cpu_count
 import sysl.math.min
-import sysl.seq.Sequence
 import sysl.text.parse_int
+import sysl.threads.{Condvar, Mutex, scope}
 
 const line_len: usize = 60
+
+// Symbols one thread draws and writes at a time: a whole number of lines, so every block but the
+// last starts and ends on a line's boundary.
+const block_len = 1024 * line_len
 
 const alu = "GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGG" +
             "GAGGCCGAGGCGGGCGGATCACCTGAGGTCAGGAGTTCGAGA" +
@@ -18,14 +23,18 @@ val iub_probabilities = [0.27, 0.12, 0.12, 0.27, 0.02, 0.02, 0.02, 0.02, 0.02, 0
 const sapiens_symbols = "acgt"
 val sapiens_probabilities = [0.3029549426680, 0.1979883004921, 0.1975473066391, 0.3015094502008]
 
-struct Random
+// The generator every thread draws from, how many symbols are still to be drawn, and the number of
+// the next block, which is the order the blocks are written in.
+struct Draws
     last: int
+    left: usize
+    block: int
 
     next(*self) -> real
         self.last = (self.last * 3877 + 29573) % 139968
 
         real(self.last) / 139968.0
-end Random
+end Draws
 
 // The sequence followed by its own first line, so every line is one slice of it.
 repeat_fasta(header: string, seq: string, n: usize)
@@ -42,38 +51,74 @@ repeat_fasta(header: string, seq: string, n: usize)
         at = (at + width) % seq.len
         left -= width
 
+// The Game's C and Rust programs share the work this way: the generator is one sequence, so a thread
+// draws a block of numbers from it under its lock and takes the block's number; it turns the draws
+// into lines of symbols on its own; and it writes them when every block before it has been written.
 // A symbol's index is how many cumulative probabilities lie below the draw. The last is never
-// counted, so a draw at the top of the range still lands on the last symbol.
-random_fasta(header: string, symbols: string, probabilities: []const real, n: usize, rng: *Random)
+// counted, so a draw at the top of the range still lands on the last symbol. The generator's state
+// comes in as `seed` and its last value goes back as the result.
+random_fasta(header: string, symbols: string, probabilities: []const real, n: usize, seed: int) -> int
     var cumul: []real = [0.0; probabilities.len]
-    var line: [61]u8
     var total = 0.0
-    var left = n
 
     for i in 0..<probabilities.len
         total += probabilities[i]
         cumul[i] = total
 
     val below = cumul[0..<cumul.len - 1]
+    var draws = Mutex.new(Draws(seed, n, 0))
+    var written = Mutex.new(0)
+    var turn = Condvar.new()
+    val shared = &draws
+    val done = &written
+    val next_turn = &turn
 
     print(header)
 
-    while left > 0
-        val width = min(line_len, left)
+    scope((s) ->
+        for _ in 0..<cpu_count()
+            s.spawn(() ->
+                var r: []real = [0.0; block_len]
+                var lines: []u8 = [0; block_len + block_len / line_len + 1]
 
-        for i in 0..<width
-            val r = rng.next()
+                loop
+                    val (block, count) = shared.with((d) ->
+                        val count = min(block_len, d.left)
 
-            line[i] = symbols.bytes[below.count_where(p -> r > p)]
+                        for i in 0..<count do r[i] = d.next()
 
-        line[width] = 10
-        putbytes(line[0..width])
-        left -= width
+                        d.left -= count
+                        d.block += 1
+                        (d.block - 1, count))
+
+                    if count == 0 then break
+
+                    var at: usize = 0
+
+                    for i in 0..<count
+                        lines[at] = symbols.bytes[below.count_where(p -> r[i] > p)]
+                        at += 1
+
+                        if (i + 1) % line_len == 0 || i + 1 == count
+                            lines[at] = 10
+                            at += 1
+
+                    val last = done.lock_raw()
+
+                    while *last != block do next_turn.wait(done)
+
+                    putbytes(lines[0..<at])
+                    *last += 1
+                    done.unlock_raw()
+                    next_turn.notify_all()))
+
+    shared.with((d) -> d.last)
 
 main(args: []string)
     val n = usize(parse_int(args[1]).unwrap())
-    var rng = Random(42)
 
     repeat_fasta(">ONE Homo sapiens alu", alu, n * 2)
-    random_fasta(">TWO IUB ambiguity codes", iub_symbols, iub_probabilities, n * 3, &rng)
-    random_fasta(">THREE Homo sapiens frequency", sapiens_symbols, sapiens_probabilities, n * 5, &rng)
+
+    val seed = random_fasta(">TWO IUB ambiguity codes", iub_symbols, iub_probabilities, n * 3, 42)
+
+    random_fasta(">THREE Homo sapiens frequency", sapiens_symbols, sapiens_probabilities, n * 5, seed)

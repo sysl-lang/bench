@@ -1,9 +1,10 @@
-import sysl.math.max
+import sysl.cpu_count
+import sysl.math.{max, min}
 import sysl.text.parse_int
+import sysl.threads.scope
 
-// Tuned: C's own node. A counted `&Tree` is a 24-byte header plus a 24-byte enum, 48 bytes against
-// C's 16, and every release goes through the counting machinery. Here a node is two raw pointers,
-// allocated with `malloc` and given back with `free` exactly as C does, so the work is C's.
+// Tuned: C's own node, two raw pointers. A counted `&Tree` is a 24-byte header plus a 24-byte enum,
+// 48 bytes against C's 16, and every release goes through the counting machinery.
 struct Node
     left: *Node
     right: *Node
@@ -11,49 +12,82 @@ struct Node
 extern malloc(n: usize) -> *Node
 extern free(p: *Node)
 
-make(depth: int) -> *Node
-    val node = malloc(sizeof(Node))
+// Tuned: the nodes of one tree come from a pool, as the Game's fastest C (an APR pool per thread),
+// C++ (a monotonic buffer per thread) and Rust (a bump arena per thread) programs take them. A pool is
+// one block big enough for a tree of its depth; a node is the next slot, and the whole tree is given
+// back at once by starting again from the first slot.
+struct Pool
+    base: *Node
+    used: usize
+
+    take(*self) -> *Node
+        val node = &self.base[self.used]
+
+        self.used += 1
+        node
+
+make(pool: *Pool, depth: int) -> *Node
+    val node = pool.take()
 
     if depth == 0
         node.left = null
         node.right = null
     else
-        node.left = make(depth - 1)
-        node.right = make(depth - 1)
+        node.left = make(pool, depth - 1)
+        node.right = make(pool, depth - 1)
 
     node
 
 check(t: *Node) -> int = if t.left == null then 1 else 1 + check(t.left) + check(t.right)
 
-delete(t: *Node)
-    if t.left != null
-        delete(t.left)
-        delete(t.right)
+nodes(depth: int) -> usize = (usize(1) << (depth + 1)) - 1
 
-    free(t)
+// One tree built in a pool of its own, checked, and given back with the pool.
+alone(depth: int) -> int
+    var pool = Pool(malloc(nodes(depth) * sizeof(Node)), 0)
+    val c = check(make(&pool, depth))
+
+    free(pool.base)
+    c
+
+// The trees of one depth are shared out among one thread per processor, as the Game's C++ and Rust
+// programs share them: thread p builds and checks its own stretch of the iterations in its own pool,
+// emptied after every tree, and the depth's total is the sum of the threads'.
+total(depth: int, iterations: int) -> int
+    val parts = min(iterations, int(cpu_count()))
+    var checks: []int = [0; parts]
+
+    scope((s) ->
+        for p in 0..<parts
+            s.spawn(() ->
+                var pool = Pool(malloc(nodes(depth) * sizeof(Node)), 0)
+
+                for _ in p * iterations / parts..<(p + 1) * iterations / parts
+                    pool.used = 0
+                    checks[p] += check(make(&pool, depth))
+
+                free(pool.base)))
+
+    var sum = 0
+
+    for c in checks do sum += c
+
+    sum
 
 main(args: []string)
     val n = parse_int(args[1]).unwrap()
     val min_depth = 4
     val max_depth = max(min_depth + 2, n)
 
-    val stretch = make(max_depth + 1)
+    print(f"stretch tree of depth ${max_depth + 1}\t check: ${alone(max_depth + 1)}")
 
-    print(f"stretch tree of depth ${max_depth + 1}\t check: ${check(stretch)}")
-    delete(stretch)
-
-    val long_lived = make(max_depth)
+    var long_pool = Pool(malloc(nodes(max_depth) * sizeof(Node)), 0)
+    val long_lived = make(&long_pool, max_depth)
 
     for var depth = min_depth; depth <= max_depth; depth += 2
         val iterations = 1 << (max_depth - depth + min_depth)
-        var total = 0
 
-        for _ in 0..<iterations
-            val tree = make(depth)
-
-            total += check(tree)
-            delete(tree)
-
-        print(f"$iterations\t trees of depth $depth\t check: $total")
+        print(f"$iterations\t trees of depth $depth\t check: ${total(depth, iterations)}")
 
     print(f"long lived tree of depth $max_depth\t check: ${check(long_lived)}")
+    free(long_pool.base)

@@ -1,22 +1,43 @@
+import sysl.cpu_count
+import sysl.math.{max, min}
 import sysl.slices.{copy, reverse}
 import sysl.text.parse_int
+import sysl.threads.scope
 
-fannkuch(n: usize) -> (int, int)
+// The first i + 1 elements turned one place to the left.
+rotate(perm: []usize, i: usize)
+    val first = perm[0]
+
+    for j in 0..<i do perm[j] = perm[j + 1]
+
+    perm[i] = first
+
+// Permutations first..<last of n, in the Game's order: the checksum and the most flips among them.
+//
+// Permutation k is reached from the identity by turning the first i + 1 elements left count[i]
+// times, for each i from n - 1 down to 1, where count is k written in the factorial number system.
+// The next permutation adds one to that count, carrying as a counter does.
+block(n: usize, first: usize, last: usize) -> (int, int)
     var perm1: []usize = [0; n]
     var perm: []usize = [0; n]
     var count: []usize = [0; n]
+    var factorial: usize = 1
     var max_flips = 0
     var checksum = 0
-    var perm_count = 0
-    var r = n
 
     for i in 0..<n do perm1[i] = i
+    for i in 1..<n do factorial *= i
 
-    loop
-        while r != 1
-            count[r - 1] = r
-            r -= 1
+    var index = first
 
+    for var i = n - 1; i > 0; i -= 1
+        count[i] = index / factorial
+        index %= factorial
+        factorial /= i
+
+        for _ in 0..<count[i] do rotate(perm1, i)
+
+    for k in first..<last
         // A permutation that starts with 0 takes no flips. The flip that brings 0 to the front is
         // counted without being made, so one that would bring it there at once needs no copy.
         if perm1[0] != 0
@@ -31,29 +52,53 @@ fannkuch(n: usize) -> (int, int)
 
                     if perm[perm[0]] == 0 then break
 
-            if flips > max_flips then max_flips = flips
+            max_flips = max(max_flips, flips)
+            checksum += if k % 2 == 0 then flips else -flips
 
-            checksum += if perm_count % 2 == 0 then flips else -flips
+        var i = 1
 
         loop
-            if r == n then return (checksum, max_flips)
+            rotate(perm1, i)
+            count[i] += 1
 
-            val first = perm1[0]
+            if count[i] <= i then break
 
-            for i in 0..<r do perm1[i] = perm1[i + 1]
+            count[i] = 0
+            i += 1
 
-            perm1[r] = first
-            count[r] -= 1
+            if i == n then break
 
-            if count[r] > 0 then break
+    (checksum, max_flips)
 
-            r += 1
-
-        perm_count += 1
-
+// The n! permutations are cut into blocks that are shared out among one thread per processor, as the
+// Game's C and Rust programs share them: thread t takes blocks t, t + threads and so on, starting each
+// from its first permutation's index, and the answers are combined once every thread has finished.
 main(args: []string)
     val n = usize(parse_int(args[1]).unwrap())
-    val (checksum, max_flips) = fannkuch(n)
+    val threads = cpu_count()
+    var total: usize = 1
+
+    for i in 2..n do total *= i
+
+    val blocks = max(1, min(total, 4 * threads))
+    var checksums: []int = [0; threads]
+    var maxima: []int = [0; threads]
+
+    scope((s) ->
+        for t in 0..<threads
+            s.spawn(() ->
+                for var b = t; b < blocks; b += threads
+                    val (checksum, flips) = block(n, b * total / blocks, (b + 1) * total / blocks)
+
+                    checksums[t] += checksum
+                    maxima[t] = max(maxima[t], flips)))
+
+    var checksum = 0
+    var max_flips = 0
+
+    for t in 0..<threads
+        checksum += checksums[t]
+        max_flips = max(max_flips, maxima[t])
 
     print(checksum)
     print(f"Pfannkuchen($n) = $max_flips")

@@ -327,3 +327,27 @@ comments are the full account):
   declarations of the PCRE2 functions in the file itself, because the org's `pcre2` package binds
   only the interpreter (`pcre2_match`) and allocates match data on every search. Its build passes
   `--link-path` to Homebrew's PCRE2 so that `@link("pcre2-8")` does not find macOS's JIT-less copy.
+
+## sysl multi-threaded (binarytrees … mandelbrot)
+
+The Game's programs run on every core, so both sysl columns of binarytrees, fannkuch-redux, fasta and
+mandelbrot do too, with sysl's own scoped threads (`sysl.threads.scope`: `s.spawn` of a closure that
+borrows the caller's arrays, every thread joined before `scope` returns) and as many threads as
+`sysl.cpu_count()` answers. Each splits the work the way the Game's fastest C, C++ and Rust entries
+split it, and does the same work as the single-threaded form it replaces; the threads only divide it.
+
+| program | how the work is shared out | `sysl-tuned` beyond `sysl-idiomatic` |
+|---|---|---|
+| binarytrees | the stretch and long-lived trees on the main thread; each depth's iterations cut into one stretch per thread (at most one per tree), each thread building and checking its own trees, the depth's checks summed after the join (Rust's and C++'s per-depth parallel loop) | C's 16-byte node of two raw pointers, taken from a pool per thread that is one block for a tree of the depth, reset after every tree: the per-thread arena of the Game's fastest C (APR pools), C++ (a monotonic buffer) and Rust (a bump arena) |
+| fannkuchredux | the n! permutations cut into blocks; a block starts from its first index written in the factorial number system and walks on with the count array; checksums summed and maxima taken after the join (the Game's C and Rust block split) | blocks taken from one atomic counter (OpenMP's dynamic schedule), 16 blocks per thread; the permutation one `<16>u8`, a flip and a rotation each one constant shuffle; `@unchecked` |
+| fasta | the repeated ALU on the main thread; for the two random sections, a thread draws a block of 1024 lines' numbers from the one generator under its `Mutex`, takes the block's number, turns the draws into lines on its own, and writes them when the block before it has been written (a `Mutex` and a `Condvar`), as the Game's C and Rust programs order their output | only the state steps happen under the lock (a `u32`, into the thread's own array), the division and the symbol lookup outside it; thresholds in one vector compare; `@unchecked` |
+| mandelbrot | rows shared out among the threads, each rendering its rows into its own stretch of one image, written once after the join (OpenMP's and rayon's row split) | rows taken from one atomic counter; the real parts of a row computed once; sixteen pixels per pass as two independent eight-lane chains; the escape test every fifth iteration |
+
+**k-nucleotide stays single-threaded.** The Game's programs count each of the seven reports in a
+thread of its own and print them in order; in sysl that is `s.spawn(() -> frequencies(codes, 1))`
+answering the report's `string`, joined in order. sysl 0.12.0 refuses it inside its own library: a
+`ScopedThread[string]`'s `join` (`library/sysl/threads/scope.sysl:92`) answers its value out of a
+`Mutex.with`, whose rule refuses a `string` (`'sysl.threads.Mutex.with' answers a value out of the
+'value' it guards … but this answers a 'string'`), though the reference says a handle's `join`
+answers what its closure answered (`reference/memory.md § A thread borrows a frame only inside a
+scope`). The program is left as it was until that is fixed, rather than written around it.

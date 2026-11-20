@@ -1,45 +1,86 @@
+import sysl.cpu_count
+import sysl.sync.Atomic
 import sysl.text.parse_int
+import sysl.threads.scope
 
 const iterations = 50
 
 val lanes: <8>real = [0, 1, 2, 3, 4, 5, 6, 7]
 val weights: <8>u8 = [128, 64, 32, 16, 8, 4, 2, 1]
 
-// One byte of the image: eight pixels on one row, computed together. A pixel
-// that has escaped keeps growing and never comes back inside, so the eight
-// iterate until every one has escaped or the iterations run out.
-octet(cr: <8>real, ci: real) -> u8
-    var zr: <8>real = 0
-    var zi: <8>real = 0
-    var tr: <8>real = 0
-    var ti: <8>real = 0
+// Two bytes of the image, sixteen pixels on one row, as two independent chains of eight so that
+// the two multiply chains overlap.
+//
+// Tuned: the escape test runs every fifth iteration rather than every one. A pixel that has
+// escaped only grows (or overflows to infinity or NaN, which fail `<= 4.0` too), so the
+// iterations past its escape cannot bring it back inside, and the image is the same.
+pair(cr0: <8>real, cr1: <8>real, ci: real) -> (u8, u8)
+    var zr0: <8>real = 0
+    var zi0: <8>real = 0
+    var tr0: <8>real = 0
+    var ti0: <8>real = 0
+    var zr1: <8>real = 0
+    var zi1: <8>real = 0
+    var tr1: <8>real = 0
+    var ti1: <8>real = 0
 
-    // Tuned: the escape test runs every fifth iteration rather than every one. A pixel that has
-    // escaped only grows (or overflows to infinity or NaN, which fail `<= 4.0` too), so the
-    // iterations past its escape cannot bring it back inside, and the image is the same.
     for _ in 0..<iterations / 5
-        if !(tr + ti <= 4.0).any() then break
+        if !(tr0 + ti0 <= 4.0).any() && !(tr1 + ti1 <= 4.0).any() then break
 
         for _ in 0..<5
-            zi = 2.0 * zr * zi + ci
-            zr = tr - ti + cr
-            tr = zr * zr
-            ti = zi * zi
+            zi0 = 2.0 * zr0 * zi0 + ci
+            zi1 = 2.0 * zr1 * zi1 + ci
+            zr0 = tr0 - ti0 + cr0
+            zr1 = tr1 - ti1 + cr1
+            tr0 = zr0 * zr0
+            tr1 = zr1 * zr1
+            ti0 = zi0 * zi0
+            ti1 = zi1 * zi1
 
-    (tr + ti <= 4.0).select(weights, 0).sum()
+    ((tr0 + ti0 <= 4.0).select(weights, 0).sum(), (tr1 + ti1 <= 4.0).select(weights, 0).sum())
 
+// Row y of an n by n image, into its own bytes, from the real parts every row shares.
+render(row: []u8, crs: []<8>real, y: usize, n: usize)
+    val ci = 2.0 * real(y) / real(n) - 1.0
+    var byte = 0
+
+    @unchecked
+        while byte + 1 < row.len
+            val (a, b) = pair(crs[byte], crs[byte + 1], ci)
+
+            row[byte] = a
+            row[byte + 1] = b
+            byte += 2
+
+        if byte < row.len then row[byte] = pair(crs[byte], crs[byte], ci).0
+
+    if n % 8 != 0 then row[n / 8] = row[n / 8] & (0xFF << (8 - n % 8))
+
+// The rows are shared out among one thread per processor, as the Game's C, C++ and Rust programs
+// share them. Tuned: each thread takes the next row from one shared counter (OpenMP's dynamic
+// schedule, rayon's work stealing), so a thread given the cheap rows outside the set is not left
+// idle; the real parts of a row's pixels are computed once, as C's `Crvs` are.
 main(args: []string)
     val n = usize(parse_int(args[1]).unwrap())
-    var row: []u8 = [0; (n + 7) / 8]
+    val width = (n + 7) / 8
+    var image: []u8 = [0; width * n]
+    var crs: []<8>real = [0; width]
+
+    for byte in 0..<width do crs[byte] = 2.0 * (lanes + real(byte * 8)) / real(n) - 1.5
+
+    var next = Atomic(0)
+    val rows = &next
+
+    scope((s) ->
+        for _ in 0..<cpu_count()
+            s.spawn(() ->
+                loop
+                    val y = usize(rows.add(1))
+
+                    if y >= n then break
+
+                    render(image[y * width..<(y + 1) * width], crs, y, n)))
 
     print("P4")
     print(n, n)
-
-    for y in 0..<n
-        val ci = 2.0 * real(y) / real(n) - 1.0
-
-        for byte in 0..<row.len do row[byte] = octet(2.0 * (lanes + real(byte * 8)) / real(n) - 1.5, ci)
-
-        if n % 8 != 0 then row[n / 8] = row[n / 8] & (0xFF << (8 - n % 8))
-
-        putbytes(row)
+    putbytes(image)

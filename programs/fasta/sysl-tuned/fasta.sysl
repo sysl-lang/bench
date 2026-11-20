@@ -1,8 +1,14 @@
+import sysl.cpu_count
 import sysl.math.min
 import sysl.slices.copy
 import sysl.text.parse_int
+import sysl.threads.{Condvar, Mutex, scope}
 
 const line_len: usize = 60
+
+// Symbols one thread draws and writes at a time: a whole number of lines, so every block but the
+// last starts and ends on a line's boundary.
+const block_len = 1024 * line_len
 
 const alu = "GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGG" +
             "GAGGCCGAGGCGGGCGGATCACCTGAGGTCAGGAGTTCGAGA" +
@@ -18,8 +24,12 @@ val iub_probabilities = [0.27, 0.12, 0.12, 0.27, 0.02, 0.02, 0.02, 0.02, 0.02, 0
 const sapiens_symbols = "acgt"
 val sapiens_probabilities = [0.3029549426680, 0.1979883004921, 0.1975473066391, 0.3015094502008]
 
-// Lines written per `putbytes`: one call per block, not one per line.
-const block_lines: usize = 1024
+// The generator every thread draws from, how many symbols are still to be drawn, and the number of
+// the next block, which is the order the blocks are written in.
+struct Draws
+    state: u32
+    left: usize
+    block: int
 
 // The sequence followed by its own first line, so every line is one slice of it.
 //
@@ -27,7 +37,7 @@ const block_lines: usize = 1024
 // call and a newline per line.
 repeat_fasta(header: string, seq: string, n: usize)
     val wrapped = (seq + seq[0..<line_len]).bytes
-    var block: []u8 = [0; block_lines * (line_len + 1)]
+    var block: []u8 = [0; 1024 * (line_len + 1)]
     var from: usize = 0
     var left = n
 
@@ -47,55 +57,84 @@ repeat_fasta(header: string, seq: string, n: usize)
 
         putbytes(block[0..<at])
 
-// A symbol's index is how many cumulative probabilities lie below the draw. The last is never
-// counted, so a draw at the top of the range still lands on the last symbol.
+// The Game's C and Rust programs share the work this way: the generator is one sequence, so a thread
+// draws a block of numbers from it under its lock and takes the block's number; it turns the draws
+// into lines of symbols on its own; and it writes them when every block before it has been written.
+// A symbol's index is how many cumulative probabilities lie below the draw. The generator's state
+// comes in as `seed` and its last value goes back as the result.
 //
-// The generator's state comes in as `seed` and its last value goes back as the result.
-//
-// Tuned: the state is a local `u32` for the whole run, where a `Random` behind a pointer is
-// reloaded through it every symbol (FINDINGS 2); `u32`, as in C, because the state's update is the
-// loop's critical path and an unsigned remainder by a constant is one instruction shorter. The
-// thresholds sit in one `W`-lane vector, padded with 2.0, which no draw exceeds, so the count is
-// one lane-wise compare and a sum in place of a chain of scalar compares. Lines are gathered into
-// one block and written with one `putbytes`.
+// Tuned: under the lock a thread only steps the state, a `u32` as in C, into its own block of states,
+// so the one sequential part of the program is the generator's own critical path; the division to a
+// probability happens outside it. The thresholds sit in one `W`-lane vector, padded with 2.0, which
+// no draw exceeds, so a symbol's index is one lane-wise compare and a sum.
 random_fasta[const W: usize](header: string, symbols: string, probabilities: []const real, n: usize, seed: u32) -> u32
     var thresholds: [W]real = [2.0; W]
-    var block: []u8 = [0; block_lines * (line_len + 1)]
     var total = 0.0
-    var left = n
-    var state = seed
 
     for i in 0..<probabilities.len - 1
         total += probabilities[i]
         thresholds[i] = total
 
     val below: <W>real = thresholds.load(0)
-    val one: <W>u64 = 1
+    var draws = Mutex.new(Draws(seed, n, 0))
+    var written = Mutex.new(0)
+    var turn = Condvar.new()
+    val shared = &draws
+    val done = &written
+    val next_turn = &turn
 
     print(header)
 
-    while left > 0
-        var at: usize = 0
+    scope((s) ->
+        for _ in 0..<cpu_count()
+            s.spawn(() ->
+                var states: []u32 = [0; block_len]
+                var lines: []u8 = [0; block_len + block_len / line_len + 1]
+                val one: <W>u64 = 1
 
-        while left > 0 && at < block.len
-            val width = min(line_len, left)
+                loop
+                    val (block, count) = shared.with((d) ->
+                        val count = min(block_len, d.left)
+                        var state = d.state
 
-            @unchecked
-                for i in 0..<width
-                    state = (state * 3877 + 29573) % 139968
+                        @unchecked
+                            for i in 0..<count
+                                state = (state * 3877 + 29573) % 139968
+                                states[i] = state
 
-                    val r = real(state) / 139968.0
+                        d.state = state
+                        d.left -= count
+                        d.block += 1
+                        (d.block - 1, count))
 
-                    block[at + i] = symbols.bytes[(r > below).select(one, 0).sum()]
+                    if count == 0 then break
 
-                block[at + width] = 10
+                    var at: usize = 0
+                    var i: usize = 0
 
-            at += width + 1
-            left -= width
+                    @unchecked
+                        while i < count
+                            val width = min(line_len, count - i)
 
-        putbytes(block[0..<at])
+                            for j in 0..<width
+                                val r = real(states[i + j]) / 139968.0
 
-    state
+                                lines[at + j] = symbols.bytes[(r > below).select(one, 0).sum()]
+
+                            lines[at + width] = 10
+                            at += width + 1
+                            i += width
+
+                    val last = done.lock_raw()
+
+                    while *last != block do next_turn.wait(done)
+
+                    putbytes(lines[0..<at])
+                    *last += 1
+                    done.unlock_raw()
+                    next_turn.notify_all()))
+
+    shared.with((d) -> d.state)
 
 main(args: []string)
     val n = usize(parse_int(args[1]).unwrap())

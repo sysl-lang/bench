@@ -1,4 +1,6 @@
+import sysl.cpu_count
 import sysl.text.parse_int
+import sysl.threads.scope
 
 const iterations = 50
 
@@ -24,18 +26,28 @@ octet(cr: <8>real, ci: real) -> u8
 
     (tr + ti <= 4.0).select(weights, 0).sum()
 
+// Row y of an n by n image, into its own bytes.
+render(row: []u8, y: usize, n: usize)
+    val ci = 2.0 * real(y) / real(n) - 1.0
+
+    for byte in 0..<row.len do row[byte] = octet(2.0 * (lanes + real(byte * 8)) / real(n) - 1.5, ci)
+
+    if n % 8 != 0 then row[n / 8] = row[n / 8] & (0xFF << (8 - n % 8))
+
+// The rows are shared out among one thread per processor, as the Game's C, C++ and Rust programs
+// share them: thread t renders rows t, t + threads, t + 2 threads and so on, each into its own
+// stretch of one image, which is written once every thread has finished.
 main(args: []string)
     val n = usize(parse_int(args[1]).unwrap())
-    var row: []u8 = [0; (n + 7) / 8]
+    val width = (n + 7) / 8
+    var image: []u8 = [0; width * n]
+    val threads = cpu_count()
+
+    scope((s) ->
+        for t in 0..<threads
+            s.spawn(() ->
+                for var y = t; y < n; y += threads do render(image[y * width..<(y + 1) * width], y, n)))
 
     print("P4")
     print(n, n)
-
-    for y in 0..<n
-        val ci = 2.0 * real(y) / real(n) - 1.0
-
-        for byte in 0..<row.len do row[byte] = octet(2.0 * (lanes + real(byte * 8)) / real(n) - 1.5, ci)
-
-        if n % 8 != 0 then row[n / 8] = row[n / 8] & (0xFF << (8 - n % 8))
-
-        putbytes(row)
+    putbytes(image)

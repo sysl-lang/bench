@@ -1,8 +1,14 @@
+import sysl.cpu_count
+import sysl.math.{max, min}
+import sysl.sync.Atomic
 import sysl.text.parse_int
+import sysl.threads.scope
 
-// Tuned: a permutation of up to 16 elements is one `<16>u8` register, and flipping its first k + 1
-// elements is one constant shuffle, where a scalar `reverse` swaps one pair at a time. A shuffle's
-// lanes are part of the instruction, so `flip` dispatches on k to one shuffle per prefix length.
+// Tuned: a permutation of up to 16 elements is one `<16>u8` register; flipping its first k + 1
+// elements, and turning its first i + 1 one place left, are each one constant shuffle, where a
+// scalar loop moves one element at a time (the `pshufb` form of the Game's fastest C and Rust
+// programs, here NEON's `TBL`). A shuffle's lanes are part of the instruction, so `flip` and
+// `rotate` dispatch on the length to one shuffle per prefix.
 
 // The lanes that reverse the first k + 1 and leave the rest where they are.
 const reversal(k: usize) -> [16]usize
@@ -12,7 +18,17 @@ const reversal(k: usize) -> [16]usize
 
     lanes
 
+// The lanes that turn the first i + 1 one place left and leave the rest where they are.
+const rotation(i: usize) -> [16]usize
+    var lanes: [16]usize = [0; 16]
+
+    for j in 0..<16 do lanes[j] = if j < i then j + 1 else if j == i then 0 else j
+
+    lanes
+
 flipped[const K: usize](p: <16>u8) -> <16>u8 = p.shuffle(reversal(K))
+
+rotated[const I: usize](p: <16>u8) -> <16>u8 = p.shuffle(rotation(I))
 
 flip(p: <16>u8, k: u8) -> <16>u8
     k match
@@ -33,25 +49,54 @@ flip(p: <16>u8, k: u8) -> <16>u8
         15 -> flipped[15](p)
         _ -> p
 
-fannkuch(n: usize) -> (int, int)
-    var perm1: [16]u8 = [0; 16]
+rotate(p: <16>u8, i: usize) -> <16>u8
+    i match
+        1 -> rotated[1](p)
+        2 -> rotated[2](p)
+        3 -> rotated[3](p)
+        4 -> rotated[4](p)
+        5 -> rotated[5](p)
+        6 -> rotated[6](p)
+        7 -> rotated[7](p)
+        8 -> rotated[8](p)
+        9 -> rotated[9](p)
+        10 -> rotated[10](p)
+        11 -> rotated[11](p)
+        12 -> rotated[12](p)
+        13 -> rotated[13](p)
+        14 -> rotated[14](p)
+        _ -> rotated[15](p)
+
+val identity: <16>u8 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+// Permutations first..<last of n, in the Game's order: the checksum and the most flips among them.
+//
+// Permutation k is reached from the identity by turning the first i + 1 elements left count[i]
+// times, for each i from n - 1 down to 1, where count is k written in the factorial number system.
+// The next permutation adds one to that count, carrying as a counter does.
+block(n: usize, first: usize, last: usize) -> (int, int)
     var count: [16]usize = [0; 16]
+    var perm1 = identity
+    var factorial: usize = 1
     var max_flips = 0
     var checksum = 0
-    var perm_count = 0
-    var r = n
 
-    for i in 0..<n do perm1[i] = u8(i)
+    for i in 1..<n do factorial *= i
+
+    var index = first
+
+    for var i = n - 1; i > 0; i -= 1
+        count[i] = index / factorial
+        index %= factorial
+        factorial /= i
+
+        for _ in 0..<count[i] do perm1 = rotate(perm1, i)
 
     @unchecked
-        loop
-            while r != 1
-                count[r - 1] = r
-                r -= 1
-
+        for k in first..<last
             // A permutation that starts with 0 takes no flips; the flips are made until 0 is first.
             if perm1[0] != 0
-                var p: <16>u8 = perm1.load(0)
+                var p = perm1
                 var flips = 0
 
                 loop
@@ -60,29 +105,60 @@ fannkuch(n: usize) -> (int, int)
 
                     if p[0] == 0 then break
 
-                if flips > max_flips then max_flips = flips
+                max_flips = max(max_flips, flips)
+                checksum += if k % 2 == 0 then flips else -flips
 
-                checksum += if perm_count % 2 == 0 then flips else -flips
+            var i = 1
 
             loop
-                if r == n then return (checksum, max_flips)
+                perm1 = rotate(perm1, i)
+                count[i] += 1
 
-                val first = perm1[0]
+                if count[i] <= i then break
 
-                for i in 0..<r do perm1[i] = perm1[i + 1]
+                count[i] = 0
+                i += 1
 
-                perm1[r] = first
-                count[r] -= 1
+                if i == n then break
 
-                if count[r] > 0 then break
+    (checksum, max_flips)
 
-                r += 1
-
-            perm_count += 1
-
+// The n! permutations are cut into blocks that are shared out among one thread per processor, as the
+// Game's C and Rust programs share them, each block starting from its first permutation's index.
+// Tuned: a thread takes the next block from one shared counter (OpenMP's dynamic schedule, rayon's
+// work stealing), so the blocks with long flip runs do not leave the other threads idle at the end.
 main(args: []string)
     val n = usize(parse_int(args[1]).unwrap())
-    val (checksum, max_flips) = fannkuch(n)
+    val threads = cpu_count()
+    var total: usize = 1
+
+    for i in 2..n do total *= i
+
+    val blocks = max(1, min(total, 16 * threads))
+    var checksums: []int = [0; threads]
+    var maxima: []int = [0; threads]
+    var next = Atomic(0)
+    val taken = &next
+
+    scope((s) ->
+        for t in 0..<threads
+            s.spawn(() ->
+                loop
+                    val b = usize(taken.add(1))
+
+                    if b >= blocks then break
+
+                    val (checksum, flips) = block(n, b * total / blocks, (b + 1) * total / blocks)
+
+                    checksums[t] += checksum
+                    maxima[t] = max(maxima[t], flips)))
+
+    var checksum = 0
+    var max_flips = 0
+
+    for t in 0..<threads
+        checksum += checksums[t]
+        max_flips = max(max_flips, maxima[t])
 
     print(checksum)
     print(f"Pfannkuchen($n) = $max_flips")
