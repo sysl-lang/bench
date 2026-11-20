@@ -36,6 +36,8 @@ energy(bodies: []const Body) -> real
 
     e
 
+// One thread, as every one of the Game's fastest nbody programs (C gcc-9, C++ g++-0, Rust-9): a step
+// needs the positions the step before it wrote, and five bodies are too little work to share out.
 advance(bodies: []Body, dt: real)
     for i in 0..<bodies.len
         for j in i + 1..<bodies.len

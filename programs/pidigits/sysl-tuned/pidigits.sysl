@@ -1,15 +1,24 @@
-import sysl.math.bigint.{BigInt, div_rem, from_int, mul_long}
+import sh.sysl.gmp.Int
 import sysl.text.{parse_int, str_builder}
 
-// Gibbons' unbounded spigot in Mr Ledrug's form over the standard library's BigInt, with one
-// division per candidate digit: q = (3·num + acc)/den with remainder r, and the (4·num + acc)/den
-// digit is the same one exactly when r + num < den. BigInt has no in-place arithmetic, so that is
-// the whole difference from sysl-idiomatic.
+// (num·nth + acc) / den, truncated, into tmp.
+extract(num: Int, acc: Int, den: Int, tmp: Int, nth: long) -> ulong
+    tmp.set_mul(num, nth)
+    tmp.add_assign(acc)
+    tmp.div_assign(den)
+    tmp.low_ulong()
+
+// Gibbons' unbounded spigot in Mr Ledrug's form over GMP through the sysl-lang/gmp package, written
+// in place as the Game's fastest C and C++ entries write it: no integer is allocated in the loop, and
+// two divisions per candidate digit (one `mpz_tdiv_qr` whose remainder decides the second digit
+// measured slower in C; SOURCES.md). One thread, as every one of the Game's fastest pidigits programs:
+// each step needs the one before it.
 main(args: []string)
     val n = parse_int(args[1]).unwrap()
-    var acc = from_int(0)
-    var den = from_int(1)
-    var num = from_int(1)
+    val acc = Int.of(0)
+    val den = Int.of(1)
+    val num = Int.of(1)
+    val tmp = Int.of(0)
     var line = str_builder()
     var i = 0
     var k: long = 0
@@ -19,27 +28,27 @@ main(args: []string)
 
         val k2 = k * 2 + 1
 
-        acc = mul_long(acc + mul_long(num, 2), k2)
-        den = mul_long(den, k2)
-        num = mul_long(num, k)
+        acc.add_mul(num, 2)
+        acc.mul_assign(k2)
+        den.mul_assign(k2)
+        num.mul_assign(k)
 
         if num > acc then continue
 
-        val (q, r) = div_rem(mul_long(num, 3) + acc, den)
+        val d = extract(num, acc, den, tmp, 3)
 
-        if r + num >= den then continue
+        if d != extract(num, acc, den, tmp, 4) then continue
 
-        val digit = q.to_long().unwrap()
-
-        line.push_int(digit)
+        line.push_uint(d)
         i += 1
 
         if i % 10 == 0
             print(s"${line.finish()}\t:$i")
             line = str_builder()
 
-        acc = mul_long(acc - mul_long(den, digit), 10)
-        num = mul_long(num, 10)
+        acc.sub_mul(den, long(d))
+        acc.mul_assign(10)
+        num.mul_assign(10)
     end while
 
     if i % 10 != 0

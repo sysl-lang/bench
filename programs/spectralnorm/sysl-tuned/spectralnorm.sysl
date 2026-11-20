@@ -1,50 +1,92 @@
+import sysl.math.min
 import sysl.text.parse_int
+import sysl.threads.{barrier, scope}
 
-// The denominator of A[i][j], as a double. It stays scalar integer
-// arithmetic: a 64-bit lane multiply has no vector instruction, so a
-// `<2>usize` form moves every lane out to a general register and back.
-a(i: usize, j: usize) -> real = real((i + j) * (i + j + 1) / 2 + i + 1)
+// The denominators of A[i][j..j+3] (or of Aᵀ's row i, A[j..j+3][i]): (i+j)(i+j+1)/2 plus the A row
+// index plus one. Every value is an integer below 2^27, so it is exact in double.
+denominators(i: real, j: <4>real, transpose: bool) -> <4>real
+    val s = j + i
 
-// Two columns per step, as in the Rust program: the two denominators
-// meet the two vector elements in one two-lane divide.
+    s * (s + 1) * 0.5 + (if transpose then j else <4>real(i)) + 1
+
+// One row of a 4×4 tile, in the form of the Game's fastest C (`spectralnorm.gcc-6`): the row's sum
+// u0/d0 + … + u3/d3 is (u0·d1d2d3 + … + u3·d0d1d2) / (d0d1d2d3), so it answers the products of the
+// other three denominators times u, and the product of all four. A row then costs one divide shared
+// with three other rows, where it cost four.
+outfix(d: <4>real, u: <4>real) -> (<4>real, real)
+    val f = d.shuffle([1, 0, 3, 2])
+    val p = d * f
+    val t = p.shuffle([2, 3, 0, 1])
+
+    (t * f * u, (t * p)[0])
+
+// out[lo..<hi] = A·v (or Aᵀ·v), four rows at a time over 4×4 tiles. lo, hi and v.len are multiples
+// of four; v's padding is zero, so it adds nothing.
 //
-// Tuned: `@unchecked`, since every load is a pair inside `v`; the check was a compare and branch
-// in the inner loop.
-times(v: []const real, out: []real)
+// Tuned: `@unchecked`, since every load and store is four elements inside `v` or `out`.
+multiply(v: []const real, out: []real, lo: usize, hi: usize, transpose: bool)
+    val lanes: <4>real = [0, 1, 2, 3]
+
     @unchecked
-        for i in 0..<out.len
-            var sum: <2>real = 0
+        for var i = lo; i < hi; i += 4
+            var s0: <4>real = 0
+            var s1: <4>real = 0
+            var s2: <4>real = 0
+            var s3: <4>real = 0
+            val row = real(i)
 
-            for j in 0..<v.len / 2
-                val top: <2>real = v.load(2 * j)
-                sum += top / [a(i, 2 * j), a(i, 2 * j + 1)]
+            for var j = 0; j < v.len; j += 4
+                val u: <4>real = v.load(j)
+                val cols = lanes + real(j)
+                val (f0, p0) = outfix(denominators(row, cols, transpose), u)
+                val (f1, p1) = outfix(denominators(row + 1, cols, transpose), u)
+                val (f2, p2) = outfix(denominators(row + 2, cols, transpose), u)
+                val (f3, p3) = outfix(denominators(row + 3, cols, transpose), u)
+                val inv = 1.0 / <4>real([p0, p1, p2, p3])
 
-            out[i] = sum.sum()
+                s0 += f0 * inv[0]
+                s1 += f1 * inv[1]
+                s2 += f2 * inv[2]
+                s3 += f3 * inv[3]
 
-times_transpose(v: []const real, out: []real)
-    @unchecked
-        for i in 0..<out.len
-            var sum: <2>real = 0
-
-            for j in 0..<v.len / 2
-                val top: <2>real = v.load(2 * j)
-                sum += top / [a(2 * j, i), a(2 * j + 1, i)]
-
-            out[i] = sum.sum()
-
-times_a_transpose_a(v: []const real, out: []real, tmp: []real)
-    times(v, tmp)
-    times_transpose(tmp, out)
+            out.store(i, <4>real([s0.sum(), s1.sum(), s2.sum(), s3.sum()]))
 
 main(args: []string)
     val n = usize(parse_int(args[1]).unwrap())
-    var u: []real = [1.0; n]
-    var v: []real = [0.0; n]
-    var tmp: []real = [0.0; n]
+    // Rounded up to whole tiles; the rows past n are kept at zero.
+    val n4 = (n + 3) / 4 * 4
+    var u: []real = [0.0; n4]
+    var v: []real = [0.0; n4]
+    var tmp: []real = [0.0; n4]
 
-    for _ in 0..<10
-        times_a_transpose_a(u, v, tmp)
-        times_a_transpose_a(v, u, tmp)
+    for i in 0..<n do u[i] = 1
+
+    // One thread per processor for the whole run, each owning a band of whole tiles of every product,
+    // with a barrier between products — an OpenMP `parallel for schedule(static)` per product, as
+    // gcc-6 has, without starting threads forty times.
+    val threads = cpu_count()
+    val band = ((n4 / 4 + threads - 1) / threads) * 4
+    val meet = barrier(threads)
+
+    scope((s) ->
+        for t in 0..<threads
+            val lo = min(t * band, n4)
+            val hi = min(lo + band, n4)
+
+            s.spawn(() ->
+                // A product of A, then of Aᵀ, over this band, waiting for every band of the one before.
+                val step = (from: []const real, to: []real, transpose: bool) ->
+                    multiply(from, to, lo, hi, transpose)
+
+                    if hi == n4 && lo < hi then for i in n..<n4 do to[i] = 0
+
+                    meet.wait()
+
+                for _ in 0..<10
+                    step(u, tmp, false)
+                    step(tmp, v, true)
+                    step(v, tmp, false)
+                    step(tmp, u, true)))
 
     var vbv = 0.0
     var vv = 0.0

@@ -1,26 +1,32 @@
+import sysl.math.min
 import sysl.text.parse_int
+import sysl.threads.scope
 
 a(i: usize, j: usize) -> real = 1.0 / real((i + j) * (i + j + 1) / 2 + i + 1)
 
-times(v: []const real, out: []real)
-    for i in 0..<out.len
-        var sum = 0.0
+// out = A·v, or Aᵀ·v. The rows are dealt out in one band per processor, each band on a scoped thread
+// of its own, as the Game's OpenMP and Rust programs share out each product's rows.
+times(v: []const real, out: []real, transpose: bool)
+    val bands = cpu_count()
+    val size = (out.len + bands - 1) / bands
 
-        for j in 0..<v.len do sum += a(i, j) * v[j]
+    scope((s) ->
+        for b in 0..<bands
+            val lo = min(b * size, out.len)
+            val rows = out[lo..<min(lo + size, out.len)]
 
-        out[i] = sum
+            s.spawn(() ->
+                for r in 0..<rows.len
+                    val i = lo + r
+                    var sum = 0.0
 
-times_transpose(v: []const real, out: []real)
-    for i in 0..<out.len
-        var sum = 0.0
+                    for j in 0..<v.len do sum += (if transpose then a(j, i) else a(i, j)) * v[j]
 
-        for j in 0..<v.len do sum += a(j, i) * v[j]
-
-        out[i] = sum
+                    rows[r] = sum))
 
 times_a_transpose_a(v: []const real, out: []real, tmp: []real)
-    times(v, tmp)
-    times_transpose(tmp, out)
+    times(v, tmp, false)
+    times(tmp, out, true)
 
 main(args: []string)
     val n = usize(parse_int(args[1]).unwrap())

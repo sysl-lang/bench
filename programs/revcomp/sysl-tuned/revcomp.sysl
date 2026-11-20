@@ -1,10 +1,13 @@
-import sysl.buf.{Buf, buf}
-import sysl.io.stdin
 import sysl.math.min
+import sysl.sync.Atomic
 import sysl.text.Search
+import sysl.threads.scope
 
-// A full line of bases and its newline.
+// The bases on a full line, the line with its newline, and the lines a thread takes at a time (the
+// Game's fastest C, `revcomp.gcc-7`, takes 8,192).
+const width: usize = 60
 const line_len: usize = 61
+const chunk_lines: usize = 8192
 
 // complement[b] is the IUPAC complement of the base b, upper case, whatever b's case.
 complements() -> [256]u8
@@ -18,61 +21,65 @@ complements() -> [256]u8
 
     table
 
-val complement = complements()
-
-// Swaps the complements of d[a..<a + n] and d[b - n..<b], the first run read forwards and the
-// second backwards.
+// out[o..<o + count] = the complements of src[e - count..<e], read backwards: sixteen at a time as
+// gcc-7 does them, reversed by one shuffle and complemented through two sixteen-byte tables indexed by
+// a letter's low five bits (A to O, then P to Z; one `tbl` each), the rest one at a time.
 //
-// Tuned: `@unchecked`, since both runs lie inside `d` by construction.
-swap_runs(d: []u8, a: usize, b: usize, n: usize)
+// Tuned: `@unchecked`, since both runs lie inside their slices by construction.
+reverse_span(out: []u8, o: usize, src: []const u8, e: usize, count: usize, complement: [256]u8)
+    val low: <16>u8 = " TVGH  CD  M KN ".bytes.load(0)
+    val high: <16>u8 = "  YSAABW R      ".bytes.load(0)
+
     @unchecked
-        for k in 0..<n
-            val x = d[a + k]
+        var k = 0
 
-            d[a + k] = complement[d[b - 1 - k]]
-            d[b - 1 - k] = complement[x]
+        while k + 16 <= count
+            val x: <16>u8 = src.load(e - k - 16)
+            val i = x.shuffle([15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]) & 31
 
-// Reverse-complements one sequence's lines in place, leaving every newline where it was. d is the
-// lines without their final newline. Each round swaps a run from the front with a run from the back:
-// the back's newlines sit `t` bytes after a line start counted from the end, the front's 60 - t.
-reverse_complement(d: []u8)
-    val t = d.len % line_len
-    val mid = d.len / 2
-    var lo = 0
-    var hi = d.len
+            out.store(o + k, low.lookup(i) | high.lookup(i ^ 16))
+            k += 16
 
-    while lo < mid || hi > mid
-        // The front run ends where the back's line does; the back then steps over its newline.
-        var front = lo
-        var front_end = lo + min(t, mid - lo)
-        var back = hi - min(t, hi - mid)
-        var back_end = hi
+        while k < count
+            out[o + k] = complement[src[e - 1 - k]]
+            k += 1
 
-        lo = front_end
-        hi = back - min(1, back - mid)
+// Writes the reverse complement of one sequence's lines, body (every line ends in a newline), into
+// out, the same size. Output line l holds the bases n-1-60l down to n-60l-60 of the n: a run from the
+// end of one input line and, unless the lines happen to align, a run from the end of the line before.
+//
+// One thread per processor, each taking the next 8,192 output lines while any are left, as gcc-7's
+// threads do. Every chunk's place in out is known, so the chunks are written where they belong and
+// the whole is written once, where gcc-7's threads take turns writing theirs in order.
+reverse_complement(body: []const u8, out: []u8, complement: [256]u8)
+    val lines = (body.len + line_len - 1) / line_len
+    val n = body.len - lines
+    val chunks = (lines + chunk_lines - 1) / chunk_lines
+    val next: &sync Atomic[usize] = Atomic(0)
 
-        // At the middle, an odd byte left over falls on the back.
-        if back_end - back > front_end - front
-            d[back] = complement[d[back]]
-            back += 1
+    scope((s) ->
+        for _ in 0..<cpu_count()
+            s.spawn(() ->
+                loop
+                    val c = next.add(1)
 
-        swap_runs(d, front, back_end, min(front_end - front, back_end - back))
+                    if c >= chunks then break
 
-        // The front run ends at the front's newline, which it then steps over.
-        front = lo
-        front_end = lo + min(line_len - 1 - t, mid - lo)
-        back = hi - min(line_len - 1 - t, hi - mid)
-        back_end = hi
+                    for l in c * chunk_lines..<min((c + 1) * chunk_lines, lines)
+                        val o = l * line_len
+                        val top = n - 1 - l * width
+                        val count = min(width, n - l * width)
+                        // The first run ends at base `top`'s own position, the second just before
+                        // the newline that precedes it.
+                        val e = top + top / width + 1
+                        val first = min(top % width + 1, count)
 
-        lo = front_end + min(1, mid - front_end)
-        hi = back
+                        reverse_span(out, o, body, e, first, complement)
 
-        // At the middle, an odd byte left over falls on the front.
-        if front_end - front > back_end - back
-            front_end -= 1
-            d[front_end] = complement[d[front_end]]
+                        if count > first
+                            reverse_span(out, o + first, body, e - first - 1, count - first, complement)
 
-        swap_runs(d, front, back_end, min(front_end - front, back_end - back))
+                        out[o + count] = u8('\n')))
 
 extern malloc(n: usize) -> *u8
 extern realloc(p: *u8, n: usize) -> *u8
@@ -97,14 +104,18 @@ main()
 
         len += usize(got)
 
-    val bytes = storage[0..<len]
+    val data = storage[0..<len]
+    val out = malloc(len)[0..<len]
+    val complement = complements()
     var i = 0
 
-    while i < bytes.len
-        val start = bytes.index_of_byte_from(u8('\n'), i).unwrap() + 1
-        val end = bytes.index_of_byte_from(u8('>'), start).unwrap_or(bytes.len)
+    while i < data.len
+        val start = data.index_of_byte_from(u8('\n'), i).unwrap() + 1
+        val end = data.index_of_byte_from(u8('>'), start).unwrap_or(data.len)
 
-        reverse_complement(bytes[start..<end - 1])
+        for j in i..<start do out[j] = data[j]
+
+        reverse_complement(data[start..<end], out[start..<end], complement)
         i = end
 
-    putbytes(bytes)
+    putbytes(out)

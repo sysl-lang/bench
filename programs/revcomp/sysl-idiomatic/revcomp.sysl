@@ -1,10 +1,11 @@
-import sysl.buf.{Buf, buf}
 import sysl.io.{read_all, stdin}
 import sysl.math.min
-import sysl.slices.reverse
 import sysl.text.Search
+import sysl.threads.scope
 
-const line_len: usize = 60
+// The bases on a full line, and the line with its newline.
+const width: usize = 60
+const line_len: usize = 61
 
 // complement[b] is the IUPAC complement of the base b, upper case, whatever b's case.
 complements() -> [256]u8
@@ -18,42 +19,49 @@ complements() -> [256]u8
 
     table
 
-val complement = complements()
+// Where base b of a sequence sits among its lines.
+at(b: usize) -> usize = b + b / width
 
-// Writes the reverse complement of bases to out in lines of line_len.
-write_reversed(bases: []u8, out: Buf[u8])
-    reverse(bases)
+// Writes the reverse complement of one sequence's lines, body (every line ends in a newline), into
+// out, the same size. Output line l holds the bases n-1-60l down to n-60l-60 of the n, read across at
+// most one of the input's newlines. The lines are dealt out in one band per processor, each band on a
+// scoped thread, as the Game's fastest programs (C gcc-7, Rust) share out each sequence's lines.
+reverse_complement(body: []const u8, out: []u8, complement: [256]u8)
+    val lines = (body.len + line_len - 1) / line_len
+    val n = body.len - lines
+    val bands = cpu_count()
+    val size = (lines + bands - 1) / bands
 
-    for i in 0..<bases.len do bases[i] = complement[bases[i]]
+    scope((s) ->
+        for band in 0..<bands
+            val first = min(band * size, lines)
+            val last = min(first + size, lines)
 
-    var i = 0
+            s.spawn(() ->
+                for l in first..<last
+                    val o = l * line_len
+                    val top = n - 1 - l * width
+                    val count = min(width, n - l * width)
 
-    while i < bases.len
-        val end = min(i + line_len, bases.len)
+                    for k in 0..<count do out[o + k] = complement[body[at(top - k)]]
 
-        out.extend(bases[i..<end])
-        out.push(u8('\n'))
-        i = end
+                    out[o + count] = u8('\n')))
 
 main()
     var input = stdin()
     val input_bytes = read_all(&input)
     val data = input_bytes.view()
-    val out: Buf[u8] = buf()
-    var seq: Buf[u8] = buf()
+    var out: []u8 = [0; data.len]
+    val complement = complements()
     var i = 0
 
     while i < data.len
-        val end = data.index_of_byte_from(u8('\n'), i).unwrap_or(data.len - 1)
+        val start = data.index_of_byte_from(u8('\n'), i).unwrap() + 1
+        val end = data.index_of_byte_from(u8('>'), start).unwrap_or(data.len)
 
-        if data[i] == u8('>')
-            write_reversed(seq.view_mut(), out)
-            seq.clear()
-            out.extend(data[i..end])
-        else
-            seq.extend(data[i..<end])
+        for j in i..<start do out[j] = data[j]
 
-        i = end + 1
+        reverse_complement(data[start..<end], out[start..<end], complement)
+        i = end
 
-    write_reversed(seq.view_mut(), out)
-    putbytes(out.view())
+    putbytes(out)

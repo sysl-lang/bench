@@ -1,14 +1,18 @@
-// regex-redux over PCRE2 with its JIT, the library and the calls of the C program: each pattern is
-// JIT-compiled once and matched with pcre2_jit_match, which skips the interpreter's checks.
+// regex-redux over PCRE2 with its JIT, in the shape of the Game's fastest program (`regexredux.rust-7`,
+// which C `gcc-5` and C++ `g++-6` share): the input is read and its headers and newlines removed in
+// place; then the five substitutions run one after another on a thread of their own, beside the nine
+// counts, each on a thread of its own. Each pattern is JIT-compiled where it is used and matched with
+// `pcre2_jit_match`, and each thread has its own match data and JIT stack, as each of Rust's `Regex`es
+// does.
 //
 // The org's `pcre2` package binds the interpreter (`pcre2_match`) and allocates match data per
-// search, so this program declares the nine PCRE2 functions it needs itself.
+// search, so this program declares the PCRE2 functions it needs itself.
 @link("pcre2-8")
 
 import sysl.buf.{Buf, buf}
 import sysl.io.{read_all, stdin}
-import sysl.slices.as_ptr
-
+import sysl.slices.{as_ptr, copy}
+import sysl.threads.scope
 
 opaque struct Code
 opaque struct MatchData
@@ -19,9 +23,12 @@ extern "pcre2_compile_8" pcre_compile(pattern: *u8, length: usize, options: u32,
 extern "pcre2_jit_compile_8" jit_compile(code: *Code, options: u32) -> i32
 extern "pcre2_code_free_8" code_free(code: *Code)
 extern "pcre2_match_context_create_8" match_context_create(gcontext: *u8) -> *MatchContext
+extern "pcre2_match_context_free_8" match_context_free(mcontext: *MatchContext)
 extern "pcre2_jit_stack_create_8" jit_stack_create(startsize: usize, maxsize: usize, gcontext: *u8) -> *JitStack
+extern "pcre2_jit_stack_free_8" jit_stack_free(stack: *JitStack)
 extern "pcre2_jit_stack_assign_8" jit_stack_assign(mcontext: *MatchContext, callback: *u8, data: *JitStack)
 extern "pcre2_match_data_create_8" match_data_create(ovecsize: u32, gcontext: *u8) -> *MatchData
+extern "pcre2_match_data_free_8" match_data_free(md: *MatchData)
 extern "pcre2_get_ovector_pointer_8" ovector(md: *MatchData) -> *usize
 extern "pcre2_jit_match_8" jit_match(code: *Code, subject: *u8, length: usize, startoffset: usize, options: u32, md: *MatchData, mcontext: *MatchContext) -> i32
 
@@ -40,80 +47,119 @@ val variants = [
     "agggtaa[cgt]|[acg]ttaccct",
 ]
 
-val substitutions = [
-    ("tHa[Nt]", "<4>"),
-    ("aND|caN|Ha[DS]|WaS", "<3>"),
-    ("a[NSt]|BY", "<2>"),
-    ("<[^>]*>", "|"),
-    ("\\|[^|][^|]*\\|", "-"),
-]
-
-// One match context with its JIT stack, and one match data, shared by every search.
+// A JIT-compiled pattern with the match context, JIT stack and match data one thread searches with.
 struct Matcher
+    code: *Code
     ctx: *MatchContext
+    stack: *JitStack
     md: *MatchData
     ov: *usize
 
-compile(pattern: string) -> *Code
+    // The next match in s at or after pos, as its start and end.
+    find(self, s: []const u8, pos: usize) -> Option[(usize, usize)] =
+        if jit_match(self.code, as_ptr(s), s.len, pos, 0, self.md, self.ctx) > 0 then Some((self.ov[0], self.ov[1])) else None
+
+    free(self)
+        code_free(self.code)
+        match_data_free(self.md)
+        jit_stack_free(self.stack)
+        match_context_free(self.ctx)
+
+matcher(pattern: string) -> Matcher
     var err: i32 = 0
     var at: usize = 0
     val code = pcre_compile(as_ptr(pattern.bytes), pattern.len, 0, &err, &at, null)
 
     jit_compile(code, jit_complete)
-    code
+
+    val ctx = match_context_create(null)
+    val stack = jit_stack_create(16384, 16384, null)
+
+    jit_stack_assign(ctx, null, stack)
+
+    val md = match_data_create(16, null)
+
+    Matcher(code, ctx, stack, md, ovector(md))
+
+// Every match of pattern in s replaced by with, where with is no longer than any match: the text is
+// moved down over the matches in place. Answers the length left.
+squeeze(pattern: string, with: string, s: []u8) -> usize
+    val m = matcher(pattern)
+    var read: usize = 0
+    var write: usize = 0
+
+    while m.find(s, read) is Some((start, end))
+        write += copy(s[write..], s[read..<start])
+        write += copy(s[write..], with.bytes)
+        read = end
+
+    m.free()
+    write + copy(s[write..], s[read..])
+
+replace_in_place(pattern: string, with: string, d: Buf[u8]) = d.truncate(squeeze(pattern, with, d.view_mut()))
 
 // Every match of pattern in src replaced by with, appended to dst.
-replace(m: Matcher, pattern: string, with: string, src: []const u8, dst: Buf[u8])
-    val code = compile(pattern)
+replace(pattern: string, with: string, src: []const u8, dst: Buf[u8])
+    val m = matcher(pattern)
     var pos: usize = 0
 
-    while jit_match(code, as_ptr(src), src.len, pos, 0, m.md, m.ctx) >= 0
-        dst.extend(src[pos..<m.ov[0]])
+    while m.find(src, pos) is Some((start, end))
+        dst.extend(src[pos..<start])
         dst.extend(with.bytes)
-        pos = m.ov[1]
+        pos = end
 
-    code_free(code)
-    dst.extend(src[pos..<src.len])
+    dst.extend(src[pos..])
+    m.free()
 
-count(m: Matcher, pattern: string, s: []const u8) -> int
-    val code = compile(pattern)
+count(pattern: string, s: []const u8) -> int
+    val m = matcher(pattern)
     var n = 0
     var pos: usize = 0
 
-    while jit_match(code, as_ptr(s), s.len, pos, 0, m.md, m.ctx) >= 0
+    while m.find(s, pos) is Some((_, end))
         n += 1
-        pos = m.ov[1]
+        pos = end
 
-    code_free(code)
+    m.free()
     n
 
 main()
     var input = stdin()
     val data = read_all(&input)
-    val ctx = match_context_create(null)
+    val input_len = data.len()
 
-    jit_stack_assign(ctx, null, jit_stack_create(16384, 16384, null))
+    replace_in_place(">[^\n]*\n|\n", "", data)
 
-    val md = match_data_create(16, null)
-    val m = Matcher(ctx, md, ovector(md))
-    val seq: Buf[u8] = buf()
+    val seq = data.view()
+    var counts: []int = [0; variants.len]
+    val tally = counts[..]
 
-    replace(m, ">.*\n|\n", "", data.view(), seq)
+    val length = scope((s) ->
+        val chain = s.spawn(() ->
+            // The substitutions work on a copy, as Rust's do; the third lengthens the text (two bytes
+            // become three), so it alone writes into a new buffer.
+            var text: Buf[u8] = buf()
 
-    for v in variants
-        print(v, count(m, v, seq.view()))
+            text.extend(seq)
+            replace_in_place("tHa[Nt]", "<4>", text)
+            replace_in_place("aND|caN|Ha[DS]|WaS", "<3>", text)
 
-    var pre: Buf[u8] = buf()
+            var wider: Buf[u8] = buf()
 
-    pre.extend(seq.view())
+            wider.reserve(text.len() * 3 / 2)
+            replace("a[NSt]|BY", "<2>", text.view(), wider)
+            replace_in_place("<[^>]*>", "|", wider)
+            replace_in_place("\\|[^|][^|]*\\|", "-", wider)
+            wider.len())
 
-    for (pattern, with) in substitutions
-        val post: Buf[u8] = buf()
+        for i in 0..<variants.len
+            s.spawn(() -> tally[i] = count(variants[i], seq))
 
-        replace(m, pattern, with, pre.view(), post)
-        pre = post
+        chain.join())
+
+    for i in 0..<variants.len do print(variants[i], counts[i])
 
     print("")
-    print(data.len())
-    print(seq.len())
-    print(pre.len())
+    print(input_len)
+    print(seq.len)
+    print(length)

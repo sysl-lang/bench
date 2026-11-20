@@ -1,5 +1,6 @@
 import sysl.io.{read_all_text, stdin}
 import sysl.regex.regex
+import sysl.threads.scope
 
 // Each pattern and its reverse complement, with a wildcard in one position.
 val variants = [
@@ -23,22 +24,38 @@ val substitutions = [
     ("\\|[^|][^|]*\\|", "-"),
 ]
 
+// The sequence every thread reads, shared once: its bytes are given an atomic count as it is made.
+struct Sequence
+    text: string
+
 main()
     var input = stdin()
     val text = read_all_text(&input).unwrap()
 
     // `.` matches a newline in an ERE, so a header line is `>` and every character up to its newline.
-    val seq = regex(">[^\n]*\n|\n").unwrap().replace_all(text, "")
+    val seq: &sync Sequence = Sequence(regex(">[^\n]*\n|\n").unwrap().replace_all(text, ""))
+    var counts: []usize = [0; variants.len]
+    val tally = counts[..]
 
-    for v in variants
-        print(v, regex(v).unwrap().find_all(seq).len())
+    // As the Game's fastest programs (Rust #7, C gcc-5) divide it: the substitutions, one after
+    // another, on a thread of their own, beside the nine counts, each on a thread of its own.
+    val length = scope((s) ->
+        val chain = s.spawn(() ->
+            var out = seq.text
 
-    var out = seq
+            for (pattern, with) in substitutions
+                out = regex(pattern).unwrap().replace_all(out, with)
 
-    for (pattern, with) in substitutions
-        out = regex(pattern).unwrap().replace_all(out, with)
+            out.len)
+
+        for i in 0..<variants.len
+            s.spawn(() -> tally[i] = regex(variants[i]).unwrap().find_all(seq.text).len())
+
+        chain.join())
+
+    for i in 0..<variants.len do print(variants[i], counts[i])
 
     print("")
     print(text.len)
-    print(seq.len)
-    print(out.len)
+    print(seq.text.len)
+    print(length)

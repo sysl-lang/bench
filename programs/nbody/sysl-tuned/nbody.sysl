@@ -29,17 +29,44 @@ energy(bodies: []const Body) -> real
 
     e
 
+// One thread, as every one of the Game's fastest nbody programs (C gcc-9, C++ g++-0, Rust-9): a step
+// needs the positions the step before it wrote, and five bodies are too little work to share out.
+//
+// Tuned: the form of the Game's fastest C (`nbody.gcc-9`). A step takes the ten pairwise
+// differences and squared distances into arrays, then the ten magnitudes two at a time in vector
+// lanes (five square roots and five divides where there were ten of each), then the velocity
+// updates. gcc-9 replaces the square root and divide by a single-precision reciprocal square root
+// estimate refined in double; sysl has no estimate instruction to name, and AArch64's (`frsqrte`,
+// about 8 bits) needs a third refinement where x86's needs two, so the exact square root stays.
+// `@unchecked`, since every index is one of the ten pairs.
 advance(bodies: []Body, dt: real)
-    for i in 0..<bodies.len
-        for j in i + 1..<bodies.len
-            val d = bodies[i].pos - bodies[j].pos
-            val d2 = (d * d).sum()
-            val mag = dt / (d2 * d2.sqrt())
+    var d: [10]<3>real
+    var d2: [10]real
+    var mag: [10]real
 
-            bodies[i].vel -= d * bodies[j].mass * mag
-            bodies[j].vel += d * bodies[i].mass * mag
+    @unchecked
+        var k = 0
 
-    for i in 0..<bodies.len do bodies[i].pos += dt * bodies[i].vel
+        for i in 0..<bodies.len
+            for j in i + 1..<bodies.len
+                d[k] = bodies[i].pos - bodies[j].pos
+                d2[k] = (d[k] * d[k]).sum()
+                k += 1
+
+        for var p = 0; p < 10; p += 2
+            val s: <2>real = d2.load(p)
+
+            mag.store(p, dt / (s * s.sqrt()))
+
+        k = 0
+
+        for i in 0..<bodies.len
+            for j in i + 1..<bodies.len
+                bodies[i].vel -= d[k] * bodies[j].mass * mag[k]
+                bodies[j].vel += d[k] * bodies[i].mass * mag[k]
+                k += 1
+
+        for i in 0..<bodies.len do bodies[i].pos += dt * bodies[i].vel
 
 offset_momentum(bodies: []Body)
     var p: <3>real = 0

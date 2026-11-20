@@ -305,10 +305,7 @@ that would make it pointless. Where nothing beats the idiomatic program, `sysl-t
 What each `sysl-tuned` program does differently from `sysl-idiomatic` (each file's own `// Tuned:`
 comments are the full account):
 
-- **nbody**: a body's position and velocity are `<3>real`, so a pair's distance, its squared length
-  and both velocity updates are vector operations.
-- **spectralnorm**: two columns per step, as Rust does: each step loads two elements as a `<2>real`
-  and divides them by the two columns' denominators in one two-lane divide; `@unchecked`.
+- **nbody, spectralnorm, revcomp, regexredux, pidigits**: see "sysl multi-threaded" below.
 - **fannkuchredux**: the permutation is one `<16>u8` and a flip one constant shuffle chosen by a
   `match` on its length; `@unchecked`.
 - **binarytrees**: C's node, two raw pointers, from `extern malloc` and given back by `extern free`
@@ -319,11 +316,32 @@ comments are the full account):
   and the lines written a block at a time; `@unchecked`.
 - **knucleotide**: a key type whose hash is one multiply (Rust's hasher), each table sized up front,
   input read with `read(2)` into `realloc`ed storage; `@unchecked`.
-- **revcomp**: the input read into `realloc`ed storage, and each record reverse-complemented in place
-  in its line layout, a run from each end swapped at a time; `@unchecked` around the swap.
 - **regexredux**: not the same library. `sysl-idiomatic` uses the standard `sysl.regex` (POSIX ERE,
   a Pike VM; `.` matches a newline there, so the header pattern is `>[^\n]*\n|\n`) and its
   `find_all` and `replace_all`. `sysl-tuned` is C's program: PCRE2 with the JIT, through nine `extern`
   declarations of the PCRE2 functions in the file itself, because the org's `pcre2` package binds
   only the interpreter (`pcre2_match`) and allocates match data on every search. Its build passes
   `--link-path` to Homebrew's PCRE2 so that `@link("pcre2-8")` does not find macOS's JIT-less copy.
+
+## sysl multi-threaded (nbody, pidigits, regexredux, revcomp, spectralnorm)
+
+The Game programs run as the Game runs them, so each sysl program uses threads exactly where the
+Game's fastest C, C++ and Rust entries for it do (chosen 2026-11-20 from the Game's
+`performance/<program>.html`), with their decomposition and no less work. `sysl-idiomatic` uses
+sysl's own concurrency as a user would write it: `sysl.threads.scope`, whose scoped threads borrow
+the caller's arrays as views, one band of rows or lines per processor (`cpu_count()`), a `&sync`
+object to share a string. `sysl-tuned` keeps the decomposition and adds what sysl offers for speed.
+
+| program | the Game's fastest (wall / CPU s) | threads | `sysl-idiomatic` | `sysl-tuned` |
+|---|---|---|---|---|
+| nbody | C `gcc-9` 2.10 / 2.10, C++ `g++-0` 2.15 / 2.15, Rust `-9` 2.19 / 2.19 | **one**: every step needs the positions the step before wrote, and five bodies are too little work to share out; none of the fastest entries uses a second thread | unchanged | `gcc-9`'s form: the ten pairwise differences and squared distances into arrays, then the ten magnitudes two at a time in `<2>real` lanes (five square roots and five divides, not ten), then the updates; `@unchecked`. gcc-9's single-precision reciprocal-square-root estimate refined in double is not used: sysl has no estimate instruction to name, and AArch64's `frsqrte` (about 8 bits) needs a third refinement where x86's needs two (see C++ above), so the exact square root stays |
+| pidigits | Rust `-4` 0.71 / 0.71, C++ `g++-4` 0.72 / 0.71, C `gcc-2` 0.74 / 0.73 | **one**: each term needs the one before it | GMP through the `sysl-lang/gmp` package (`sysl.hocon` beside the source), written with its operators, a fresh `Int` per operation (the std `BigInt` it used before is not what the other languages compute with) | GMP in place (`add_mul`, `mul_assign`, `set_mul`, `div_assign`): no integer allocated in the loop, two divisions per candidate digit as C and C++ do. `sysl-tuned-gmp`, the earlier one-division form, is left unused |
+| spectralnorm | C `gcc-6` 0.40 / 1.59; C `gcc-4`/`-5`/`-7`, Rust, C++ `g++-6` 0.72 / 2.85 | every product's rows shared out over all processors, a barrier between products (OpenMP `parallel for schedule(static)`) | each of the 40 products opens a `scope` and spawns one band of rows per processor; the plain scalar loops | gcc-6's form: one thread per processor for the whole run, each owning a band of 4-row tiles of every product, a `Barrier` between products; 4×4 tiles of A with each row's four terms put over one common denominator (the product of all four), so a tile costs one four-lane divide where it cost four; vectors padded to whole tiles; `@unchecked`. gcc-6 divides by a single-precision reciprocal estimate refined in double; sysl divides exactly |
+| revcomp | C `gcc-7` 0.44 / 0.59, Rust 0.55 / 0.85 (C++ `g++-2`, 0.76 / 0.75, is one thread) | each sequence's lines shared out over all processors, written in order | input read whole; each sequence's output lines dealt out in one band per processor to scoped threads that write them into an output array at their own place (an output line is a run from the end of one input line and a run from the line before), then one write | gcc-7's: chunks of 8,192 output lines taken by one thread per processor from a shared `Atomic` counter, each line two runs reverse-complemented sixteen bytes at a time (a constant shuffle reverses, two sixteen-byte `lookup`s indexed by the low five bits complement, one `TBL` each); input in `realloc`ed storage. gcc-7's threads write their chunks in turn as they finish; here each chunk lands at its place in one output buffer, written once |
+| regexredux | Rust `-7` 0.78 / 2.00, C `gcc-5` 0.81 / 2.04, C++ `g++-6` 1.14 / 2.26 | after the read and the header strip, the five substitutions on one thread beside the nine counts on threads of their own | `sysl.regex`, as before (still DNF at the timed size: FINDINGS.md §9): the counts and the substitution chain on scoped threads, the sequence shared as a `&sync` object so its bytes are copied once | Rust `-7`'s: PCRE2's JIT, each thread with its own compiled pattern, match data and JIT stack; the strip and four of the substitutions in place, the one that lengthens the text (`<2>`) into a new buffer |
+
+The Game's published outputs at its sizes are in `expected/game/` where its program pages print them
+whole: nbody at 50,000,000, spectralnorm at 5,500, regexredux on its `regexredux-input5000000.txt`
+(fasta 5,000,000). pidigits and revcomp are printed truncated there, so at the timed size they are
+checked against `expected/*.sha256`, and at the small size against the Game's download files
+(`expected/ref/`).
