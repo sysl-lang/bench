@@ -1,0 +1,18 @@
+# The crates the Game's binarytrees.rust-5 names; the source is used unmodified (SOURCES.md).
+[package]
+name = "binarytrees"
+version = "0.0.0"
+edition = "2015"
+autobins = false
+
+[[bin]]
+name = "binarytrees"
+path = "binarytrees.rs"
+
+[dependencies]
+bumpalo = "3"
+rayon = "1"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1

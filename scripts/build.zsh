@@ -14,8 +14,8 @@ cd $ROOT
 # spelling of them. No other program gets these.
 GMP_INCLUDE=$(pkg-config --variable=includedir gmp) GMP_LIB=$(pkg-config --variable=libdir gmp)
 typeset -A GMP_FLAGS
-GMP_FLAGS=(c "-I$GMP_INCLUDE -L$GMP_LIB -lgmp" c-tuned "-I$GMP_INCLUDE -L$GMP_LIB -lgmp"
-           cpp "-I$GMP_INCLUDE -L$GMP_LIB -lgmp" rust "-L $GMP_LIB" rust-tuned "-L $GMP_LIB"
+GMP_FLAGS=(c "-I$GMP_INCLUDE -L$GMP_LIB -lgmp"
+           cpp "-I$GMP_INCLUDE -L$GMP_LIB -lgmp"
            swift "-I programs/pidigits/swift -Xcc -I$GMP_INCLUDE -L $GMP_LIB" zig "-L$GMP_LIB -lgmp"
            odin "-extra-linker-flags:-L$GMP_LIB"
            ada "-largs -L$GMP_LIB" fortran "-L$GMP_LIB -lgmp" c3 "-L $GMP_LIB -l gmp")
@@ -24,10 +24,31 @@ GMP_FLAGS=(c "-I$GMP_INCLUDE -L$GMP_LIB -lgmp" c-tuned "-I$GMP_INCLUDE -L$GMP_LI
 # Homebrew's copy is named outright: macOS has a libpcre2-8 of its own, built without the JIT.
 PCRE2=/opt/homebrew/opt/pcre2
 typeset -A PCRE2_FLAGS
-PCRE2_FLAGS=(c "-I$PCRE2/include -L$PCRE2/lib -lpcre2-8" c-tuned "-I$PCRE2/include -L$PCRE2/lib -lpcre2-8"
+PCRE2_FLAGS=(c "-I$PCRE2/include -L$PCRE2/lib -lpcre2-8"
              cpp "-I$PCRE2/include -I/opt/homebrew/opt/boost/include -L$PCRE2/lib -lpcre2-8"
-             rust "-L $PCRE2/lib" rust-tuned "-L $PCRE2/lib" zig "-L$PCRE2/lib -lpcre2-8"
+             zig "-L$PCRE2/lib -lpcre2-8"
              fortran "-L$PCRE2/lib -lpcre2-8" sysl-tuned "--link-path $PCRE2/lib")
+
+# The C programs are the Game's fastest entries that build unmodified here, each with the flags of its
+# Game make line beyond the common ones (SOURCES.md, the C and Rust entries). -fopenmp is Apple clang's
+# -Xpreprocessor -fopenmp with Homebrew's libomp; binary-trees links the APR pools it allocates from.
+# mandelbrot's -ffp-contract=off is the program's own "-mno-fma": the Game's Ivy Bridge has no FMA,
+# and a fused multiply-add changes which pixels escape.
+OMP=/opt/homebrew/opt/libomp APR=/opt/homebrew/opt/apr
+OPENMP=(-Xpreprocessor -fopenmp -I$OMP/include -L$OMP/lib -lomp)
+typeset -A C_FLAGS
+C_FLAGS=(binarytrees "$OPENMP -I$APR/include/apr-1 -L$APR/lib -lapr-1" fannkuchredux "$OPENMP"
+         knucleotide "$OPENMP" mandelbrot "$OPENMP -ffp-contract=off" regexredux "$OPENMP"
+         revcomp "-pthread" spectralnorm "$OPENMP")
+
+# The Rust programs build with Cargo, each from its directory's Cargo.toml (the crates its Game entry
+# names) and Cargo.lock. Crates are fetched into build/.cargo-home, so no user-wide CARGO_HOME is
+# written. target-cpu=native and codegen-units=1 (Cargo.toml), as the Game builds Rust (AUDIT.md A2).
+# rug links Homebrew's GMP and pcre2-sys finds Homebrew's PCRE2, the libraries the C programs link.
+export CARGO_HOME=$BUILD/.cargo-home CARGO_TARGET_DIR=$BUILD/.cargo-target
+export RUSTFLAGS="-C target-cpu=native"
+export C_INCLUDE_PATH=$GMP_INCLUDE LIBRARY_PATH=$GMP_LIB
+export PKG_CONFIG_PATH=$PCRE2/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
 
 failed=0
 for prog in $PROGRAMS; do
@@ -46,15 +67,14 @@ for prog in $PROGRAMS; do
       sysl-*-dev)
               SYSL_NO_CACHE=1 SYSL_LIB=$SYSL_DEV_LIB $SYSL_DEV build --release -O3 --cpu native $libs -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
       sysl-*) SYSL_NO_CACHE=1 env -u SYSL_LIB sysl build --release -O3 --cpu native $libs -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
-      c|c-tuned)
-              # -mcpu=native, not -march=native: on arm64 Apple clang -march=native means apple-m1 and
-              # the v8.7a features, while -mcpu=native is this machine's processor, as sysl's
-              # --cpu native and Rust's target-cpu=native are (AUDIT.md A1).
-              clang -std=gnu17 -O3 -mcpu=native -w -I$dir $dir/$prog.c -o $out -lm $libs >$out.log 2>&1 ;;
+      c)      # The Game's gcc -pipe -O3 -fomit-frame-pointer -march=ivybridge, with -mcpu=native, not
+              # -march=native: on arm64 Apple clang -march=native means apple-m1 and the v8.7a
+              # features, while -mcpu=native is this machine's processor, as sysl's --cpu native and
+              # Rust's target-cpu=native are (AUDIT.md A1).
+              clang -std=gnu17 -pipe -O3 -fomit-frame-pointer -mcpu=native -w -I$dir $dir/$prog.c -o $out -lm $libs ${(z)C_FLAGS[$prog]} >$out.log 2>&1 ;;
       cpp)    clang++ -std=c++20 -O3 -mcpu=native -w $dir/$prog.cpp -o $out $libs >$out.log 2>&1 ;;
-      rust|rust-tuned)
-              # codegen-units=1, as the Benchmarks Game builds Rust (AUDIT.md A2).
-              rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native -C codegen-units=1 $dir/$prog.rs -o $out $libs >$out.log 2>&1 ;;
+      rust)   cargo build --release --manifest-path $dir/Cargo.toml >$out.log 2>&1 &&
+                cp $CARGO_TARGET_DIR/release/$prog $out ;;
       swift)  swiftc -O $dir/$prog.swift -o $out $libs >$out.log 2>&1 ;;
       zig)    (cd $dir && zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded -lc --cache-dir $BUILD/.zig-cache --global-cache-dir $BUILD/.zig-global -femit-bin=$out $libs $prog.zig) >$out.log 2>&1 ;;
       go)     # Plain `go build`, as the Benchmarks Game builds Go. GOARM64=v8.7 is this machine's

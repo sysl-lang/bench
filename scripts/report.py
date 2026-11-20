@@ -14,7 +14,7 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 programs = ["nbody", "spectralnorm", "fannkuchredux", "binarytrees",
             "mandelbrot", "fasta", "knucleotide", "revcomp", "regexredux", "pidigits"]
 # Go is the one garbage-collected language (README, methodology item 9).
-columns = ["c", "c-tuned", "rust", "rust-tuned", "cpp", "zig", "odin", "c3", "ada", "fortran", "swift",
+columns = ["c", "rust", "cpp", "zig", "odin", "c3", "ada", "fortran", "swift",
            "go", "sysl-idiomatic", "sysl-tuned"]
 # A run with a second sysl compiler (SYSL_DEV, scripts/lib.zsh) has its two columns too.
 sysl_dev = os.environ.get("SYSL_DEV")
@@ -65,11 +65,13 @@ toolchains = {
 flags = {
     "sysl": "sysl build --release -O3 --cpu native (bounds checks stay on; sysl-tuned drops them inside "
             "its `@unchecked` blocks; integer overflow wraps in a release build)",
-    "c": "clang -std=gnu17 -O3 -mcpu=native (c-tuned the same; -mcpu, because Apple clang reads "
-         "-march=native on arm64 as apple-m1)",
+    "c": "clang -std=gnu17 -pipe -O3 -fomit-frame-pointer -mcpu=native, plus each Game entry's own "
+         "-fopenmp (Homebrew libomp), -pthread and libraries (SOURCES.md); -mcpu, because Apple clang "
+         "reads -march=native on arm64 as apple-m1",
     "cpp": "clang++ -std=c++20 -O3 -mcpu=native",
-    "rust": "rustc --edition 2021 -C opt-level=3 -C target-cpu=native -C codegen-units=1 (rust-tuned the "
-            "same; bounds checks stay on, overflow wraps)",
+    "rust": "cargo build --release: opt-level=3, codegen-units=1, -C target-cpu=native, edition 2015 as the "
+            "Game's bare rustc; each Game entry's crates (rayon and others, SOURCES.md); bounds checks "
+            "stay on, overflow wraps",
     "swift": "swiftc -O (bounds checks and integer-overflow traps stay on; no CPU option, so generic arm64)",
     "zig": "zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded",
     "odin": "odin build -o:speed -microarch:native (bounds checks stay on)",
@@ -159,13 +161,11 @@ def cell(e, lang, key, fmt):
 
 overall_geo = {"wall": group_geo(columns, "ratio_to_c"), "cpu": group_geo(columns, "cpu_ratio_to_c")}
 
-# The comparison a headline about speed may quote (AUDIT.md A6): each language's FASTER column, the
-# tuned one where it has one, against the faster of C's two programs on that program. The plain C
-# programs are the baseline of the tables above and are known to be weak on several programs
-# (README, "Known weaknesses of the plain columns"), so a ratio to plain C flatters every language.
-best_columns = {"c": ["c", "c-tuned"], "rust": ["rust", "rust-tuned"],
-                "sysl": ["sysl-idiomatic", "sysl-tuned"],
-                **{lang: [lang] for lang in ["cpp", "zig", "odin", "c3", "ada", "fortran", "swift", "go"]}}
+# The comparison a headline about speed may quote (AUDIT.md A6): each language's FASTER column (sysl
+# has two, idiomatic and tuned) against C on that program. C and Rust are each the Game's fastest entry
+# that builds unmodified here, so they have one column each (AUDIT.md, D-TUNED superseded).
+best_columns = {"sysl": ["sysl-idiomatic", "sysl-tuned"],
+                **{lang: [lang] for lang in ["c", "rust", "cpp", "zig", "odin", "c3", "ada", "fortran", "swift", "go"]}}
 best = {}
 for prog in common:
     e = data[prog]
@@ -217,11 +217,10 @@ lines += ["", f"Geometric mean over every program and language, C included (wall
           f"**{overall_geo['wall']:.2f}**."]
 best_langs = list(best_columns)
 lines += ["", "## Each language at its best", "",
-          "The comparison to quote. Each cell is the language's faster column on that program (its tuned "
-          "column where it has one: c-tuned, rust-tuned, sysl-tuned) as a ratio to the faster of `c` and "
-          "`c-tuned`, by wall-clock mean. The tables above divide by the plain C program, which is weak on "
-          "several programs (README, \"Known weaknesses of the plain columns\") and so flatters every "
-          "language. Only C, Rust and sysl have tuned columns; every other language is its plain program.",
+          "The comparison to quote. Each cell is the language's faster column on that program as a ratio "
+          "to `c`, by wall-clock mean. Only sysl has two columns (idiomatic and tuned); C and Rust are each "
+          "the Benchmarks Game's fastest entry that builds unmodified here, and every other language is "
+          "its one program.",
           "",
           "| program | " + " | ".join(best_langs) + " |",
           "|---|" + "---:|" * len(best_langs)]

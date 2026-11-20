@@ -1,0 +1,21 @@
+# The crates the Game's knucleotide.rust-7 names; the source is used unmodified (SOURCES.md).
+[package]
+name = "knucleotide"
+version = "0.0.0"
+edition = "2015"
+autobins = false
+
+[[bin]]
+name = "knucleotide"
+path = "knucleotide.rs"
+
+[dependencies]
+futures = "0.1"
+tokio-threadpool = "0.1"
+itertools = "0.14"
+num = "0.4"
+hashbrown = "0.15"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1

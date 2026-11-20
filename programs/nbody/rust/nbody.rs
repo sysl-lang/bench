@@ -1,204 +1,239 @@
-// The Computer Language Benchmarks Game
-// https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
-//
-// contributed by Cristi Cobzarenco
+/// The Computer Language Benchmarks Game
+/// https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
+/// 
+/// Contributed by Ilia Schelokov
 
-use std::ops::{Add, Sub, Mul};
+use std::f64::consts::PI;
+use std::ops::{Add, Sub, Mul, AddAssign, SubAssign};
+use std::default::Default;
 
-const PI: f64 = 3.141592653589793;
-const SOLAR_MASS: f64 = 4.0 * PI * PI;
-const YEAR: f64 = 365.24;
-const N_BODIES: usize = 5;
-const N_PAIRS: usize = N_BODIES * (N_BODIES - 1) / 2;
+#[derive(Clone, Debug)]
+struct Vec3D(f64, f64, f64);
 
-static BODIES: [Planet; N_BODIES] = [
-    // Sun
-    Planet {
-        pos: Vec3(0.0, 0.0, 0.0),
-        vel: Vec3(0.0, 0.0, 0.0),
-        mass: SOLAR_MASS,
-    },
-    // Jupiter
-    Planet {
-        pos: Vec3(4.84143144246472090e+00,
-                    -1.16032004402742839e+00,
-                    -1.03622044471123109e-01),
-        vel: Vec3(1.66007664274403694e-03 * YEAR,
-                    7.69901118419740425e-03 * YEAR,
-                    -6.90460016972063023e-05 * YEAR),
-        mass: 9.54791938424326609e-04 * SOLAR_MASS,
-    },
-    // Saturn
-    Planet {
-        pos: Vec3(8.34336671824457987e+00,
-                    4.12479856412430479e+00,
-                    -4.03523417114321381e-01),
-        vel: Vec3(-2.76742510726862411e-03 * YEAR,
-                    4.99852801234917238e-03 * YEAR,
-                    2.30417297573763929e-05 * YEAR),
-        mass: 2.85885980666130812e-04 * SOLAR_MASS,
-    },
-    // Uranus
-    Planet {
-        pos: Vec3(1.28943695621391310e+01,
-                    -1.51111514016986312e+01,
-                    -2.23307578892655734e-01),
-        vel: Vec3(2.96460137564761618e-03 * YEAR,
-                    2.37847173959480950e-03 * YEAR,
-                    -2.96589568540237556e-05 * YEAR),
-        mass: 4.36624404335156298e-05 * SOLAR_MASS,
-    },
-    // Neptune
-    Planet {
-        pos: Vec3(1.53796971148509165e+01,
-                    -2.59193146099879641e+01,
-                    1.79258772950371181e-01),
-        vel: Vec3(2.68067772490389322e-03 * YEAR,
-                    1.62824170038242295e-03 * YEAR,
-                    -9.51592254519715870e-05 * YEAR),
-        mass: 5.15138902046611451e-05 * SOLAR_MASS,
-    },
-];
+impl Vec3D {
+    fn sum_squares(&self) -> f64 {
+        self.0 * self.0
+            + self.1 * self.1
+            + self.2 * self.2
+    }
 
-/// A 3d Vector type with oveloaded operators to improve readability.
-#[derive(Clone, Copy)]
-struct Vec3(pub f64, pub f64, pub f64);
-
-impl Vec3 {
-    fn zero() -> Self { Vec3(0.0, 0.0, 0.0) }
-
-    fn norm(&self) -> f64 { self.squared_norm().sqrt() }
-
-    fn squared_norm(&self) -> f64 {
-        self.0 * self.0 + self.1 * self.1 + self.2 * self.2
+    fn magnitude(&self, dt: f64) -> f64 {
+        let sum = self.sum_squares();
+        dt / (sum * sum.sqrt())
     }
 }
 
-impl Add for Vec3 {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self {
-        Vec3(self.0 + rhs.0, self.1 + rhs.1, self.2 + rhs.2)
+impl Default for Vec3D {
+    fn default() -> Vec3D {
+        Vec3D(0.0, 0.0, 0.0)
     }
 }
 
-impl Sub for Vec3 {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self {
-        Vec3(self.0 - rhs.0, self.1 - rhs.1, self.2 - rhs.2)
+impl Add for &Vec3D {
+    type Output = Vec3D;
+    fn add(self, rhs: Self) -> Self::Output {
+        Vec3D(
+            self.0 + rhs.0,
+            self.1 + rhs.1,
+            self.2 + rhs.2
+        )
     }
 }
 
-impl Mul<f64> for Vec3 {
-    type Output = Self;
-    fn mul(self, rhs: f64) -> Self {
-        Vec3(self.0 * rhs, self.1 * rhs, self.2 * rhs)
+impl Sub for &Vec3D {
+    type Output = Vec3D;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Vec3D(
+            self.0 - rhs.0,
+            self.1 - rhs.1,
+            self.2 - rhs.2
+        )
     }
 }
 
-#[derive(Clone, Copy)]
-struct Planet {
-    pos: Vec3,
-    vel: Vec3,
+impl Mul<f64> for &Vec3D {
+    type Output = Vec3D;
+    fn mul(self, rhs: f64) -> Self::Output {
+        Vec3D(
+            self.0 * rhs,
+            self.1 * rhs,
+            self.2 * rhs
+        )
+    }
+}
+
+impl AddAssign for Vec3D {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+        self.1 += rhs.1;
+        self.2 += rhs.2;
+    }
+}
+
+impl SubAssign for Vec3D {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 -= rhs.0;
+        self.1 -= rhs.1;
+        self.2 -= rhs.2;
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Body {
+    position: Vec3D,
+    velocity: Vec3D,
     mass: f64,
 }
 
-/// Computes all pairwise position differences between the planets.
-fn pairwise_diffs(bodies: &[Planet; N_BODIES], diff: &mut [Vec3; N_PAIRS]) {
-    let mut bodies = bodies.iter();
-    let mut diff = diff.iter_mut();
-    while let Some(bi) = bodies.next() {
-        for bj in bodies.clone() {
-            *diff.next().unwrap() = bi.pos - bj.pos;
+const BODIES_COUNT: usize = 5;
+
+const SOLAR_MASS: f64 = 4. * PI * PI;
+const DAYS_PER_YEAR: f64 = 365.24;
+
+const INTERACTIONS: usize = BODIES_COUNT * (BODIES_COUNT - 1) / 2;
+
+const STARTING_STATE: [Body; BODIES_COUNT] = [
+    // Sun
+    Body {
+        mass: SOLAR_MASS,
+        position: Vec3D(0., 0., 0.),
+        velocity: Vec3D(0., 0., 0.),
+    },
+    // Jupiter
+    Body {
+        position: Vec3D(
+            4.841_431_442_464_72e0,
+            -1.160_320_044_027_428_4e0,
+            -1.036_220_444_711_231_1e-1,
+        ),
+        velocity: Vec3D(
+            1.660_076_642_744_037e-3 * DAYS_PER_YEAR,
+            7.699_011_184_197_404e-3 * DAYS_PER_YEAR,
+            -6.904_600_169_720_63e-5 * DAYS_PER_YEAR,
+        ),
+        mass: 9.547_919_384_243_266e-4 * SOLAR_MASS,
+    },
+    // Saturn
+    Body {
+        position: Vec3D(
+            8.343_366_718_244_58e0,
+            4.124_798_564_124_305e0,
+            -4.035_234_171_143_214e-1,
+        ),
+        velocity: Vec3D(
+            -2.767_425_107_268_624e-3 * DAYS_PER_YEAR,
+            4.998_528_012_349_172e-3 * DAYS_PER_YEAR,
+            2.304_172_975_737_639_3e-5 * DAYS_PER_YEAR,
+        ),
+        mass: 2.858_859_806_661_308e-4 * SOLAR_MASS,
+    },
+    // Uranus
+    Body {
+        position: Vec3D(
+            1.289_436_956_213_913_1e1,
+            -1.511_115_140_169_863_1e1,
+            -2.233_075_788_926_557_3e-1,
+        ),
+        velocity: Vec3D(
+            2.964_601_375_647_616e-3 * DAYS_PER_YEAR,
+            2.378_471_739_594_809_5e-3 * DAYS_PER_YEAR,
+            -2.965_895_685_402_375_6e-5 * DAYS_PER_YEAR,
+        ),
+        mass: 4.366_244_043_351_563e-5 * SOLAR_MASS,
+    },
+    // Neptune
+    Body {
+        position: Vec3D(
+            1.537_969_711_485_091_1e1,
+            -2.591_931_460_998_796_4e1,
+            1.792_587_729_503_711_8e-1,
+        ),
+        velocity: Vec3D(
+            2.680_677_724_903_893_2e-3 * DAYS_PER_YEAR,
+            1.628_241_700_382_423e-3 * DAYS_PER_YEAR,
+            -9.515_922_545_197_159e-5 * DAYS_PER_YEAR,
+        ),
+        mass: 5.151_389_020_466_114_5e-5 * SOLAR_MASS,
+    },
+];
+
+/// Steps the simulation forward by one time-step.
+fn advance(bodies: &mut [Body; BODIES_COUNT], dt: f64, steps: usize) {
+    let mut d_positions: [Vec3D; INTERACTIONS] = Default::default();
+    let mut magnitudes = [0.; INTERACTIONS];
+
+    for _ in 0 .. steps {
+        // Vectors between each pair of bodies.
+        let mut k = 0;
+        for (i, body1) in bodies.iter().enumerate() {
+            for body2 in &bodies[i + 1 ..] {
+                d_positions[k] = &body1.position - &body2.position;
+                k += 1;
+            }
+        }
+    
+        // Magnitude between each pair of bodies.
+        for (mag, d_pos) in magnitudes.iter_mut().zip(d_positions.iter()) {
+            *mag = d_pos.magnitude(dt);
+        };
+    
+        // Apply every other body's gravitation to each body's velocity.
+        let mut k = 0;
+        for i in 0 .. BODIES_COUNT - 1 {
+            let (body1, rest) = bodies[i..].split_first_mut().unwrap();
+            for body2 in rest {
+                let d_pos       = &d_positions[k];
+                let mag         = magnitudes[k];
+                body1.velocity -= d_pos * (body2.mass * mag);
+                body2.velocity += d_pos * (body1.mass * mag);
+                k += 1;
+            }
+        }
+    
+        // Update positions
+        for body in bodies.iter_mut() {
+            body.position += &body.velocity * dt;
         }
     }
 }
 
-/// Computes the magnitude of the force between each pair of planets.
-fn magnitudes(diff: &[Vec3; N_PAIRS], dt: f64, mag: &mut [f64; N_PAIRS]) {
-    for (mag, diff) in mag.iter_mut().zip(diff.iter()) {
-        let d2 = diff.squared_norm();
-        *mag = dt / (d2 * d2.sqrt());
+/// Adjust the Sun's velocity to offset system momentum.
+fn offset_momentum(bodies: &mut [Body; BODIES_COUNT]) {
+    let (sun, planets) = bodies.split_first_mut().unwrap();
+    sun.velocity = Default::default();
+    for planet in planets {
+        sun.velocity -= &planet.velocity * (planet.mass / SOLAR_MASS);
     }
 }
 
-/// Updates the velocities of the planets by computing their gravitational
-/// accelerations and performing one step of Euler integration.
-fn update_velocities(bodies: &mut [Planet; N_BODIES], dt: f64,
-                     diff: &mut [Vec3; N_PAIRS], mag: &mut [f64; N_PAIRS]) {
-    pairwise_diffs(bodies, diff);
-    magnitudes(&diff, dt, mag);
-
-    let mut bodies = &mut bodies[..];
-    let mut mag = mag.iter();
-    let mut diff = diff.iter();
-    while let Some(bi) = shift_mut_ref(&mut bodies) {
-        for bj in bodies.iter_mut() {
-            let diff = *diff.next().unwrap();
-            let mag = *mag.next().unwrap();
-            bi.vel = bi.vel - diff * (bj.mass * mag);
-            bj.vel = bj.vel + diff * (bi.mass * mag);
+/// Print the system energy.
+fn compute_energy(bodies: &mut [Body; BODIES_COUNT]) -> f64 {
+    let mut energy = 0.;
+    for (i, body1) in bodies.iter().enumerate() {
+        // Add the kinetic energy for each body.
+        energy += 0.5
+            * body1.mass
+            * body1.velocity.sum_squares();
+        // Add the potential energy between this body and every other body.
+        for body2 in &bodies[i + 1 ..] {
+            let d_pos = &body1.position - &body2.position;
+            energy -= body1.mass * body2.mass / d_pos.sum_squares().sqrt();
         }
     }
-}
-
-/// Advances the solar system by one timestep by first updating the
-/// velocities and then integrating the positions using the updated velocities.
-///
-/// Note: the `diff` & `mag` arrays are effectively scratch space. They're
-/// provided as arguments to avoid re-zeroing them every time `advance` is
-/// called.
-fn advance(mut bodies: &mut [Planet; N_BODIES], dt: f64,
-           diff: &mut [Vec3; N_PAIRS], mag: &mut [f64; N_PAIRS]) {
-    update_velocities(bodies, dt, diff, mag);
-    for body in bodies.iter_mut() {
-        body.pos = body.pos + body.vel * dt;
-    }
-}
-
-/// Computes the total energy of the solar system.
-fn energy(bodies: &[Planet; N_BODIES]) -> f64 {
-    let mut e = 0.0;
-    let mut bodies = bodies.iter();
-    while let Some(bi) = bodies.next() {
-        e += bi.vel.squared_norm() * bi.mass / 2.0
-           - bi.mass * bodies.clone()
-                             .map(|bj| bj.mass / (bi.pos - bj.pos).norm())
-                             .fold(0.0, |a, b| a + b);
-    }
-    e
-}
-
-/// Offsets the sun's velocity to make the overall momentum of the system zero.
-fn offset_momentum(bodies: &mut [Planet; N_BODIES]) {
-    let p = bodies.iter().fold(Vec3::zero(), |v, b| v + b.vel * b.mass);
-    bodies[0].vel = p * (-1.0 / bodies[0].mass);
+    energy
 }
 
 fn main() {
-    let n = std::env::args_os().nth(1)
+    let ncycles = std::env::args_os()
+        .nth(1)
         .and_then(|s| s.into_string().ok())
         .and_then(|n| n.parse().ok())
         .unwrap_or(1000);
-    let mut bodies = BODIES;
-    let mut diff = [Vec3::zero(); N_PAIRS];
-    let mut mag = [0.0f64; N_PAIRS];
+
+    let mut bodies = STARTING_STATE;
 
     offset_momentum(&mut bodies);
-    println!("{:.9}", energy(&bodies));
-
-    for _ in (0..n) {
-        advance(&mut bodies, 0.01, &mut diff, &mut mag);
-    }
-
-    println!("{:.9}", energy(&bodies));
-}
-
-/// Pop a mutable reference off the head of a slice, mutating the slice to no
-/// longer contain the mutable reference.
-fn shift_mut_ref<'a, T>(r: &mut &'a mut [T]) -> Option<&'a mut T> {
-    if r.len() == 0 { return None }
-    let tmp = std::mem::replace(r, &mut []);
-    let (h, t) = tmp.split_at_mut(1);
-    *r = t;
-    Some(&mut h[0])
+    println!("{:.9}", compute_energy(&mut bodies));
+    advance(&mut bodies, 0.01, ncycles);
+    println!("{:.9}", compute_energy(&mut bodies));
 }

@@ -1,0 +1,17 @@
+# The crates the Game's fannkuchredux.rust-4 names; the source is used unmodified (SOURCES.md).
+[package]
+name = "fannkuchredux"
+version = "0.0.0"
+edition = "2015"
+autobins = false
+
+[[bin]]
+name = "fannkuchredux"
+path = "fannkuchredux.rs"
+
+[dependencies]
+rayon = "1"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1

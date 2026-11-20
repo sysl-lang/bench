@@ -5,7 +5,7 @@ export PATH=$HOME/.local/gnat-16.1.0/bin:/Users/work/.cargo/bin:/opt/homebrew/bi
 
 PROGRAMS=(nbody spectralnorm fannkuchredux binarytrees mandelbrot fasta knucleotide revcomp)
 # Go is the one garbage-collected language (README, methodology item 9).
-LANGS=(sysl-idiomatic sysl-tuned c c-tuned rust rust-tuned cpp swift zig odin c3 ada fortran go)
+LANGS=(sysl-idiomatic sysl-tuned c rust cpp swift zig odin c3 ada fortran go)
 
 # Every program is single-threaded, so Go runs Go code on one processor, as every other language runs
 # on one thread. Its runtime's own threads (the GC's background mark work shares that one P) still

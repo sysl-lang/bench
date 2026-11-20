@@ -1,0 +1,14 @@
+# The Game's nbody.rust-3, which uses no crates; the source is used unmodified (SOURCES.md).
+[package]
+name = "nbody"
+version = "0.0.0"
+edition = "2015"
+autobins = false
+
+[[bin]]
+name = "nbody"
+path = "nbody.rs"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1

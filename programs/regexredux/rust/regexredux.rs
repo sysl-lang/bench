@@ -4,55 +4,19 @@
 // contributed by Tom Kaitchuck
 // contributed by Ryohei Machida
 
+extern crate libc;
+extern crate pcre2_sys;
+extern crate rayon;
+
 use crate::pcre2::Regex;
+use rayon::prelude::*;
 use std::cmp;
 use std::io::{self, Read};
 use std::mem;
-
-// The declarations the archive program takes from the pcre2_sys crate, written out: the build here
-// is a bare rustc with no crates, and these are the same C functions of libpcre2-8.
-#[allow(non_camel_case_types)]
-mod pcre2_sys {
-    use std::ffi::{c_int, c_void};
-
-    pub enum pcre2_code_8 {}
-    pub enum pcre2_compile_context_8 {}
-    pub enum pcre2_general_context_8 {}
-    pub enum pcre2_match_context_8 {}
-    pub enum pcre2_match_data_8 {}
-    pub enum pcre2_jit_stack_8 {}
-
-    pub type pcre2_jit_callback_8 =
-        Option<unsafe extern "C" fn(*mut c_void) -> *mut pcre2_jit_stack_8>;
-
-    pub const PCRE2_JIT_COMPLETE: u32 = 0x00000001;
-
-    #[link(name = "pcre2-8")]
-    extern "C" {
-        pub fn pcre2_compile_context_create_8(gc: *mut pcre2_general_context_8) -> *mut pcre2_compile_context_8;
-        pub fn pcre2_compile_context_free_8(cc: *mut pcre2_compile_context_8);
-        pub fn pcre2_compile_8(pattern: *const u8, length: usize, options: u32, errorcode: *mut c_int,
-                               erroroffset: *mut usize, cc: *mut pcre2_compile_context_8) -> *mut pcre2_code_8;
-        pub fn pcre2_code_free_8(code: *mut pcre2_code_8);
-        pub fn pcre2_jit_compile_8(code: *mut pcre2_code_8, options: u32) -> c_int;
-        pub fn pcre2_match_context_create_8(gc: *mut pcre2_general_context_8) -> *mut pcre2_match_context_8;
-        pub fn pcre2_match_context_free_8(mc: *mut pcre2_match_context_8);
-        pub fn pcre2_match_data_create_from_pattern_8(code: *const pcre2_code_8,
-                                                      gc: *mut pcre2_general_context_8) -> *mut pcre2_match_data_8;
-        pub fn pcre2_match_data_free_8(md: *mut pcre2_match_data_8);
-        pub fn pcre2_jit_stack_create_8(startsize: usize, maxsize: usize,
-                                        gc: *mut pcre2_general_context_8) -> *mut pcre2_jit_stack_8;
-        pub fn pcre2_jit_stack_free_8(stack: *mut pcre2_jit_stack_8);
-        pub fn pcre2_jit_stack_assign_8(mc: *mut pcre2_match_context_8, callback: pcre2_jit_callback_8,
-                                        data: *mut c_void);
-        pub fn pcre2_get_ovector_pointer_8(md: *mut pcre2_match_data_8) -> *mut usize;
-        pub fn pcre2_jit_match_8(code: *const pcre2_code_8, subject: *const u8, length: usize, startoffset: usize,
-                                 options: u32, md: *mut pcre2_match_data_8, mc: *mut pcre2_match_context_8) -> c_int;
-    }
-}
+use std::sync::mpsc;
 
 mod pcre2 {
-    use crate::pcre2_sys::*;
+    use pcre2_sys::*;
     use std::ffi::c_void;
     use std::ptr;
 
@@ -264,17 +228,10 @@ mod pcre2 {
 ))]
 #[inline]
 fn stdin_size_hint() -> Option<usize> {
-    use std::ffi::{c_int, c_ulong};
-    extern "C" {
-        fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
-    }
-    #[cfg(target_os = "macos")]
-    const FIONREAD: c_ulong = 0x4004667f;
-    #[cfg(not(target_os = "macos"))]
-    const FIONREAD: c_ulong = 0x541B;
+    use libc::{ioctl, FIONREAD, STDIN_FILENO};
 
-    let mut len: c_int = 0;
-    if unsafe { ioctl(0, FIONREAD, &mut len as *mut c_int) } != -1 {
+    let mut len: libc::c_int = 0;
+    if unsafe { ioctl(STDIN_FILENO, FIONREAD, &mut len as *mut _) } != -1 {
         Some(len as usize)
     } else {
         None
@@ -294,7 +251,7 @@ fn stdin_size_hint() -> Option<usize> {
     None
 }
 
-fn count_reverse_complements(sequence: &[u8]) -> Vec<String> {
+fn count_reverse_complements(sequence: mpsc::Receiver<Vec<u8>>) -> Vec<String> {
     // Search for occurrences of the following patterns:
     let variants = vec![
         Regex::new("agggtaaa|tttaccct"),
@@ -307,16 +264,18 @@ fn count_reverse_complements(sequence: &[u8]) -> Vec<String> {
         Regex::new("agggta[cgt]a|t[acg]taccct"),
         Regex::new("agggtaa[cgt]|[acg]ttaccct"),
     ];
+    let sequence = sequence.recv().unwrap();
+
     variants
-        .into_iter()
+        .into_par_iter()
         .map(|variant| {
-            let count = variant.count(sequence);
+            let count = variant.count(&*sequence);
             format!("{} {}", variant.pattern(), count)
         })
         .collect()
 }
 
-fn find_replaced_sequence_length(mut buf: Vec<u8>) -> usize {
+fn find_replaced_sequence_length(sequence: mpsc::Receiver<Vec<u8>>) -> usize {
     // Replace the following patterns, one at a time:
     let substs = vec![
         (Regex::new("tHa[Nt]"), &b"<4>"[..]),
@@ -325,6 +284,8 @@ fn find_replaced_sequence_length(mut buf: Vec<u8>) -> usize {
         (Regex::new("<[^>]*>"), &b"|"[..]),
         (Regex::new("\\|[^|][^|]*\\|"), &b"-"[..]),
     ];
+
+    let mut buf = sequence.recv().unwrap();
 
     substs[0].0.replace_inplace(&mut buf, substs[0].1);
     substs[1].0.replace_inplace(&mut buf, substs[1].1);
@@ -348,19 +309,45 @@ const MALLOC_OVERHEAD: usize = 16;
 const MIN_ALLOC_SIZE: usize = 4096 * 2 - MALLOC_OVERHEAD;
 
 fn main() {
-    let mut capacity = stdin_size_hint().map_or(MIN_ALLOC_SIZE, |s| s + 1);
-    capacity = cmp::max(capacity, MIN_ALLOC_SIZE);
+    let mut input_len = 0;
+    let mut sequence_len = 0;
+    let mut result = 0;
+    let mut counts = Vec::new();
 
-    let mut input = Vec::with_capacity(capacity);
-    io::stdin().read_to_end(&mut input).unwrap();
-    let input_len = input.len();
+    let (tx1, rx1) = mpsc::channel();
+    let (tx2, rx2) = mpsc::channel();
 
-    Regex::new(">[^\n]*\n|\n").replace_inplace(&mut input, b"");
+    rayon::scope(|s| {
+        let input_len = &mut input_len;
+        let sequence_len = &mut sequence_len;
+        let result = &mut result;
+        let counts = &mut counts;
 
-    let sequence_len = input.len();
+        s.spawn(move |_| {
+            let mut capacity =
+                stdin_size_hint().map_or(MIN_ALLOC_SIZE, |s| s + 1);
+            capacity = cmp::max(capacity, MIN_ALLOC_SIZE);
 
-    let result = find_replaced_sequence_length(input.clone());
-    let counts = count_reverse_complements(&input);
+            let mut input = Vec::with_capacity(capacity);
+            io::stdin().read_to_end(&mut input).unwrap();
+            *input_len = input.len();
+
+            Regex::new(">[^\n]*\n|\n").replace_inplace(&mut input, b"");
+
+            *sequence_len = input.len();
+
+            tx1.send(input.clone()).unwrap();
+            tx2.send(input).unwrap();
+        });
+
+        s.spawn(move |_| {
+            *result = find_replaced_sequence_length(rx1);
+        });
+
+        s.spawn(move |_| {
+            *counts = count_reverse_complements(rx2);
+        })
+    });
 
     for variant in counts {
         println!("{}", variant)

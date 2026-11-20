@@ -1,0 +1,17 @@
+# The crates the Game's mandelbrot.rust-4 names; the source is used unmodified (SOURCES.md).
+[package]
+name = "mandelbrot"
+version = "0.0.0"
+edition = "2015"
+autobins = false
+
+[[bin]]
+name = "mandelbrot"
+path = "mandelbrot.rs"
+
+[dependencies]
+rayon = "1"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1

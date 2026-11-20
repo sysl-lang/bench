@@ -63,6 +63,30 @@ ten match the Game's output at the small size and C's hash at the timed size. No
 | G5 | correctness, fixed | `programs/{knucleotide,mandelbrot,pidigits}/go` | **Three fastest entries do not produce the reference output as published.** k-nucleotide `-7` rolls its key by shifting in `data[idx+i]`, correct only when the goroutine count is at least k; with one goroutine it counted wrong k-mers. mandelbrot `-4` computes each coordinate as `x*(2/size)`, which rounds some boundary pixels the other way from C's `2*x/size` (wrong at 200 and at 6,000; probed: not fused multiply-add, not `GOARM64`). pidigits `-4` prints only whole lines of ten digits. | Each fixed in the smallest way (the base shifted in, C's coordinate formula, computed once before the loop, and the last line padded as C pads it), stated in the file header and SOURCES.md. None changes the work. |
 | G6 | disclosure | README rule 9, "Methodology" | **Go collects garbage**, and its times include the collector's work and its peak RSS the headroom `GOGC=100` leaves; pidigits and regex-redux pay cgo's crossing on every GMP and PCRE2 call. Stated. | — |
 
+## C and Rust
+
+On 2026-11-20 (decision D-BENCH2TRACK) the C and Rust columns became the Benchmarks Game's fastest
+entries, by elapsed time on its multi-core table, that build and run **unmodified** here,
+multi-threaded as the Game runs them (OpenMP with Homebrew's libomp, pthreads, rayon and the other
+crates the entries name). **D-TUNED is superseded**: its single-threaded expert `c-tuned` and
+`rust-tuned` columns are removed from the build, the run and the report (their files stay in git
+history), because a rival at its fastest known is now the Game's own fastest program, not one written
+here. Findings that rest on the old columns — A6's "faster of `c` and `c-tuned`", D1's plain C and
+Rust weaknesses, D3, and G3's comparison with the tuned columns' one walk — describe the programs as
+they were; the report's "at its best" table now divides by `c`. Every C and Rust source is the archive
+file byte for byte; the build changes are flags, paths, libraries and Cargo manifests, each in
+SOURCES.md ("The C and Rust entries"), with every faster entry passed over and why (x86 intrinsics,
+Linux-only `cpu_set_t`, `malloc.h`, an SSE2-only run-time assertion). All twenty were rebuilt and
+verified through marshal (job 8148): twenty of twenty match the Game's output at the small size and
+the hash at the timed size. No timing was taken.
+
+| # | severity | where | finding | fix |
+|---|---|---|---|---|
+| CR1 | correctness, build flag | `programs/mandelbrot/c`, `scripts/build.zsh` | **mandelbrot `gcc-5` fails the 200-pixel reference output under Apple clang's default fused multiply-add.** Its header says to compile with `-mno-fma`; the Game's Ivy Bridge has no FMA, so the Game never fuses. | `-ffp-contract=off` for that program only: arm64's spelling of the arithmetic the Game runs. No source change. |
+| CR2 | disclosure | SOURCES.md | **Crate versions are not published by the Game.** Each crate is the newest release of the major version the entry is written against (futures and tokio-threadpool 0.1, rayon 1, …), locked in each `Cargo.lock`. | — |
+| CR3 | disclosure | `scripts/lib.zsh` | **Sizes are still this repo's, not the Game's** (D4): binarytrees 18, fannkuchredux 11, mandelbrot 6,000, k-nucleotide and regex-redux on fasta 10,000,000, revcomp 25,000,000; the Game's program pages run 21, 12, 16,000, `knucleotide-input25000000.txt`,
+`regexredux-input5000000.txt` and `revcomp-input100000001.txt`. Thread start-up weighs more at the smaller sizes. Left to the methodology rewrite, as the sizes and their hashes are every language's. | — |
+
 ## Checked and found sound
 
 - **Thread count**: no program starts a thread. No build passes `-fopenmp`, so the C and Fortran

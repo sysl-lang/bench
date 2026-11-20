@@ -1,60 +1,55 @@
 // The Computer Language Benchmarks Game
-// https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
+// http://benchmarksgame.alioth.debian.org/
 //
 // contributed by the Rust Project Developers
+// contributed by Matt Brubeck
 // contributed by TeXitoi
+// modified by Tung Duong
+// contributed by Cristi Cobzarenco (@cristicbz)
+// contributed by Andre Bogus
 
-#![allow(non_snake_case)]
+extern crate rayon;
+use rayon::prelude::*;
+use std::ops::*;
 
-use std::iter::repeat;
+#[derive(Clone, Copy)]
+struct F64x2(f64, f64);
 
-// As std::simd::f64x2 etc. are unstable, we provide a similar interface,
-// expecting llvm to autovectorize its usage.
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-struct usizex2(usize, usize);
-impl std::ops::Add for usizex2 {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self {
-        usizex2(self.0 + rhs.0, self.1 + rhs.1)
+impl F64x2 {
+    pub fn splat(x: f64) -> F64x2 { F64x2(x, x) }
+    pub fn new(a: f64, b: f64) -> F64x2 { F64x2(a, b) }
+    pub fn write_to_slice_unaligned(self, slice: &mut [f64]) {
+        slice[0] = self.0;
+        slice[1] = self.1;
+    }
+    pub fn sum(self) -> f64 {
+        let mut s = [0f64; 2];
+        self.write_to_slice_unaligned(&mut s);
+        s[0] + s[1]
     }
 }
-impl std::ops::Mul for usizex2 {
+
+impl Add for F64x2 {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        F64x2(self.0 + rhs.0, self.1 + rhs.1)
+    }
+}
+impl Mul for F64x2 {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self {
-        usizex2(self.0 * rhs.0, self.1 * rhs.1)
+        F64x2(self.0 * rhs.0, self.1 * rhs.1)
     }
 }
-impl std::ops::Div for usizex2 {
+impl Div for F64x2 {
     type Output = Self;
     fn div(self, rhs: Self) -> Self {
-        usizex2(self.0 / rhs.0, self.1 / rhs.1)
-    }
-}
-impl From<usizex2> for f64x2 {
-    fn from(i: usizex2) -> f64x2 {
-        f64x2(i.0 as f64, i.1 as f64)
-    }
-}
-
-#[allow(non_camel_case_types)]
-struct f64x2(f64, f64);
-impl std::ops::Add for f64x2 {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self {
-        f64x2(self.0 + rhs.0, self.1 + rhs.1)
-    }
-}
-impl std::ops::Div for f64x2 {
-    type Output = Self;
-    fn div(self, rhs: Self) -> Self {
-        f64x2(self.0 / rhs.0, self.1 / rhs.1)
+        F64x2(self.0 / rhs.0, self.1 / rhs.1)
     }
 }
 
 fn main() {
-    let n = std::env::args_os().nth(1)
-        .and_then(|s| s.into_string().ok())
+    let n = std::env::args().nth(1)
         .and_then(|n| n.parse().ok())
         .unwrap_or(100);
     let answer = spectralnorm(n);
@@ -62,48 +57,71 @@ fn main() {
 }
 
 fn spectralnorm(n: usize) -> f64 {
+    // Group all vectors in pairs of two for SIMD convenience.
     assert!(n % 2 == 0, "only even lengths are accepted");
-    let mut u = repeat(1.0).take(n).collect::<Vec<_>>();
-    let mut v = u.clone();
-    let mut tmp = v.clone();
+    let mut u = vec![F64x2::splat(1.0); n / 2];
+    let mut v = vec![F64x2::splat(0.0); n / 2];
+    let mut tmp = vec![F64x2::splat(0.0); n / 2];
+
     for _ in 0..10 {
-        mult_AtAv(&u, &mut v, &mut tmp);
-        mult_AtAv(&v, &mut u, &mut tmp);
+        mult_at_av(&u, &mut v, &mut tmp);
+        mult_at_av(&v, &mut u, &mut tmp);
     }
+
     (dot(&u, &v) / dot(&v, &v)).sqrt()
 }
 
-fn mult_AtAv(v: &[f64], out: &mut [f64], tmp: &mut [f64]) {
-    mult_Av(v, tmp);
-    mult_Atv(tmp, out);
+fn mult_at_av(v: &[F64x2], out: &mut [F64x2], tmp: &mut [F64x2]) {
+    mult(v, tmp, a);
+    mult(tmp, out, |i, j| a(j, i));
 }
 
-fn mult_Av(v: &[f64], out: &mut [f64]) {
-    mult(v, out, 0, Ax2);
-}
+fn mult<F>(v: &[F64x2], out: &mut [F64x2], a: F)
+           where F: Fn([usize; 2], [usize; 2]) -> F64x2 + Sync {
+    // Parallelize along the output vector, with each pair of slots as a parallelism unit.
+    out.par_iter_mut().enumerate().for_each(|(i, slot)| {
+        // We're computing everything in chunks of two so the indces of slot[0] and slot[1] are 2*i
+        // and 2*i + 1.
+        let i = 2 * i;
+        let (i0, i1) = ([i; 2], [i + 1; 2]);
 
-fn mult_Atv(v: &[f64], out: &mut [f64]) {
-    mult(v, out, 0, |i, j| Ax2(j, i));
-}
-
-fn mult<F>(v: &[f64], out: &mut [f64], start: usize, a: F)
-           where F: Fn(usizex2, usizex2) -> f64x2 {
-    for (i, slot) in out.iter_mut().enumerate().map(|(i, s)| (i + start, s)) {
-        let mut sum = f64x2(0.0, 0.0);
-        for (j, chunk) in v.chunks(2).enumerate().map(|(j, s)| (2 * j, s)) {
-            let top = f64x2(chunk[0], chunk[1]);
-            let bot = a(usizex2(i, i), usizex2(j, j+1));
-            sum = sum + top / bot;
+        // Each slot in the pair gets its own sum, which is further computed in two f64 lanes (which
+        // are summed at the end.
+        let (mut sum0, mut sum1) = (F64x2::splat(0.0), F64x2::splat(0.0));
+        for (j, x) in v.iter().enumerate() {
+            let j = [2 * j, 2 * j  + 1];
+            div_and_add(*x, a(i0, j), a(i1, j), &mut sum0, &mut sum1);
         }
-        let f64x2(a, b) = sum;
-        *slot = a + b;
-    }
+
+        // Sum the two lanes for each slot.
+        *slot = F64x2::new(sum0.sum(), sum1.sum());
+    });
 }
 
-fn Ax2(i: usizex2, j: usizex2) -> f64x2 {
-    ((i + j) * (i + j + usizex2(1, 1)) / usizex2(2, 2) + i + usizex2(1, 1)).into()
+fn a(i: [usize; 2], j: [usize; 2]) -> F64x2 {
+   F64x2::new(((i[0] + j[0]) * (i[0] + j[0] + 1) / 2 + i[0] + 1) as f64,
+    ((i[1] + j[1]) * (i[1] + j[1] + 1) / 2 + i[1] + 1) as f64)
 }
 
-fn dot(v: &[f64], u: &[f64]) -> f64 {
-    v.iter().zip(u.iter()).map(|(a, b)| *a * *b).fold(0., |acc, i| acc + i)
+fn dot(v: &[F64x2], u: &[F64x2]) -> f64 {
+    // Vectorised form of dot product: (1) compute dot across two lanes.
+    let r = u.iter()
+             .zip(v)
+             .map(|(&x, &y)| x * y)
+             .fold(F64x2::splat(0.0), |s, x| s + x);
+
+    // (2) sum the two lanes.
+    r.sum()
+}
+
+// Hint that this function should not be inlined. Keep the parallelised code tight, and vectorize
+// better.
+#[inline(never)]
+fn div_and_add(x: F64x2,
+               a0: F64x2,
+               a1: F64x2,
+               s0: &mut F64x2,
+               s1: &mut F64x2) {
+    *s0 = *s0 + x / a0;
+    *s1 = *s1 + x / a1;
 }
