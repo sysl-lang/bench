@@ -43,7 +43,25 @@ is unmeasured. Every changed program was rebuilt and verified through marshal (j
 | D7 | `scripts/run.zsh:44-62` | Verification compares output only, not exit status; a program that exits non-zero after correct output would pass `--verify` but fails the timing, which stops on a non-zero status. Stated. |
 | D8 | `programs/binarytrees/swift/binarytrees.swift:49` | Swift's stretch tree is a top-level `let`, so it is never freed (C frees it): about 1.5% of the program's frees are skipped. Against no one materially. |
 | D9 | `programs/pidigits/sysl-*` | pidigits compares `sysl.math.bigint` with GMP in every other language; already stated in README. |
-| D10 | SOURCES.md, "Go, D and Odin", "Java", "C3, Eiffel", regex-redux rows | Sections and rows for languages removed on 2026-11-18 (Go, D, Java, Eiffel, Nim) remain beside the Odin and C3 text they share. Documentation only. |
+| D10 | SOURCES.md, "Go, D and Odin", "Java", "C3, Eiffel", regex-redux rows | Sections and rows for languages removed on 2026-11-18 (D, Java, Eiffel, Nim) remain beside the Odin and C3 text they share. Documentation only. Go's rows are current again (below). |
+
+## Go
+
+Go was removed with the other garbage-collected languages on 2026-11-18 (3c21092) and restored on
+2026-11-20, alone, so that its column says where sysl stands against it (README rule 9). Its programs
+were audited against the Game's Go entries and its published measurements (archive and
+`performance/<program>.html`, fetched 2026-11-20) to the standard above. Go 1.27.4 (Homebrew, upgraded
+from 1.27.3 for this). All ten programs were rebuilt and verified through marshal (job 8107): ten of
+ten match the Game's output at the small size and C's hash at the timed size. No timing was taken.
+
+| # | severity | where | finding | fix |
+|---|---|---|---|---|
+| G1 | disclosure, fixed | `scripts/lib.zsh` | **Thread count.** Every other program runs on one thread; an unset `GOMAXPROCS` lets Go run the collector's mark work on other cores in parallel, free wall-clock time no other language gets. | `GOMAXPROCS=1` exported for every Go run (verify and timing). The runtime's own service threads remain; their CPU time is in the CPU-time table. `GOGC` stays at its default, 100. |
+| G2 | disclosure, fixed | `scripts/build.zsh` | **Build flags.** The Game builds Go with plain `go build` and `GOAMD64=v2` (its program pages); none of its Go entries uses `-gcflags=-B` or any other flag. Here Go was built for baseline arm64 (`GOARM64=v8.0`) while every other language builds for this processor. | `GOARM64=v8.7 go build`, this machine's level as `clang -mcpu=native` reads it (`+v8.7a`); no `-gcflags`, so bounds checks stay. `GOFLAGS` cleared. Its effect on speed is unmeasured (Go uses the level mostly for atomics and a few instructions). |
+| G3 | disclosure | `programs/binarytrees/go` | **binary-trees recycles nodes through `sync.Pool`** (`binarytrees.go-6`, the Game's fastest single-threaded Go on CPU, 29.26 s against 61.36 for the plain-`&Node{}` `-7` used before). Every node is still its own heap object, obtained and returned one at a time, as C's are through `malloc`/`free`; the pool is Go's explicit free list. It checks and frees each tree in one walk, as `c-tuned` and `rust-tuned` do (D3). Allowed and stated in README; the asymmetry is against sysl. | — |
+| G4 | headline (Go) | `programs/*/go`, SOURCES.md | **Seven of the ten Go programs were not Go's fastest entry.** Measured by the Game's CPU seconds (the cost that carries over to one thread): nbody `go` 7.03 where `-3` takes 6.40; fannkuch `-8` 46.27 where `-3` takes 33.33; binary-trees `-7` 61.36 where `-6` takes 29.26; mandelbrot `-8` 26.76 where `-4` takes 15.01; fasta `-8` 11.32 where `go` (`-1`) takes 3.75; k-nucleotide `-4` 30.77 where `-7` takes 28.88; and **pidigits used `math/big` (`-7`, 5.62) where Go's fastest, `-4`, calls GMP through cgo (0.83)** while every other language here uses GMP. Go's geometric mean would have been well short of Go at its best. | Each replaced by the fastest entry, made single-threaded (SOURCES.md, "Go"). spectralnorm `-8`, revcomp `-2` and regex-redux `-5` already were the lowest-CPU entries and stay. |
+| G5 | correctness, fixed | `programs/{knucleotide,mandelbrot,pidigits}/go` | **Three fastest entries do not produce the reference output as published.** k-nucleotide `-7` rolls its key by shifting in `data[idx+i]`, correct only when the goroutine count is at least k; with one goroutine it counted wrong k-mers. mandelbrot `-4` computes each coordinate as `x*(2/size)`, which rounds some boundary pixels the other way from C's `2*x/size` (wrong at 200 and at 6,000; probed: not fused multiply-add, not `GOARM64`). pidigits `-4` prints only whole lines of ten digits. | Each fixed in the smallest way (the base shifted in, C's coordinate formula, computed once before the loop, and the last line padded as C pads it), stated in the file header and SOURCES.md. None changes the work. |
+| G6 | disclosure | README rule 9, "Methodology" | **Go collects garbage**, and its times include the collector's work and its peak RSS the headroom `GOGC=100` leaves; pidigits and regex-redux pay cgo's crossing on every GMP and PCRE2 call. Stated. | — |
 
 ## Checked and found sound
 

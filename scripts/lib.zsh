@@ -4,8 +4,13 @@ ROOT=${0:A:h:h}
 export PATH=$HOME/.local/gnat-16.1.0/bin:/Users/work/.cargo/bin:/opt/homebrew/bin:$PATH
 
 PROGRAMS=(nbody spectralnorm fannkuchredux binarytrees mandelbrot fasta knucleotide revcomp)
-# Only languages that run with no garbage collector (README, methodology item 9).
-LANGS=(sysl-idiomatic sysl-tuned c c-tuned rust rust-tuned cpp swift zig odin c3 ada fortran)
+# Go is the one garbage-collected language (README, methodology item 9).
+LANGS=(sysl-idiomatic sysl-tuned c c-tuned rust rust-tuned cpp swift zig odin c3 ada fortran go)
+
+# Every program is single-threaded, so Go runs Go code on one processor, as every other language runs
+# on one thread. Its runtime's own threads (the GC's background mark work shares that one P) still
+# exist; their CPU time is in the CPU-time table (AUDIT.md G1).
+export GOMAXPROCS=1
 
 # A second sysl compiler to compare with the one on PATH: SYSL_DEV names its binary and SYSL_DEV_LIB
 # its library/ tree. When set, every program is also built from its sysl-idiomatic and sysl-tuned

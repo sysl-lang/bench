@@ -68,20 +68,22 @@ included, must do (README rule 3).
 
 ### Go, D and Odin
 
-Go's programs come from the same archive (`*.go` files, BSD-3, headers kept). Where several entries
-exist the one chosen is the single-threaded entry that is the C program's algorithm, or the fastest
-threaded one converted. Go has no optimisation flags, so `go build` runs with its defaults.
+Go's programs come from the same archive (`*.go` files, BSD-3, headers kept; each adapted file says
+how in its header). Each is **the Game's fastest Go entry for the program on CPU time**, the measure
+that carries over to one thread, with its goroutines removed (re-chosen 2026-11-20, AUDIT.md G4; the
+"Game" columns are the Game's published Go measurements, wall and CPU seconds, on its 4-core x86).
+Go has no optimisation level: `GOARM64=v8.7 go build`, run with `GOMAXPROCS=1` (README rule 5, rule 9).
 
-| program | Go archive file | changes |
-|---|---|---|
-| nbody | `nbody.go` | unchanged |
-| spectralnorm | `spectralnorm.go-8.go` | unchanged |
-| fannkuchredux | `fannkuchredux.go-8.go` | unchanged |
-| binarytrees | `binarytrees.go-7.go` | unchanged (a `*Node` per allocation) |
-| mandelbrot | `mandelbrot.go-8.go` | unchanged |
-| fasta | `fasta.go-8.go` | unchanged (a transliteration of the C program, linear lookup) |
-| knucleotide | `knucleotide.go-4.go` | keys the `map` by the 2k-bit `uint32`/`uint64` code. The `runtime.NumCPU` goroutine workers and result channels replaced by running the seven jobs in order on the main goroutine |
-| revcomp | `revcomp.go-2.go` | unchanged |
+| program | Go archive file | Game wall / CPU (s) | changes |
+|---|---|---|---|
+| nbody | `nbody.go-3.go` | 6.39 / 6.40, fastest | unchanged |
+| spectralnorm | `spectralnorm.go-8.go` | 5.34 / 5.35, lowest CPU (ties `spectralnorm.go`) | unchanged. The fastest on wall clock, `-4` (1.43 / 5.69), is the same loops split over four goroutines |
+| fannkuchredux | `fannkuchredux.go-3.go` | 8.36 / 33.33, fastest | Oleg Mazurov's chunked permutation walk, as C's `-3`. The goroutine each chunk starts for the next replaced by `main` running every chunk in turn; `runtime.GOMAXPROCS(4)` removed |
+| binarytrees | `binarytrees.go-6.go` | 27.93 / 29.26, lowest CPU | unchanged: single-threaded; every node is its own `&Node{}`, recycled through `sync.Pool` when its tree is checked (AUDIT.md G3). The fastest on wall clock (`-2`, 56.53 CPU) is goroutines over plain allocation |
+| mandelbrot | `mandelbrot.go-4.go` | 3.77 / 15.01, fastest | two pixels per inner loop, 50 iterations, C's escape test. The 2 x `NumCPU` workers taking rows from an atomic counter replaced by `main` rendering every row; `runtime.GOMAXPROCS` removed. Each coordinate computed as C computes it, `2*x/size`, where the archive's `x*(2/size)` rounds some boundary pixels the other way: its output differed from the Game's own at 200 and from C's at 6,000 (AUDIT.md G5). The coordinates are computed once, outside the timed loop's work |
+| fasta | `fasta.go` | 3.74 / 3.75, lowest CPU | unchanged: single-threaded, linear scan of the cumulative probabilities |
+| knucleotide | `knucleotide.go-7.go` | 7.58 / 28.88, fastest | a built-in `map[uint32]*int` / `map[uint64]*int` keyed by the 2k-bit code. `runtime.NumCPU()` replaced by 1, so there is one table per k, rolled one base at a time, and the workers called rather than started with `go`. The roll shifts in the k-mer's last base (`data[idx+size-nsize+i]`); the archive shifts in `data[idx+i]`, right only when the goroutine count is at least k, and with one goroutine it counted wrong k-mers (AUDIT.md G5) |
+| revcomp | `revcomp.go-2.go` | 2.22 / 2.32, lowest CPU | unchanged: single-threaded. The fastest on wall clock, `-6` (1.93 / 3.43), is threaded |
 
 **D and Odin are not in the archive.** Every D and Odin program is **a port of the C program, written
 for this suite** (same algorithm and data layout, idiomatic for the language): `nbody`,
@@ -173,7 +175,7 @@ Homebrew's copy outright (build.zsh's `PCRE2_FLAGS`).
 | C++ | `regexredux.gpp-6.gpp` (the fastest C++) | PCRE2, JIT | `std::launch::async` changed to `std::launch::deferred`, so each task runs on the main thread when its result is asked for |
 | Rust, `rust-tuned` | `regexredux.rust-7.rust` (the Game's fastest program) | PCRE2, JIT | the `pcre2_sys` and `libc` crates replaced by the `extern "C"` declarations they provide (the build is a bare `rustc` with no crates); `rayon::scope`, the `mpsc` channels and `into_par_iter` replaced by sequential calls. `rust-tuned` is a copy. **The entries using the `regex` crate (`regexredux.rust`, `-2` to `-6`) were not used**: the crate cannot be built without cargo, and the PCRE2 entry is the Game's fastest |
 | Swift | `regexredux.swift-4.swift` | Foundation `NSRegularExpression` (every Swift entry's) | the `DispatchGroup` and its queues removed; the replacement chain and the counts run in turn |
-| Go | `regexredux.go-5.go` (the fastest Go) | PCRE2, JIT, through cgo | the archive program imports `github.com/GRbit/go-pcre`, a cgo binding to the retired PCRE1 (not installed, and a module fetch); it is replaced by a few dozen lines of cgo over PCRE2 making the same calls (`pcre2_jit_compile`, `pcre2_jit_match`). Goroutines and `GOMAXPROCS` removed. Go's own `regexp` (`regexredux.go`, `-3`) is about eight times slower on the Game |
+| Go | `regexredux.go-5.go` (the fastest Go) | PCRE2, JIT, through cgo | the archive program imports `github.com/GRbit/go-pcre`, a cgo binding to the retired PCRE1 (not installed, and a module fetch); it is replaced by a few dozen lines of cgo over PCRE2 making the same calls (`pcre2_jit_compile`, `pcre2_jit_match`). Goroutines and `GOMAXPROCS` removed. Go's own `regexp` (`regexredux.go`, `-3`) is about eight times slower on the Game. The cgo flags come from PCRE2's `pkg-config` file, Homebrew's named outright by build.zsh |
 | Java | `regexredux.java-2.java` (the JVM form of the fastest Java, `graalvmaot-4`) | PCRE2, JIT, through `java.lang.foreign` | the jextract-generated `jextract_pcre2.pcre2_h` (not in the archive) replaced by a nested class of hand-written downcalls to the same seven functions; the executor's tasks called in turn. Run as every Java program here, on the JVM, so the time includes startup and JIT warm-up. The JVM warns on stderr that a restricted method was called; it does not affect the output |
 | Nim | none (not in the archive) | standard `std/re`, which is PCRE2 with the JIT | written for this suite. `std/re` opens `libpcre2-8.0.dylib` by name at run time, which finds macOS's JIT-less copy; `regexredux.nim.cfg` beside the source overrides that `dynlib` and links Homebrew's |
 | Fortran | `regexredux.ifc` (the Game's only Fortran, a translation of `gcc-5`) | PCRE2, JIT, through `bind(C)` interfaces | built with gfortran and no `-fopenmp`, so its `!$omp` directives are comments and it runs on one thread. The `PCRE2_SIZE` arguments of `pcre2_compile` and `pcre2_jit_match` declared `integer(c_size_t)` where the archive passes `c_int`, and standard input opened as `/dev/stdin` because gfortran cannot reopen the preconnected unit for stream access |
@@ -239,7 +241,7 @@ Several archive entries print no padded last line when the count is not a multip
 | C++ | GMP (C API) | `pidigits.gpp-5.gpp` | `using ulong = unsigned long` (a glibc name macOS lacks) |
 | Rust | GMP (`#[link]` FFI, no crate) | `pidigits.rust-3.rust` | unchanged. `pidigits.rust-4` uses the `rug` crate, which the bench's crate-free `rustc` build cannot take; `-3` binds the same library directly |
 | Swift | GMP (`import gmp`) | `pidigits.swift-2.swift` | unchanged; the `gmp` module is `module.modulemap` and `gmp-shim.h` beside it |
-| Go | `math/big` | `pidigits.go-7.go` | unchanged. The archive's fastest Go entries (`-3`, `-4`) bind GMP through cgo; Go has a standard big integer, so it uses that |
+| Go | GMP (cgo) | `pidigits.go-4.go` (the fastest Go: 0.82 s on the Game, against 5.00 for `math/big` in `-7`) | padding (the archive program prints only whole lines of ten). It sets `GOMAXPROCS(1)` and locks the OS thread itself. Until 2026-11-17 Go ran `-7` over `math/big`, about six times slower on the Game, while every other language here used GMP (AUDIT.md G4) |
 | Java | `java.math.BigInteger` | `pidigits.java-3.java` | the archive program calls GMP through a JNI wrapper library; its operations rewritten as `BigInteger` ones, the structure and output buffer kept; padding |
 | Ada | GMP (`pragma Import`) | `pidigits.gnat-2.gnat` | `mpz_addmul_ui`/`mpz_submul_ui` take `unsigned_long` (the archive passed a 32-bit `unsigned` for a C `unsigned long`); `printf` imported as `C_Variadic_1`, since arm64 macOS passes variadic arguments on the stack |
 | Fortran | GMP (`bind(C)`) | `pidigits.ifc-4.ifc` | unchanged |

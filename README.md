@@ -1,7 +1,7 @@
 # bench
 
 A cross-language benchmark suite that times [sysl](https://github.com/sysl-lang/sysl) against C, Rust,
-C++ and Swift on ten programs from the [Computer Language Benchmarks
+C++, Swift and Go on ten programs from the [Computer Language Benchmarks
 Game](https://benchmarksgame-team.pages.debian.net/benchmarksgame/): n-body, spectral-norm,
 fannkuch-redux, binary-trees, mandelbrot, fasta, k-nucleotide, reverse-complement, regex-redux and pidigits.
 
@@ -38,7 +38,7 @@ entries; where no technique beats the plain program, the tuned file is a copy of
 what each one does. The plain `c` and `rust` columns are unchanged, and C remains the baseline of
 every ratio.
 
-The C, Rust, C++ and Swift programs are Benchmarks Game sources (BSD-3). Where the site publishes only
+The C, Rust, C++, Swift and Go programs are Benchmarks Game sources (BSD-3). Where the site publishes only
 a threaded or crate-dependent program, it is adapted to what the rules below require. [SOURCES.md](SOURCES.md)
 names the origin of every file and says exactly what was changed.
 
@@ -68,23 +68,35 @@ names the origin of every file and says exactly what was changed.
    `gnatmake -O3 -gnatp -march=native` (GCC's spelling: this machine's features, GCC's generic tuning);
    Fortran `gfortran -O3 -march=native` (IEEE semantics kept, as in C: no `-ffast-math`; gfortran
    rather than LLVM's `flang`, which was slower overall and cannot use the gfortran-built stdlib);
+   Go `GOARM64=v8.7 go build` (Go has no optimisation level; the Benchmarks Game runs plain `go build`
+   with `GOAMD64=v2`, and v8.7 is this machine's architecture level, as clang's `-mcpu=native` reads
+   it; no `-gcflags`, so no `-B`);
    sysl `--release -O3 --cpu native`.
 6. **Checks that remain.** `sysl-idiomatic` keeps every bounds check, and integer overflow wraps in a
    release build; `sysl-tuned` drops the bounds checks inside its `@unchecked` blocks. Rust and Odin
    keep their bounds checks (`rust-tuned` drops them
    where it reads through `get_unchecked` or raw-pointer NEON loads). Swift `-O` keeps its bounds
    checks and also traps on integer overflow (the Benchmarks Game builds Swift `-Ounchecked`; here it
-   keeps its checks, as Rust and sysl do). C, C++, Zig ReleaseFast,
+   keeps its checks, as Rust and sysl do). Go keeps its bounds checks (none of its programs uses
+   `-gcflags=-B`) and integer overflow wraps. C, C++, Zig ReleaseFast,
    C3 `-O3` (c3c's unsafe mode, which turns off bounds checks and contracts), Ada `-gnatp`
    (which suppresses every run-time check) and gfortran (which checks array bounds only under
    `-fcheck=bounds`) have none.
 7. **Every language compiles ahead of time to a native executable**, and the timing is the whole process.
 8. **Swift counts its references (ARC)**, as sysl does: its memory is freed deterministically, when the
    last reference goes, with no collector running beside the program.
-9. **No garbage-collected language.** Every language here runs with no garbage collector at run time,
-   which is the model sysl competes in. Julia was timed up to 2026-11-16 and Go, Java, D, Eiffel and
-   Nim up to 2026-11-17; all were removed on 2026-11-18. Go, Java and Eiffel collect garbage by design;
-   D collects by default (its GC-free `-betterC` subset is not how its programs are written); Nim's
+9. **One garbage-collected language: Go.** Every other language here runs with no garbage collector
+   at run time, which is the model sysl competes in. Go collects garbage by design; it is here because
+   it is the language readers compare a new systems language with, so its column says where sysl
+   stands against it. Go is held to the rules every other language is: its programs are the Game's
+   fastest Go entries made single-threaded (SOURCES.md), and it runs with **`GOMAXPROCS=1`**, so Go
+   code runs on one processor as every other program runs on one thread. The collector's mark work
+   shares that one processor; the runtime's few service threads still exist, and their CPU time is in
+   the CPU-time table. `GOGC` is left at its default, 100, which trades memory for speed: peak RSS is
+   in the JSON. Go 1.27 from Homebrew (the report prints the exact version). Julia was timed up to
+   2026-11-16 and Go, Java, D, Eiffel and Nim up to 2026-11-17; all were removed on 2026-11-18 and Go
+   alone restored on 2026-11-20 (AUDIT.md, "Go"). Java and Eiffel collect garbage by design; D
+   collects by default (its GC-free `-betterC` subset is not how its programs are written); Nim's
    default memory manager, ORC, reference-counts but adds a cycle collector, which is a collector.
    Julia is also a JIT language: a whole-process time is mostly its start-up and compilation, and a
    warm-only measurement is not comparable with the ahead-of-time languages. Swift stays: ARC is
@@ -95,12 +107,13 @@ names the origin of every file and says exactly what was changed.
 Benchmarks Game. pidigits' work is arbitrary-precision arithmetic. sysl uses its standard library's
 big integer (`sysl.math.bigint`); every other language binds
 [GMP](https://gmplib.org) 6.3.0 through its own C interop, as the Game's entries do (C, C++, Rust,
-Swift, Zig, Odin, C3, Ada, Fortran). Every version runs Mr Ledrug's form of Gibbons'
+Swift, Zig, Odin, C3, Ada, Fortran, and Go through cgo, as its fastest Game entry does). Every version runs Mr Ledrug's form of Gibbons'
 spigot; SOURCES.md says which library each uses.
 
 regex-redux's work is a regular-expression library's: each language uses its standard one where it
 has one and nothing faster is in the Game's entries for it, otherwise the library those entries use.
-That is PCRE2 with its JIT for C, C++, Rust, Zig and Fortran; `sysl-idiomatic` uses the standard
+That is PCRE2 with its JIT for C, C++, Rust, Zig, Fortran and Go (through cgo, as its fastest Game
+entry does; Go's own `regexp` is about eight times slower there); `sysl-idiomatic` uses the standard
 `sysl.regex`, and `sysl-tuned` calls PCRE2 with its JIT as C does. SOURCES.md gives each language's
 choice and how its Game entry was adapted.
 
@@ -129,8 +142,9 @@ language's best, and these are known to be well below it, single-threaded, on th
 | knucleotide | `swift` | `Dictionary`, whose hash is always SipHash through `Hasher`, as Swift's standard library requires |
 | binarytrees | `swift` | a class node with ARC's atomic counts on every retain and release |
 
-**Only C, Rust and sysl have tuned columns.** C++, Swift, Zig, Odin, C3, Ada and Fortran are each
-their plain program, and their ratios are those of the published or ported program, not of the
+**Only C, Rust and sysl have tuned columns.** C++, Swift, Go, Zig, Odin, C3, Ada and Fortran are each
+their plain program (Go's are its fastest Game entries, so its column is the nearest to a language at
+its best among them), and their ratios are those of the published or ported program, not of the
 language at its best.
 
 ## Methodology, and what a reader should know
@@ -139,8 +153,13 @@ language at its best.
   build and power source), arm64 only. The tuned C and Rust columns use NEON intrinsics and build on
   arm64 only.
 - **Single-threaded.** No program starts a thread: the C and Fortran programs' OpenMP directives are
-  inert (no `-fopenmp`), and every threaded Rust, C++ and Swift program was made sequential
-  (SOURCES.md).
+  inert (no `-fopenmp`), and every threaded Rust, C++, Swift and Go program was made sequential
+  (SOURCES.md). Go runs with `GOMAXPROCS=1` (`scripts/lib.zsh`).
+- **Go, the one garbage-collected language** (rule 9): Go 1.27 from Homebrew, `GOARM64=v8.7 go
+  build`, `GOMAXPROCS=1`, default `GOGC`. Its time includes the collector's work and its peak RSS the
+  heap headroom `GOGC=100` leaves; its binary-trees recycles nodes through `sync.Pool`, Go's explicit
+  free list, as the Game's fastest single-threaded Go entry does (AUDIT.md G3). pidigits and
+  regex-redux reach GMP and PCRE2 through cgo, so each call pays cgo's crossing.
 - **Sizes.** nbody 50,000,000, spectralnorm 5,500, fasta 25,000,000, reverse-complement on fasta
   25,000,000 and pidigits 10,000 are the Game's sizes. binarytrees 18 (Game 21), fannkuchredux 11
   (12), mandelbrot 6,000 (16,000), and k-nucleotide and regex-redux on fasta 10,000,000 (Game
@@ -169,7 +188,7 @@ language at its best.
 ## Layout
 
 ```
-programs/<name>/{sysl-idiomatic,sysl-tuned,c,c-tuned,rust,rust-tuned,cpp,swift,zig,odin,c3,ada,fortran}/   one source file per directory
+programs/<name>/{sysl-idiomatic,sysl-tuned,c,c-tuned,rust,rust-tuned,cpp,swift,zig,odin,c3,ada,fortran,go}/   one source file per directory
                    (Swift's pidigits adds the module map that makes GMP `import gmp`)
 expected/ref/      the Benchmarks Game's published output (and input) at a small size
 expected/<name>.sha256   sha256 of the output at the timed size, from the C program
@@ -189,7 +208,7 @@ its output at 25,000,000, both generated into `build/inputs/` by `build.zsh`.
 
 ## Running it
 
-Requires clang, rustc, swiftc, zig, odin, c3c, GNAT (`gnatmake`), gfortran with [fortran-stdlib](https://stdlib.fortran-lang.org) (`brew install fortran-stdlib`, found through `pkg-config`), [hyperfine](https://github.com/sharkdp/hyperfine) 2.x and `sysl` on
+Requires clang, rustc, swiftc, go, zig, odin, c3c, GNAT (`gnatmake`), gfortran with [fortran-stdlib](https://stdlib.fortran-lang.org) (`brew install fortran-stdlib`, found through `pkg-config`), [hyperfine](https://github.com/sharkdp/hyperfine) 2.x and `sysl` on
 `PATH`, and Homebrew's `pcre2` and `boost` (regex-redux).
 
 ```

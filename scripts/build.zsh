@@ -20,7 +20,7 @@ GMP_FLAGS=(c "-I$GMP_INCLUDE -L$GMP_LIB -lgmp" c-tuned "-I$GMP_INCLUDE -L$GMP_LI
            odin "-extra-linker-flags:-L$GMP_LIB"
            ada "-largs -L$GMP_LIB" fortran "-L$GMP_LIB -lgmp" c3 "-L $GMP_LIB -l gmp")
 
-# regex-redux's C, C++, Rust, Zig, Fortran and sysl-tuned programs link PCRE2 (C++ also includes Boost).
+# regex-redux's C, C++, Rust, Zig, Fortran, Go and sysl-tuned programs link PCRE2 (C++ also includes Boost).
 # Homebrew's copy is named outright: macOS has a libpcre2-8 of its own, built without the JIT.
 PCRE2=/opt/homebrew/opt/pcre2
 typeset -A PCRE2_FLAGS
@@ -57,9 +57,12 @@ for prog in $PROGRAMS; do
               rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native -C codegen-units=1 $dir/$prog.rs -o $out $libs >$out.log 2>&1 ;;
       swift)  swiftc -O $dir/$prog.swift -o $out $libs >$out.log 2>&1 ;;
       zig)    (cd $dir && zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded -lc --cache-dir $BUILD/.zig-cache --global-cache-dir $BUILD/.zig-global -femit-bin=$out $libs $prog.zig) >$out.log 2>&1 ;;
-      nim)    nim c -d:danger --opt:speed --mm:orc --cc:clang --passC:-march=native --threads:off --hints:off --warnings:off --nimcache:$BUILD/.nimcache/$prog -o:$out $libs $dir/$prog.nim >$out.log 2>&1 ;;
-      go)     go build -o $out $dir/$prog.go >$out.log 2>&1 ;;
-      d)      ldc2 -O3 -release -mcpu=native -of=$out -od=$BUILD/.dobj/$prog $libs $dir/$prog.d >$out.log 2>&1 ;;
+      go)     # Plain `go build`, as the Benchmarks Game builds Go. GOARM64=v8.7 is this machine's
+              # architecture level (clang -mcpu=native reads +v8.7a), as the Game sets GOAMD64=v2 and
+              # every other language here builds for the host (AUDIT.md G2). cgo finds GMP (pidigits)
+              # and Homebrew's PCRE2 (regex-redux, through pkg-config); -O2 -g is cgo's own default.
+              GOARM64=v8.7 GOFLAGS= CGO_CFLAGS="-O2 -g -I$GMP_INCLUDE" CGO_LDFLAGS="-O2 -g -L$GMP_LIB" \
+                PKG_CONFIG_PATH=$PCRE2/lib/pkgconfig go build -o $out $dir/$prog.go >$out.log 2>&1 ;;
       odin)   odin build $dir/$prog.odin -file -o:speed -microarch:native -out:$out $libs >$out.log 2>&1 ;;
       ada)    mkdir -p $BUILD/.adaobj/$prog
               gnatmake -q -O3 -gnatp -march=native -D $BUILD/.adaobj/$prog -o $out $dir/$prog.adb $libs >$out.log 2>&1 ;;

@@ -13,9 +13,9 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 programs = ["nbody", "spectralnorm", "fannkuchredux", "binarytrees",
             "mandelbrot", "fasta", "knucleotide", "revcomp", "regexredux", "pidigits"]
-# Only languages that run with no garbage collector (README, methodology item 9).
+# Go is the one garbage-collected language (README, methodology item 9).
 columns = ["c", "c-tuned", "rust", "rust-tuned", "cpp", "zig", "odin", "c3", "ada", "fortran", "swift",
-           "sysl-idiomatic", "sysl-tuned"]
+           "go", "sysl-idiomatic", "sysl-tuned"]
 # A run with a second sysl compiler (SYSL_DEV, scripts/lib.zsh) has its two columns too.
 sysl_dev = os.environ.get("SYSL_DEV")
 if sysl_dev:
@@ -58,6 +58,8 @@ toolchains = {
     "fortran": {"version": first_line(run(["gfortran", "--version"])),
                 "backend": "GCC's own back end (not LLVM); fortran-stdlib "
                            + run(["pkg-config", "--modversion", "fortran_stdlib"])},
+    "go": {"version": first_line(run(["go", "version"])),
+           "backend": "Go's own compiler and garbage collector (not LLVM); cgo's C through Apple clang"},
     "hyperfine": {"version": first_line(run(["hyperfine", "--version"]))},
 }
 flags = {
@@ -79,6 +81,9 @@ flags = {
     "fortran": "gfortran -O3 -march=native (no -ffast-math: IEEE semantics as in C; no bounds "
                "checks, which gfortran adds only under -fcheck=bounds); knucleotide links "
                "fortran-stdlib's hash map",
+    "go": "GOARM64=v8.7 go build (no other flag, as the Benchmarks Game builds Go, which sets "
+          "GOAMD64=v2; v8.7 is this machine's level; bounds checks stay on); run with GOMAXPROCS=1 and "
+          "the default GOGC=100; pidigits calls GMP and regex-redux PCRE2 through cgo",
 }
 machine = {"cpu": run(["sysctl", "-n", "machdep.cpu.brand_string"]),
            "model": run(["sysctl", "-n", "hw.model"]),
@@ -160,7 +165,7 @@ overall_geo = {"wall": group_geo(columns, "ratio_to_c"), "cpu": group_geo(column
 # (README, "Known weaknesses of the plain columns"), so a ratio to plain C flatters every language.
 best_columns = {"c": ["c", "c-tuned"], "rust": ["rust", "rust-tuned"],
                 "sysl": ["sysl-idiomatic", "sysl-tuned"],
-                **{lang: [lang] for lang in ["cpp", "zig", "odin", "c3", "ada", "fortran", "swift"]}}
+                **{lang: [lang] for lang in ["cpp", "zig", "odin", "c3", "ada", "fortran", "swift", "go"]}}
 best = {}
 for prog in common:
     e = data[prog]
@@ -191,8 +196,8 @@ lines = [f"# Results {stamp}", "",
          "beside this one.", "",
          *([f"**{os.environ['BENCH_NOTE']}**", ""] if os.environ.get("BENCH_NOTE") else []),
          "Each cell is the mean time as a ratio to C (1.00 = as fast as C, higher is slower). "
-         "The `C (s)` column is C's own mean in seconds. Every language here runs with no garbage "
-         "collector (README, methodology item 9).", "",
+         "The `C (s)` column is C's own mean in seconds. Go is the one language here with a garbage "
+         "collector, run with `GOMAXPROCS=1` (README, methodology item 9).", "",
          "Load average at the start and end of the run (`uptime`); if other builds were running, "
          "the figures were measured under load and are noisier than an idle-machine run:", "",
          "```", doc["load"]["start"], doc["load"]["end"], "```", "",
