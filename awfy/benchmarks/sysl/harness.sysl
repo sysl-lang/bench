@@ -1,3 +1,5 @@
+@no_fuse
+
 import sysl.text.parse_int
 
 print_usage()

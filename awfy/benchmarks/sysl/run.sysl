@@ -1,3 +1,5 @@
+@no_fuse
+
 import sysl.time.{monotonic, whole_micros}
 
 // Runs one benchmark num_iterations times, timing each run of its inner loop.

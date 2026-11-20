@@ -21,11 +21,12 @@ Each program is written once per language. sysl has two versions:
   suffix or cast the compiler can infer, standard-library containers, and vectors (`<N>T`) only where
   they are the natural tool, as in mandelbrot. **This is the form that counts.**
 - **`sysl-tuned`** may use any documented sysl feature that trades pleasantness for speed: vectors
-  everywhere, fixed-size arrays, unchecked indexing, explicit layouts, manual unrolling. It may not
-  work around the compiler: a change that would be pointless once the compiler does its job (hoisting
-  fields into locals by hand, calling an intrinsic by hand, hand strength reduction) is a finding in
-  [FINDINGS.md](FINDINGS.md), not code. Where no such feature beats the idiomatic program, `sysl-tuned`
-  is a copy of it.
+  everywhere, fixed-size arrays, unchecked indexing, explicit layouts, manual unrolling, and, as
+  `c-tuned` and `rust-tuned` may, whatever a program can do itself to get past a compiler or library
+  gap (generator state kept in a local, C's own `malloc`ed node, input read with `read(2)`). Each such
+  workaround is a "Tuned" line in [FINDINGS.md](FINDINGS.md) naming the compiler or library item that
+  would make it pointless, so the gap between the two sysl columns is that list. Where nothing beats
+  the idiomatic program, `sysl-tuned` is a copy of it.
 
 Both sysl forms use the same algorithm as C.
 
@@ -57,14 +58,23 @@ names the origin of every file and says exactly what was changed.
    [fortran-lang stdlib](https://stdlib.fortran-lang.org), the community's de facto standard library,
    as the C program uses klib's `khash.h`.
 4. **Output is verified before anything is timed.** A wrong answer fails the run.
-5. **Release flags**: C and C++ `-O3 -march=native`; Rust `-C opt-level=3 -C target-cpu=native`; Swift
-   `-O`; Zig `-O ReleaseFast -mcpu=native`; Odin `-o:speed -microarch:native`;
-   C3 `c3c compile -O3` (c3c has no native-CPU option on arm64); Ada (GNAT) `gnatmake -O3 -gnatp -march=native`;
+5. **Release flags**: C and C++ `-O3 -mcpu=native` (on arm64 Apple clang reads `-march=native` as the
+   apple-m1 processor and its features, `-mcpu=native` as this machine's, which is what sysl's
+   `--cpu native` and Rust's `target-cpu=native` name); Rust `-C opt-level=3 -C target-cpu=native
+   -C codegen-units=1` (the Benchmarks Game's Rust flags); Swift
+   `-O` (no processor option, so generic arm64); Zig `-O ReleaseFast -mcpu=native -fsingle-threaded`
+   (which also drops the locking in Zig's own standard library); Odin `-o:speed -microarch:native`;
+   C3 `c3c compile -O3` (c3c has no native-CPU option on arm64, so generic arm64); Ada (GNAT)
+   `gnatmake -O3 -gnatp -march=native` (GCC's spelling: this machine's features, GCC's generic tuning);
    Fortran `gfortran -O3 -march=native` (IEEE semantics kept, as in C: no `-ffast-math`; gfortran
    rather than LLVM's `flang`, which was slower overall and cannot use the gfortran-built stdlib);
    sysl `--release -O3 --cpu native`.
-6. **Checks that remain.** Rust and Odin keep their bounds checks (`rust-tuned` drops them
-   where it reads through `get_unchecked` or raw-pointer NEON loads). C, C++, Zig ReleaseFast,
+6. **Checks that remain.** `sysl-idiomatic` keeps every bounds check, and integer overflow wraps in a
+   release build; `sysl-tuned` drops the bounds checks inside its `@unchecked` blocks. Rust and Odin
+   keep their bounds checks (`rust-tuned` drops them
+   where it reads through `get_unchecked` or raw-pointer NEON loads). Swift `-O` keeps its bounds
+   checks and also traps on integer overflow (the Benchmarks Game builds Swift `-Ounchecked`; here it
+   keeps its checks, as Rust and sysl do). C, C++, Zig ReleaseFast,
    C3 `-O3` (c3c's unsafe mode, which turns off bounds checks and contracts), Ada `-gnatp`
    (which suppresses every run-time check) and gfortran (which checks array bounds only under
    `-fcheck=bounds`) have none.
@@ -94,7 +104,67 @@ That is PCRE2 with its JIT for C, C++, Rust, Zig and Fortran; `sysl-idiomatic` u
 `sysl.regex`, and `sysl-tuned` calls PCRE2 with its JIT as C does. SOURCES.md gives each language's
 choice and how its Game entry was adapted.
 
-The report gives one geometric mean per language and one over every language.
+The report gives one geometric mean per language and one over every language, and a table of **each
+language at its best**: its faster column on each program (the tuned one where it has one) as a ratio
+to the faster of `c` and `c-tuned`. **That table is the one to quote.** Every other table divides by
+the plain C program, which is weak on the programs listed below and so flatters every language that
+beats it (AUDIT.md A6).
+
+## Known weaknesses of the plain columns
+
+The plain columns are the Benchmarks Game's programs, adapted only as SOURCES.md says, paired with
+`sysl-idiomatic` and kept as they are because their gaps to sysl drive FINDINGS.md. They are not each
+language's best, and these are known to be well below it, single-threaded, on this machine:
+
+| program | column | what it is |
+|---|---|---|
+| mandelbrot | `c` | `mandelbrot.gcc-8`, one pixel at a time in scalar code; `sysl-idiomatic` computes eight pixels as one `<8>real`, so it runs about 3x faster than this C, and `c-tuned` (NEON) is the C to compare with |
+| nbody | `c` | the Game's plain C; the identical algorithm runs in 0.91–0.99 of its time as C3, Ada and Swift ports and in 0.54 of it as `sysl-idiomatic` on sysl dev (FINDINGS, "Where dev stands"), so a ratio to it is not a ratio to C at its best |
+| spectralnorm | `c` | `spectralnorm.gcc-8`, one column per step; Rust's two-column form is about 2.6x faster |
+| fannkuchredux | `c` | `fannkuchredux.gcc-3`, scalar flips |
+| revcomp | `c` | `revcomp.gcc-4`, line-at-a-time `fgets` |
+| fasta | `rust` | `fasta.rust-3`, about 1.9x C |
+| knucleotide | `rust` | rewritten for this suite from the archive's `Vec<u8>`-keyed program (SOURCES.md); not a Game entry |
+| knucleotide | `cpp` | `std::unordered_map` (libc++), because rule 3 asks for the standard library's table and libc++ has no `__gnu_pbds` |
+| knucleotide | `swift` | `Dictionary`, whose hash is always SipHash through `Hasher`, as Swift's standard library requires |
+| binarytrees | `swift` | a class node with ARC's atomic counts on every retain and release |
+
+**Only C, Rust and sysl have tuned columns.** C++, Swift, Zig, Odin, C3, Ada and Fortran are each
+their plain program, and their ratios are those of the published or ported program, not of the
+language at its best.
+
+## Methodology, and what a reader should know
+
+- **One machine.** Apple Silicon (the report names the processor, model, core counts, memory, macOS
+  build and power source), arm64 only. The tuned C and Rust columns use NEON intrinsics and build on
+  arm64 only.
+- **Single-threaded.** No program starts a thread: the C and Fortran programs' OpenMP directives are
+  inert (no `-fopenmp`), and every threaded Rust, C++ and Swift program was made sequential
+  (SOURCES.md).
+- **Sizes.** nbody 50,000,000, spectralnorm 5,500, fasta 25,000,000, reverse-complement on fasta
+  25,000,000 and pidigits 10,000 are the Game's sizes. binarytrees 18 (Game 21), fannkuchredux 11
+  (12), mandelbrot 6,000 (16,000), and k-nucleotide and regex-redux on fasta 10,000,000 (Game
+  25,000,000 and 5,000,000) are smaller, to keep a full run near an hour. Every language runs the same
+  size.
+- **The timing is the whole process** (rule 7): `hyperfine -N --warmup 3 --runs 10`, no shell, output to
+  `/dev/null`, input from the generated file, which the warm-ups leave in the page cache for every
+  language alike. A process's start-up (3 to 4 ms for `/usr/bin/true` here) is in every time; the
+  shortest programs run a few hundred milliseconds or more, so it stays a small share.
+- **Order.** hyperfine runs every run of one language, then the next, in the fixed order of
+  `scripts/lib.zsh`; there is no interleaving, so a slow drift of the machine's state lands on the
+  later columns. The spread table (standard deviation as a percentage of the mean) is the noise a
+  difference must beat.
+- **Raw data.** Each results JSON keeps every run's wall, CPU, user and system time, peak resident
+  set and exit code, beside the mean, standard deviation, minimum and median.
+- **Versions.** The report records each toolchain's version when it is written; build and timing
+  belong in one session with no toolchain upgraded between them.
+- **Verification** compares the output at the small size with the Game's own file and at the timed
+  size with the C program's hash, which every language's output matches. It checks output only; a
+  program that ends with a non-zero status fails the timing instead, since hyperfine stops on one.
+- **pidigits** measures `sysl.math.bigint` against GMP in every other language; **regex-redux**
+  measures each language's regular-expression library (above).
+- **The tuned binarytrees** in C and Rust check and free each tree in one walk; `sysl-tuned` walks
+  twice, as the plain programs do. The difference is against sysl.
 
 ## Layout
 
@@ -113,9 +183,9 @@ results/           one JSON and one Markdown table per run
 `scripts/run.zsh` checks each program twice. At a small size its output is compared byte for byte with
 the file the Benchmarks Game publishes (`expected/ref/`). At the size that is timed, its output hash is
 compared with `expected/<name>.sha256`, which is the C program's output; the Benchmarks Game publishes
-no output at those sizes. The hashes were then confirmed identical across all six implementations.
-k-nucleotide, reverse-complement and regex-redux read a fasta file generated by the C `fasta`
-at `build/inputs/`.
+no output at those sizes. Every language's output matches it, which `run.zsh --verify` checks on every
+run. k-nucleotide and regex-redux read the C `fasta`'s output at 10,000,000, and reverse-complement
+its output at 25,000,000, both generated into `build/inputs/` by `build.zsh`.
 
 ## Running it
 
@@ -128,7 +198,7 @@ zsh scripts/run.zsh --verify
 zsh scripts/run.zsh
 ```
 
-`run.zsh` verifies, then runs `hyperfine --warmup 3 --runs 10` for every program and writes
+`run.zsh` verifies, then runs `hyperfine -N --warmup 3 --runs 10` for every program and writes
 `results/<date>.json` and `results/<date>.md`. The table gives each language's time as a ratio to C
 (wall clock, and again from CPU time), the load average at the start and end, and the version of every
 toolchain with its LLVM version.

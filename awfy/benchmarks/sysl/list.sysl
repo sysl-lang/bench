@@ -1,3 +1,5 @@
+@no_fuse
+
 struct Element
     value: int
     next: Option[&Element]

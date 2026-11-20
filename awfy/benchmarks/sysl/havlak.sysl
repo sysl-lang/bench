@@ -1,3 +1,5 @@
+@no_fuse
+
 // Havlak's loop finder, by way of Robert Hundt's "Loop Recognition in C++/Java/Go/Scala" and the
 // Java version of the suite.
 

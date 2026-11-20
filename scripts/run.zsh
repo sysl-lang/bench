@@ -23,7 +23,7 @@ run_program() {  # <program> <language> <small|big>
   local prog=$1 lang=$2 size=$3 exe=$(exe $1 $2)
 
   if [[ $BIG[$prog] == - ]]; then
-    if [[ $size == small ]]; then $exe < expected/ref/$prog.in; else $exe < $INPUT; fi
+    if [[ $size == small ]]; then $exe < expected/ref/$prog.in; else $exe < $(input_for $prog); fi
   elif [[ $size == small ]]; then
     $exe $SMALL[$prog]
   else
@@ -84,7 +84,7 @@ for prog in $PROGRAMS; do
   timed=()
   for lang in $LANGS; do [[ -z ${DNF[$prog:$lang]} ]] && timed+=($lang); done
   if [[ $BIG[$prog] == - ]]; then
-    args+=(--input $INPUT)
+    args+=(--input $(input_for $prog))
     for lang in $timed; do cmds+=(-n $lang $(exe $prog $lang)); done
   else
     for lang in $timed; do cmds+=(-n $lang "$(exe $prog $lang) $BIG[$prog]"); done

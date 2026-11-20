@@ -39,18 +39,16 @@ typeset -A OUTER WARMUP
 OUTER=(sysl 10 sysl-dev 10 cpp 10)
 WARMUP=(sysl 0 sysl-dev 0 cpp 0)
 
-# The benchmarks a language cannot run yet, with the reason (README.md, "Gaps").
+# The benchmarks a language cannot run yet, with the reason (README.md, "Gaps"). Empty from sysl
+# 0.12.0, which the sysl sources need (`@no_fuse`, and `===` on a trait object for DeltaBlue): every
+# language runs every benchmark, so no geometric mean is over a subset (AUDIT.md A5).
 typeset -A SKIP
-SKIP=(sysl:DeltaBlue "a trait object has no identity ('===') in sysl 0.11.12; it has from sysl dev c3af7f5c (AW1)"
-      sysl:Mandelbrot "the port fuses a*b+c on AArch64 and the check needs separate roundings"
-      sysl:NBody "the port fuses a*b+c on AArch64 and the check needs separate roundings"
-      sysl-dev:Mandelbrot "the port fuses a*b+c on AArch64 and the check needs separate roundings"
-      sysl-dev:NBody "the port fuses a*b+c on AArch64 and the check needs separate roundings")
+SKIP=()
 
 # The benchmarks a sysl compiler cannot build at all: its harness is built from a copy of
-# benchmarks/sysl without their files and without their arms in run.sysl.
+# benchmarks/sysl without their files and without their arms in run.sysl. Empty from sysl 0.12.0.
 typeset -A OMIT
-OMIT=(sysl DeltaBlue)
+OMIT=()
 
 harness() {  # <lang>
   case $1 in
@@ -92,8 +90,10 @@ build() {
   done
 
   # Upstream build.sh: OPT='-O3 -flto -march=native', COMP_OPT='-ffp-contract=off -std=c++17'.
+  # -mcpu=native where upstream says -march=native: on arm64 Apple clang -march=native means
+  # apple-m1, and -mcpu=native is this machine's processor, as sysl's --cpu native is (AUDIT.md A1).
   t0=$EPOCHREALTIME
-  if (cd benchmarks/C++ && clang++ -Wall -Wextra -Wno-unused-private-field -O3 -flto -march=native \
+  if (cd benchmarks/C++ && clang++ -Wall -Wextra -Wno-unused-private-field -O3 -flto -mcpu=native \
         -ffp-contract=off -std=c++17 src/harness.cpp src/deltablue.cpp src/memory/object_tracker.cpp \
         src/richards.cpp -o $BUILD/harness-cpp) >$BUILD/cpp.log 2>&1; then
     print -r -- "$(( EPOCHREALTIME - t0 ))" > $BUILD/cpp.build-seconds

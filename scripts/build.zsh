@@ -47,10 +47,14 @@ for prog in $PROGRAMS; do
               SYSL_NO_CACHE=1 SYSL_LIB=$SYSL_DEV_LIB $SYSL_DEV build --release -O3 --cpu native $libs -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
       sysl-*) SYSL_NO_CACHE=1 env -u SYSL_LIB sysl build --release -O3 --cpu native $libs -o $out $dir/$prog.sysl >$out.log 2>&1 ;;
       c|c-tuned)
-              clang -std=gnu17 -O3 -march=native -w -I$dir $dir/$prog.c -o $out -lm $libs >$out.log 2>&1 ;;
-      cpp)    clang++ -std=c++20 -O3 -march=native -w $dir/$prog.cpp -o $out $libs >$out.log 2>&1 ;;
+              # -mcpu=native, not -march=native: on arm64 Apple clang -march=native means apple-m1 and
+              # the v8.7a features, while -mcpu=native is this machine's processor, as sysl's
+              # --cpu native and Rust's target-cpu=native are (AUDIT.md A1).
+              clang -std=gnu17 -O3 -mcpu=native -w -I$dir $dir/$prog.c -o $out -lm $libs >$out.log 2>&1 ;;
+      cpp)    clang++ -std=c++20 -O3 -mcpu=native -w $dir/$prog.cpp -o $out $libs >$out.log 2>&1 ;;
       rust|rust-tuned)
-              rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native $dir/$prog.rs -o $out $libs >$out.log 2>&1 ;;
+              # codegen-units=1, as the Benchmarks Game builds Rust (AUDIT.md A2).
+              rustc --crate-name bench --edition 2021 -C opt-level=3 -C target-cpu=native -C codegen-units=1 $dir/$prog.rs -o $out $libs >$out.log 2>&1 ;;
       swift)  swiftc -O $dir/$prog.swift -o $out $libs >$out.log 2>&1 ;;
       zig)    (cd $dir && zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded -lc --cache-dir $BUILD/.zig-cache --global-cache-dir $BUILD/.zig-global -femit-bin=$out $libs $prog.zig) >$out.log 2>&1 ;;
       nim)    nim c -d:danger --opt:speed --mm:orc --cc:clang --passC:-march=native --threads:off --hints:off --warnings:off --nimcache:$BUILD/.nimcache/$prog -o:$out $libs $dir/$prog.nim >$out.log 2>&1 ;;
@@ -76,6 +80,8 @@ mkdir -p $BUILD/inputs
 if [[ -x $(exe fasta c) ]]; then
   $(exe fasta c) $INPUT_N > $INPUT
   print "input  $INPUT ($(wc -c < $INPUT) bytes)"
+  $(exe fasta c) $REVCOMP_N > $REVCOMP_INPUT
+  print "input  $REVCOMP_INPUT ($(wc -c < $REVCOMP_INPUT) bytes)"
 elif (( ${PROGRAMS[(Ie)knucleotide]} || ${PROGRAMS[(Ie)revcomp]} )); then
   failed=1
 fi

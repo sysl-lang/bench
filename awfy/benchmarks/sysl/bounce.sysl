@@ -1,3 +1,5 @@
+@no_fuse
+
 import som.{Random, random}
 
 struct Ball

@@ -1,3 +1,5 @@
+@no_fuse
+
 // A JSON parser over a string, after minimal-json by Ralf Sternberg, by way of the Java version of the
 // suite.
 

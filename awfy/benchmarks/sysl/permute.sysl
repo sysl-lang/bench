@@ -1,3 +1,5 @@
+@no_fuse
+
 struct Permute
     count: int
     v: []int

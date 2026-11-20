@@ -48,4 +48,14 @@ INPUT_N=10000000
 BUILD=$ROOT/build
 INPUT=$BUILD/inputs/fasta-$INPUT_N.txt
 
+# reverse-complement reads the Benchmarks Game's own size, fasta 25,000,000 (about 254 MB): at
+# 10,000,000 its fastest programs finish in about 30 ms, where a process's start-up (3 to 4 ms for
+# /usr/bin/true here) is a tenth of the time and its differences between languages move the ratios
+# (AUDIT.md A7).
+REVCOMP_N=25000000
+REVCOMP_INPUT=$BUILD/inputs/fasta-$REVCOMP_N.txt
+
 exe() { print -r -- $BUILD/$1/$2; }
+
+# The standard input a program whose size is - reads at the timed size.
+input_for() { [[ $1 == revcomp ]] && print -r -- $REVCOMP_INPUT || print -r -- $INPUT; }

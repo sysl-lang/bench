@@ -1,3 +1,5 @@
+@no_fuse
+
 // DeltaBlue, the incremental constraint solver of Freeman-Benson and Maloney, by way of the Smalltalk,
 // SOM and Java versions of the suite.
 //

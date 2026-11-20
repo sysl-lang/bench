@@ -1,4 +1,5 @@
-/* Adapted for this suite: the concurrentPerform over 8 tasks is a single sequential task.
+/* Adapted for this suite: the concurrentPerform over 8 tasks is a single sequential task, whose
+   table is returned as it is rather than merged into an empty one.
 
    The Computer Language Benchmarks Game
    https://salsa.debian.org/benchmarksgame-team/benchmarksgame/
@@ -59,6 +60,12 @@ func getSequenceHash(_ n: Int, seq: [Int8]) -> [Int:Int] {
             } else {
                 lHash[idx] = 1
             }
+        }
+        // One task: its table IS the result. Merging it into an empty table, as the threaded
+        // original must, would insert every key a second time.
+        if ntasks == 1 {
+            hash = lHash
+            continue
         }
         for (key, count) in lHash {
             if let value = hash[key] {

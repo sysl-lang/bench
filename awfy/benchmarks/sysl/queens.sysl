@@ -1,3 +1,5 @@
+@no_fuse
+
 struct Queens
     free_maxs: []bool
     free_rows: []bool

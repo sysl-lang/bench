@@ -4,7 +4,8 @@
    Contributed by Branimir Maksimovic
 
    Adapted for this suite: __gnu_pbds::cc_hash_table is replaced by
-   std::unordered_map and the std::async worker per core by a single call.
+   std::unordered_map and the std::async worker per core by a single call; each
+   k-mer's code is rolled from the previous one, not re-encoded from its k bases.
 */
 
 // g++ 4.8.x bug, compile with: -Wl,--no-as-needed option 
@@ -81,9 +82,16 @@ calculate(const std::string& input,unsigned size, unsigned beg=0,unsigned incr=1
 {
    std::unordered_map<T,unsigned,T::hash> frequencies;
    T tmp;
-   for (unsigned i = beg, i_end = input.size() + 1 - size; i < i_end; i+=incr)
+   unsigned i_end = input.size() + 1 - size;
+   if (beg >= i_end) return frequencies;
+   // The first k-mer is encoded whole; each later one rolls the code by one base, as every
+   // other language's program does (README rule 3), where the archive re-encoded all k bases.
+   const uint64_t mask = size >= 32 ? ~uint64_t(0) : (uint64_t(1) << (2 * size)) - 1;
+   tmp.reset(input,beg,beg+size);
+   ++frequencies[tmp];
+   for (unsigned i = beg + incr; i < i_end; i+=incr)
    {
-     tmp.reset(input,i,i+size);
+      tmp.data = ((tmp.data << 2) | tonum[unsigned(input[i+size-1])]) & mask;
       ++frequencies[tmp];
    }
    return frequencies;

@@ -61,11 +61,14 @@ toolchains = {
     "hyperfine": {"version": first_line(run(["hyperfine", "--version"]))},
 }
 flags = {
-    "sysl": "sysl build --release -O3 --cpu native",
-    "c": "clang -std=gnu17 -O3 -march=native (c-tuned the same)",
-    "cpp": "clang++ -std=c++20 -O3 -march=native",
-    "rust": "rustc --edition 2021 -C opt-level=3 -C target-cpu=native (rust-tuned the same)",
-    "swift": "swiftc -O",
+    "sysl": "sysl build --release -O3 --cpu native (bounds checks stay on; sysl-tuned drops them inside "
+            "its `@unchecked` blocks; integer overflow wraps in a release build)",
+    "c": "clang -std=gnu17 -O3 -mcpu=native (c-tuned the same; -mcpu, because Apple clang reads "
+         "-march=native on arm64 as apple-m1)",
+    "cpp": "clang++ -std=c++20 -O3 -mcpu=native",
+    "rust": "rustc --edition 2021 -C opt-level=3 -C target-cpu=native -C codegen-units=1 (rust-tuned the "
+            "same; bounds checks stay on, overflow wraps)",
+    "swift": "swiftc -O (bounds checks and integer-overflow traps stay on; no CPU option, so generic arm64)",
     "zig": "zig build-exe -O ReleaseFast -mcpu=native -fsingle-threaded",
     "odin": "odin build -o:speed -microarch:native (bounds checks stay on)",
     "c3": "c3c compile -O3 (-O3 is c3c's unsafe mode: runtime bounds checks and contracts are off; "
@@ -78,7 +81,13 @@ flags = {
                "fortran-stdlib's hash map",
 }
 machine = {"cpu": run(["sysctl", "-n", "machdep.cpu.brand_string"]),
-           "os": first_line(run(["sw_vers", "-productVersion"]))}
+           "model": run(["sysctl", "-n", "hw.model"]),
+           "performance_cores": run(["sysctl", "-n", "hw.perflevel0.physicalcpu"]),
+           "efficiency_cores": run(["sysctl", "-n", "hw.perflevel1.physicalcpu"]),
+           "memory_bytes": run(["sysctl", "-n", "hw.memsize"]),
+           "os": first_line(run(["sw_vers", "-productVersion"])),
+           "os_build": first_line(run(["sw_vers", "-buildVersion"])),
+           "power": first_line(run(["pmset", "-g", "ps"]))}
 
 def load(name):
     with open(os.path.join(raw, name)) as f:
@@ -106,8 +115,14 @@ for prog in programs:
         wall = [m["time_wall_clock"]["value"] for m in ms]
         cpu = [m["time_cpu"]["value"] for m in ms]
         mean, stddev, low, median = stats(wall)
+        # Every run's own figures are kept, so that any statistic can be recomputed from the file.
         entry[lang] = {"mean": mean, "stddev": stddev, "min": low, "median": median,
-                       "cpu_mean": sum(cpu) / len(cpu), "runs": len(wall)}
+                       "cpu_mean": sum(cpu) / len(cpu), "runs": len(wall),
+                       "wall_seconds": wall, "cpu_seconds": cpu,
+                       "user_seconds": [m["time_user"]["value"] for m in ms],
+                       "system_seconds": [m["time_system"]["value"] for m in ms],
+                       "peak_rss_bytes": [m.get("memory_peak_resident", {}).get("value") for m in ms],
+                       "exit_codes": [m.get("exit_code") for m in ms]}
     base, cpu_base = entry["c"]["mean"], entry["c"]["cpu_mean"]
     for lang in entry:
         entry[lang]["ratio_to_c"] = entry[lang]["mean"] / base
@@ -139,7 +154,25 @@ def cell(e, lang, key, fmt):
 
 overall_geo = {"wall": group_geo(columns, "ratio_to_c"), "cpu": group_geo(columns, "cpu_ratio_to_c")}
 
+# The comparison a headline about speed may quote (AUDIT.md A6): each language's FASTER column, the
+# tuned one where it has one, against the faster of C's two programs on that program. The plain C
+# programs are the baseline of the tables above and are known to be weak on several programs
+# (README, "Known weaknesses of the plain columns"), so a ratio to plain C flatters every language.
+best_columns = {"c": ["c", "c-tuned"], "rust": ["rust", "rust-tuned"],
+                "sysl": ["sysl-idiomatic", "sysl-tuned"],
+                **{lang: [lang] for lang in ["cpp", "zig", "odin", "c3", "ada", "fortran", "swift"]}}
+best = {}
+for prog in common:
+    e = data[prog]
+    c_best = min(e[c]["mean"] for c in best_columns["c"] if c in e)
+    best[prog] = {lang: min(e[c]["mean"] for c in cols if c in e) / c_best
+                  for lang, cols in best_columns.items() if any(c in e for c in cols)}
+best_geo = {lang: math.exp(sum(math.log(best[p][lang]) for p in common) / len(common))
+            for lang in best_columns}
+
 doc = {"date": stamp, "columns": columns,
+       "best_column_ratio_to_best_c": best, "best_column_geometric_mean": best_geo,
+       "best_columns": best_columns,
        "overall_geometric_mean_ratio_to_c": overall_geo, "machine": machine, "toolchains": toolchains, "flags": flags,
        "hyperfine": "--warmup 3 --runs 10",
        "load": {"start": load("load-start.txt"), "end": load("load-end.txt")}, "programs": data, "geometric_mean_ratio_to_c": geo,
@@ -150,7 +183,12 @@ with open(os.path.join(root, "results", stamp + ".json"), "w") as f:
     f.write("\n")
 
 lines = [f"# Results {stamp}", "",
-         f"{machine['cpu']}, macOS {machine['os']}. Single-threaded, `hyperfine --warmup 3 --runs 10`.", "",
+         f"{machine['cpu']} ({machine['model']}; {machine['performance_cores']} performance and "
+         f"{machine['efficiency_cores']} efficiency cores; {int(machine['memory_bytes']) // 2**30} GiB), "
+         f"macOS {machine['os']} ({machine['os_build']}), {machine['power']}. Single-threaded, "
+         "`hyperfine -N --warmup 3 --runs 10`; each program's languages run one after another in a fixed "
+         "order, every run of one language before the next. Every run's own times are in the JSON file "
+         "beside this one.", "",
          *([f"**{os.environ['BENCH_NOTE']}**", ""] if os.environ.get("BENCH_NOTE") else []),
          "Each cell is the mean time as a ratio to C (1.00 = as fast as C, higher is slower). "
          "The `C (s)` column is C's own mean in seconds. Every language here runs with no garbage "
@@ -172,6 +210,19 @@ if dnf:
               f"column finished ({', '.join(common)}), so the columns stay comparable."]
 lines += ["", f"Geometric mean over every program and language, C included (wall clock): "
           f"**{overall_geo['wall']:.2f}**."]
+best_langs = list(best_columns)
+lines += ["", "## Each language at its best", "",
+          "The comparison to quote. Each cell is the language's faster column on that program (its tuned "
+          "column where it has one: c-tuned, rust-tuned, sysl-tuned) as a ratio to the faster of `c` and "
+          "`c-tuned`, by wall-clock mean. The tables above divide by the plain C program, which is weak on "
+          "several programs (README, \"Known weaknesses of the plain columns\") and so flatters every "
+          "language. Only C, Rust and sysl have tuned columns; every other language is its plain program.",
+          "",
+          "| program | " + " | ".join(best_langs) + " |",
+          "|---|" + "---:|" * len(best_langs)]
+for prog in common:
+    lines.append(f"| {prog} | " + " | ".join(f"{best[prog][l]:.2f}" for l in best_langs) + " |")
+lines.append("| **geometric mean** | " + " | ".join(f"{best_geo[l]:.2f}" for l in best_langs) + " |")
 lines += ["", "## CPU time", "",
           "The same ratios computed from CPU time (user plus system) instead of wall-clock time, which a "
           "busy machine disturbs less.", "",

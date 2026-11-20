@@ -1,3 +1,8 @@
+@no_fuse
+
+// Every file of the suite's module starts with `@no_fuse`: no multiply is fused with the add it
+// feeds, which is the C++ port's `-ffp-contract=off` (upstream build.sh; AUDIT.md A5).
+
 // What every benchmark provides: one run that answers a result, a check of that result, and the
 // inner loop the harness times, which by default runs and checks the benchmark that many times.
 trait Benchmark

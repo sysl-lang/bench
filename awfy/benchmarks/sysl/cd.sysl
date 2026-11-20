@@ -1,3 +1,5 @@
+@no_fuse
+
 // CD, the collision detector of the CDx real-time Java benchmark, by way of the Java version of the
 // suite.
 

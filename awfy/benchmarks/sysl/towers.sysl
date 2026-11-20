@@ -1,3 +1,5 @@
+@no_fuse
+
 struct TowersDisk
     size: int
     next: Option[&TowersDisk]

@@ -1,3 +1,5 @@
+@no_fuse
+
 const pi = 3.141592653589793
 const solar_mass = 4.0 * pi * pi
 const days_per_year = 365.24

@@ -1,3 +1,5 @@
+@no_fuse
+
 // Mario Wolczko's Richards, by way of the SOM and Java versions of the suite.
 
 const idler = 0

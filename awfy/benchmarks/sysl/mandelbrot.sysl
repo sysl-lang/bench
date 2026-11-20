@@ -1,3 +1,5 @@
+@no_fuse
+
 struct Mandelbrot
 end Mandelbrot
 

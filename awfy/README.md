@@ -70,8 +70,16 @@ sysl:
 
 | language | compiler | flags |
 |---|---|---|
-| sysl | the `sysl` on PATH (Homebrew), and with `SYSL_DEV=<binary> SYSL_DEV_LIB=<library dir>` a second compiler as `sysl-dev`; each run's results name both versions | `sysl build --release -O3 --cpu native` |
-| C++ | Apple clang 21.0.0 (clang-2100.4.1.1) | `-O3 -flto -march=native -ffp-contract=off -std=c++17` (upstream `build.sh`) |
+| sysl | the `sysl` on PATH (Homebrew), **0.12.0 or later**, and with `SYSL_DEV=<binary> SYSL_DEV_LIB=<library dir>` a second compiler as `sysl-dev`; each run's results name both versions | `sysl build --release -O3 --cpu native`; every file of the module is `@no_fuse` |
+| C++ | Apple clang 21.0.0 (clang-2100.4.1.1) | `-O3 -flto -mcpu=native -ffp-contract=off -std=c++17` (upstream `build.sh`, with `-mcpu=native` for its `-march=native`) |
+
+**The two languages are built with the same floating-point and processor settings.** Upstream builds
+C++ with `-ffp-contract=off`, so no multiply is fused with the add it feeds; every sysl file starts
+with `@no_fuse`, which is the same rule for the whole module. Before it, sysl fused where C++ did not,
+which gave sysl one instruction fewer per multiply-add on CD and kept Mandelbrot and NBody from
+passing their exact checks (AUDIT.md A5). On arm64 Apple clang reads `-march=native` as the apple-m1
+processor and its features, while `-mcpu=native` and sysl's `--cpu native` name this machine's own
+(AUDIT.md A1).
 
 **Rust:** upstream has no Rust port (its README asks for one, "guided by our C++ port"), so none is
 timed here.
@@ -113,18 +121,8 @@ caffeinate -dimsu marshal run --exclusive --quiet-load auto --dir ~/dev/sysl-lan
 
 ## Gaps
 
-`run.zsh` skips a benchmark a sysl compiler cannot run and says why.
-
-- **DeltaBlue** compares constraints by identity — `Vector.remove(constraint)`,
-  `c != determiningC`, `determinedBy == c` — and its constraints are polymorphic, so in sysl they are
-  `&AbstractConstraint` trait objects compared with `===`. sysl 0.11.12 and earlier refuse `===` on a
-  trait object; sysl dev from c3af7f5c accepts it. `run.zsh` builds the 0.11.12 harness from a copy of
-  the sources without DeltaBlue (`OMIT`), so the `sysl` column has no DeltaBlue and `sysl-dev` does.
-- **Mandelbrot** and **NBody** check their floating-point result exactly, against values computed with
-  every multiply and add rounded separately (upstream builds C++ with `-ffp-contract=off` for this
-  reason). sysl fuses `a * b + c` into one rounding wherever the machine can, which on AArch64 is
-  everywhere; sysl 0.11.12 has no build option, attribute or pragma to turn that off. sysl dev has
-  `@no_fuse` (B5), and the ports have not yet been rewritten with it. Both ports compile and run, and
-  fail their checks.
-  `pending/unfused/` has them rewritten with every product bound to a `val`: so written they pass, at
-  C++'s speed.
+None from sysl 0.12.0: every benchmark runs in both languages, so no geometric mean is taken over a
+subset. `run.zsh` keeps its `SKIP` and `OMIT` tables, empty, for a benchmark a sysl compiler cannot
+run, and says why when one is listed. The sources need 0.12.0: DeltaBlue compares its
+`&AbstractConstraint` trait objects with `===`, which 0.11 refuses, and every file is `@no_fuse`,
+which 0.11 does not have. All fourteen benchmarks were verified on a 0.12 candidate (AUDIT.md A5).

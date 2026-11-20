@@ -58,9 +58,9 @@ included, must do (README rule 3).
 | fasta | Rust | `fasta.rust-3.rust` | unchanged |
 | fasta | Swift | none | **a port of the C program above, written for this suite**: the archive's Swift programs build a `String` a `Character` at a time (`fasta.swift-8`) or use Dispatch threads (`fasta.swift-2`, `-3`), neither of which is the C program's work |
 | knucleotide | C | `knucleotide.gcc` | unchanged; needs `khash.h` |
-| knucleotide | C++ | `knucleotide.gpp-3.gpp` | `__gnu_pbds::cc_hash_table` replaced by `std::unordered_map` (libc++ has no pb_ds), and the `std::async` worker per core by one call |
+| knucleotide | C++ | `knucleotide.gpp-3.gpp` | `__gnu_pbds::cc_hash_table` replaced by `std::unordered_map` (libc++ has no pb_ds), and the `std::async` worker per core by one call. Each k-mer's code is rolled from the previous one, as every other program does (rule 3), where the archive re-encoded all k bases at every position (AUDIT.md A4) |
 | knucleotide | Rust | `knucleotide.rust` | the archive program keys a `HashMap` by a freshly allocated `Vec<u8>` per position, which is a different data structure from the others' integer keys. Rewritten to key a `HashMap` by the 2k-bit `u64` code with a one-multiply hasher; the reading, sorting and output are the archive's. Threads removed |
-| knucleotide | Swift | `knucleotide.swift-2.swift` | `concurrentPerform` over 8 tasks replaced by a loop over one task; the Dispatch queues removed |
+| knucleotide | Swift | `knucleotide.swift-2.swift` | `concurrentPerform` over 8 tasks replaced by a loop over one task, whose table is the result (merging it into an empty table, as the threaded original must, inserted every key twice: AUDIT.md A3); the Dispatch queues removed |
 | revcomp | C | `revcomp.gcc-4.gcc` | unchanged |
 | revcomp | C++ | `revcomp.gcc-4.gcc` | **the C program ported to C++** (casts on `malloc`/`realloc`, the table copied with `memcpy`). The archive's C++ programs (`revcomp.gpp`, `-2`, `-3`) read line by line through iostreams and ran 45 times slower than C, which is the I/O library rather than the algorithm |
 | revcomp | Rust | `revcomp.rust-2.rust` | `rayon::join` replaced by a local sequential `join` |
@@ -295,22 +295,30 @@ language offers for writing it pleasantly. That includes vectors (`<N>T`) where 
 tool: mandelbrot computes the eight pixels of one output byte as one `<8>real`.
 
 **`sysl-tuned`** may use any documented feature that trades pleasantness for speed: vectors everywhere,
-fixed-size arrays, unchecked indexing, explicit layouts, manual unrolling. It may not carry a
-workaround for a compiler gap. The test is whether the change would be pointless once the compiler
-does its job; if so, it is an entry in FINDINGS.md and not code. Hand-hoisting fields into locals,
-calling `llvm.sqrt` by hand, hand strength reduction and keeping generator state in a local by hand
-are all workarounds in this sense. Where no legitimate feature beats the idiomatic program,
-`sysl-tuned` is a copy of it.
+fixed-size arrays, unchecked indexing, explicit layouts, manual unrolling, and, as the tuned C and
+Rust programs may, what a program can do itself to get past a compiler or library gap. Each such
+workaround is a "Tuned" line under its program in FINDINGS.md naming the compiler or library item
+that would make it pointless. Where nothing beats the idiomatic program, `sysl-tuned` is a copy of it.
 
-What each `sysl-tuned` program does differently from `sysl-idiomatic`:
+What each `sysl-tuned` program does differently from `sysl-idiomatic` (each file's own `// Tuned:`
+comments are the full account):
 
 - **nbody**: a body's position and velocity are `<3>real`, so a pair's distance, its squared length
   and both velocity updates are vector operations.
-- **spectralnorm**: a copy. Rust's form, two columns per step, needs the integer denominators of two
-  columns as a `<2>real`, and sysl has no conversion from `<2>usize` to `<2>real` (FINDINGS.md).
-- **fannkuchredux**: a copy. Three `[16]usize` arrays in place of the heap slices measured no faster
-  (1.351 s against 1.333 s).
-- **binarytrees, mandelbrot, fasta, knucleotide, revcomp**: copies.
+- **spectralnorm**: two columns per step, as Rust does: each step loads two elements as a `<2>real`
+  and divides them by the two columns' denominators in one two-lane divide; `@unchecked`.
+- **fannkuchredux**: the permutation is one `<16>u8` and a flip one constant shuffle chosen by a
+  `match` on its length; `@unchecked`.
+- **binarytrees**: C's node, two raw pointers, from `extern malloc` and given back by `extern free`
+  in a second walk, as the plain C program does (the tuned C and Rust programs check and free in one
+  walk).
+- **mandelbrot**: the escape test every fifth iteration, as `c-tuned` does.
+- **fasta**: the generator state in a local `u32`, the thresholds in one vector compared lane-wise,
+  and the lines written a block at a time; `@unchecked`.
+- **knucleotide**: a key type whose hash is one multiply (Rust's hasher), each table sized up front,
+  input read with `read(2)` into `realloc`ed storage; `@unchecked`.
+- **revcomp**: the input read into `realloc`ed storage, and each record reverse-complemented in place
+  in its line layout, a run from each end swapped at a time; `@unchecked` around the swap.
 - **regexredux**: not the same library. `sysl-idiomatic` uses the standard `sysl.regex` (POSIX ERE,
   a Pike VM; `.` matches a newline there, so the header pattern is `>[^\n]*\n|\n`) and its
   `find_all` and `replace_all`. `sysl-tuned` is C's program: PCRE2 with the JIT, through nine `extern`
