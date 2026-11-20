@@ -110,10 +110,18 @@ private is_black[K, V](n: Option[&Node[K, V]]) -> bool =
         Some(x) -> x.color == Black
         None -> true
 
+// What tree_insert did: placed a new node, or replaced the value of the key's node and answers the
+// value it held.
+struct InsertResult[K, V]
+    is_new_entry: bool
+    new_node: Option[&Node[K, V]]
+    old_value: Option[V]
+end InsertResult
+
 struct RedBlackTree[K: CompareTo, V]
     root: Option[&Node[K, V]]
 
-    put(*self, key: K, value: V) -> Option[V]
+    private tree_insert(*self, key: K, value: V) -> InsertResult[K, V]
         var y: Option[&Node[K, V]] = None
         var x = self.root
 
@@ -127,7 +135,7 @@ struct RedBlackTree[K: CompareTo, V]
             else
                 val old_value = n.value
                 n.value = value
-                return Some(old_value)
+                return InsertResult(false, None, Some(old_value))
 
         val z: &Node[K, V] = Node(key, value, None, None, y, Red)
 
@@ -137,10 +145,17 @@ struct RedBlackTree[K: CompareTo, V]
                 if key.compare_to(yy.key) < 0 then yy.left = Some(z)
                 else yy.right = Some(z)
 
-        var x2 = z
+        InsertResult(true, Some(z), None)
 
-        while !holds(x2, self.root) && x2.parent.unwrap().color == Red
-            val p = x2.parent.unwrap()
+    put(*self, key: K, value: V) -> Option[V]
+        val insertion_result = self.tree_insert(key, value)
+
+        if !insertion_result.is_new_entry then return insertion_result.old_value
+
+        var x = insertion_result.new_node.unwrap()
+
+        while !holds(x, self.root) && x.parent.unwrap().color == Red
+            val p = x.parent.unwrap()
             val gp = p.parent.unwrap()
 
             if holds(p, gp.left)
@@ -151,15 +166,15 @@ struct RedBlackTree[K: CompareTo, V]
                     p.color = Black
                     uncle.unwrap().color = Black
                     gp.color = Red
-                    x2 = gp
+                    x = gp
                 else
-                    if holds(x2, p.right)
+                    if holds(x, p.right)
                         // Case 2
-                        x2 = p
-                        self.left_rotate(x2)
+                        x = p
+                        self.left_rotate(x)
 
                     // Case 3
-                    val p3 = x2.parent.unwrap()
+                    val p3 = x.parent.unwrap()
 
                     p3.color = Black
                     p3.parent.unwrap().color = Red
@@ -173,15 +188,15 @@ struct RedBlackTree[K: CompareTo, V]
                     p.color = Black
                     uncle.unwrap().color = Black
                     gp.color = Red
-                    x2 = gp
+                    x = gp
                 else
-                    if holds(x2, p.left)
+                    if holds(x, p.left)
                         // Case 2
-                        x2 = p
-                        self.right_rotate(x2)
+                        x = p
+                        self.right_rotate(x)
 
                     // Case 3
-                    val p3 = x2.parent.unwrap()
+                    val p3 = x.parent.unwrap()
 
                     p3.color = Black
                     p3.parent.unwrap().color = Red
@@ -553,7 +568,7 @@ struct CollisionDetector
 
         to_remove.for_each(e -> self.state.remove(e))
 
-        val all_reduced = reduce_collision_set(motions)
+        val all_reduced = self.reduce_collision_set(motions)
         val collisions: &Vector[Collision] = vector()
 
         all_reduced.for_each(reduced ->
@@ -568,6 +583,47 @@ struct CollisionDetector
                         None -> ())
 
         collisions
+
+    private recurse(*self, voxel_map: &RedBlackTree[Vector2D, &Vector[Motion]], seen: &RedBlackTree[Vector2D, bool],
+                    next_voxel: Vector2D, motion: Motion)
+        if !is_in_voxel(next_voxel, motion) then return
+        if seen.put(next_voxel, true) == Some(true) then return
+
+        put_into_map(voxel_map, next_voxel, motion)
+
+        self.recurse(voxel_map, seen, next_voxel.minus(horizontal), motion)
+        self.recurse(voxel_map, seen, next_voxel.plus(horizontal), motion)
+        self.recurse(voxel_map, seen, next_voxel.minus(vertical), motion)
+        self.recurse(voxel_map, seen, next_voxel.plus(vertical), motion)
+        self.recurse(voxel_map, seen, next_voxel.minus(horizontal).minus(vertical), motion)
+        self.recurse(voxel_map, seen, next_voxel.minus(horizontal).plus(vertical), motion)
+        self.recurse(voxel_map, seen, next_voxel.plus(horizontal).minus(vertical), motion)
+        self.recurse(voxel_map, seen, next_voxel.plus(horizontal).plus(vertical), motion)
+
+    private reduce_collision_set(*self, motions: &Vector[Motion]) -> &Vector[&Vector[Motion]]
+        val voxel_map: &RedBlackTree[Vector2D, &Vector[Motion]] = red_black_tree()
+
+        motions.for_each(motion -> self.draw_motion_on_voxel_map(voxel_map, motion))
+
+        val result: &Vector[&Vector[Motion]] = vector()
+
+        voxel_map.for_each(e -> if e.value.size() > 1 then result.append(e.value))
+        result
+
+    private voxel_hash(*self, position: Vector3D) -> Vector2D
+        val x_div = int(position.x / good_voxel_size)
+        val y_div = int(position.y / good_voxel_size)
+
+        var x = good_voxel_size * real(x_div)
+        var y = good_voxel_size * real(y_div)
+
+        if position.x < 0.0 then x -= good_voxel_size
+        if position.y < 0.0 then y -= good_voxel_size
+
+        Vector2D(x, y)
+
+    private draw_motion_on_voxel_map(*self, voxel_map: &RedBlackTree[Vector2D, &Vector[Motion]], motion: Motion) =
+        self.recurse(voxel_map, red_black_tree(), self.voxel_hash(motion.pos_one), motion)
 end CollisionDetector
 
 collision_detector() -> CollisionDetector = CollisionDetector(red_black_tree())
@@ -620,47 +676,6 @@ private put_into_map(voxel_map: &RedBlackTree[Vector2D, &Vector[Motion]], voxel:
             val arr: &Vector[Motion] = vector()
             arr.append(motion)
             voxel_map.put(voxel, arr)
-
-private recurse(voxel_map: &RedBlackTree[Vector2D, &Vector[Motion]], seen: &RedBlackTree[Vector2D, bool],
-                next_voxel: Vector2D, motion: Motion)
-    if !is_in_voxel(next_voxel, motion) then return
-    if seen.put(next_voxel, true) == Some(true) then return
-
-    put_into_map(voxel_map, next_voxel, motion)
-
-    recurse(voxel_map, seen, next_voxel.minus(horizontal), motion)
-    recurse(voxel_map, seen, next_voxel.plus(horizontal), motion)
-    recurse(voxel_map, seen, next_voxel.minus(vertical), motion)
-    recurse(voxel_map, seen, next_voxel.plus(vertical), motion)
-    recurse(voxel_map, seen, next_voxel.minus(horizontal).minus(vertical), motion)
-    recurse(voxel_map, seen, next_voxel.minus(horizontal).plus(vertical), motion)
-    recurse(voxel_map, seen, next_voxel.plus(horizontal).minus(vertical), motion)
-    recurse(voxel_map, seen, next_voxel.plus(horizontal).plus(vertical), motion)
-
-private reduce_collision_set(motions: &Vector[Motion]) -> &Vector[&Vector[Motion]]
-    val voxel_map: &RedBlackTree[Vector2D, &Vector[Motion]] = red_black_tree()
-
-    motions.for_each(motion -> draw_motion_on_voxel_map(voxel_map, motion))
-
-    val result: &Vector[&Vector[Motion]] = vector()
-
-    voxel_map.for_each(e -> if e.value.size() > 1 then result.append(e.value))
-    result
-
-private voxel_hash(position: Vector3D) -> Vector2D
-    val x_div = int(position.x / good_voxel_size)
-    val y_div = int(position.y / good_voxel_size)
-
-    var x = good_voxel_size * real(x_div)
-    var y = good_voxel_size * real(y_div)
-
-    if position.x < 0.0 then x -= good_voxel_size
-    if position.y < 0.0 then y -= good_voxel_size
-
-    Vector2D(x, y)
-
-private draw_motion_on_voxel_map(voxel_map: &RedBlackTree[Vector2D, &Vector[Motion]], motion: Motion) =
-    recurse(voxel_map, red_black_tree(), voxel_hash(motion.pos_one), motion)
 
 struct Simulator
     aircraft: &Vector[CallSign]

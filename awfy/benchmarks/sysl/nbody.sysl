@@ -111,6 +111,14 @@ nbody_system() -> NBodySystem
     NBodySystem(bodies)
 
 struct NBody
+    // C++ overloads verify_result; sysl refuses a member colliding with a trait member.
+    private verify_nbody(*self, result: real, inner_iterations: int) -> bool
+        if inner_iterations == 250000 then return result == -0.1690859889909308
+        if inner_iterations == 1 then return result == -0.16907495402506745
+
+        print(f"No verification result for $inner_iterations found")
+        print(f"Result is: $result")
+        false
 end NBody
 
 impl Benchmark for NBody
@@ -125,12 +133,4 @@ impl Benchmark for NBody
 
         for _ in 0..<inner_iterations do system.advance(0.01)
 
-        verify_nbody(system.energy(), inner_iterations)
-
-private verify_nbody(result: real, inner_iterations: int) -> bool
-    if inner_iterations == 250000 then return result == -0.1690859889909308
-    if inner_iterations == 1 then return result == -0.16907495402506745
-
-    print(f"No verification result for $inner_iterations found")
-    print(f"Result is: $result")
-    false
+        self.verify_nbody(system.energy(), inner_iterations)

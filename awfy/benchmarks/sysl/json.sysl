@@ -9,19 +9,20 @@ struct HashIndexTable
     hash_table: [32]int
 
     add(*self, name: string, index: int)
-        val slot = hash_slot_for(name)
+        val slot = self.hash_slot_for(name)
 
         // increment by 1, 0 stands for empty
         self.hash_table[slot] = if index < 0xff then (index + 1) & 0xff else 0
 
     // subtract 1, 0 stands for empty
-    get(*self, name: string) -> int = (self.hash_table[hash_slot_for(name)] & 0xff) - 1
+    get(*self, name: string) -> int = (self.hash_table[self.hash_slot_for(name)] & 0xff) - 1
+
+    // this is not a proper hash, but sufficient for the benchmark, and very portable!
+    private string_hash(*self, s: string) -> int = int(s.len) * 1402589
+
+    private hash_slot_for(*self, element: string) -> int =
+        self.string_hash(element) & (int(self.hash_table.len) - 1)
 end HashIndexTable
-
-// this is not a proper hash, but sufficient for the benchmark, and very portable!
-private string_hash(s: string) -> int = int(s.len) * 1402589
-
-private hash_slot_for(element: string) -> int = string_hash(element) & 31
 
 trait JsonValue
     is_object(*self) -> bool = false

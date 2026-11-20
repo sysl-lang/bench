@@ -11,34 +11,39 @@ struct Element
 end Element
 
 struct List
+    private make_list(*self, length: int) -> Option[&Element] =
+        if length == 0 then None else Some(Element(length, self.make_list(length - 1)))
+
+    private is_shorter_than(*self, x: Option[&Element], y: Option[&Element]) -> bool
+        var x_tail = x
+        var y_tail = y
+
+        while y_tail is Some(yt)
+            x_tail match
+                None -> return true
+                Some(xt) -> x_tail = xt.next
+
+            y_tail = yt.next
+
+        false
+
+    private tail(*self, x: Option[&Element], y: Option[&Element], z: Option[&Element]) -> Option[&Element] =
+        if self.is_shorter_than(y, x)
+            self.tail(self.tail(x.unwrap().next, y, z), self.tail(y.unwrap().next, z, x),
+                      self.tail(z.unwrap().next, x, y))
+        else z
 end List
 
 impl Benchmark for List
     type Result = int
 
     benchmark(*self) -> int
-        val result = tail(make_list(15), make_list(10), make_list(6))
+        val x = self.make_list(15)
+        val y = self.make_list(10)
+        val z = self.make_list(6)
+
+        val result = self.tail(x, y, z)
+
         result.unwrap().length()
 
     verify_result(*self, result: int) -> bool = result == 10
-
-private make_list(length: int) -> Option[&Element] =
-    if length == 0 then None else Some(Element(length, make_list(length - 1)))
-
-private is_shorter_than(x: Option[&Element], y: Option[&Element]) -> bool
-    var x_tail = x
-    var y_tail = y
-
-    while y_tail is Some(yt)
-        x_tail match
-            None -> return true
-            Some(xt) -> x_tail = xt.next
-
-        y_tail = yt.next
-
-    false
-
-private tail(x: Option[&Element], y: Option[&Element], z: Option[&Element]) -> Option[&Element] =
-    if is_shorter_than(y, x)
-        tail(tail(x.unwrap().next, y, z), tail(y.unwrap().next, z, x), tail(z.unwrap().next, x, y))
-    else z
