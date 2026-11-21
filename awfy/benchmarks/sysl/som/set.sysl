@@ -2,7 +2,7 @@ module som
 
 // A set kept as a Vector, its elements compared with ==.
 struct Set[E: Eq]
-    items: &Vector[E]
+    items: Vector[E]
 
     size(*self) -> usize = self.items.size()
 
@@ -25,7 +25,7 @@ struct Set[E: Eq]
     remove_all(*self) = self.items.remove_all()
 end Set
 
-set[E: Eq]() -> &Set[E] = Set(vector_of_size(initial_size))
+set[E: Eq]() -> &Set[E] = Set(Vector(slot_storage(initial_size), 0, 0))
 
 // A set of objects compared by identity.
 struct IdentitySet[E]
