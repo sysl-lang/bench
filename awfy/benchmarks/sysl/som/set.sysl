@@ -29,7 +29,7 @@ set[E: Eq]() -> &Set[E] = Set(Vector(slot_storage(initial_size), 0, 0))
 
 // A set of objects compared by identity.
 struct IdentitySet[E]
-    items: &Vector[&E]
+    items: Vector[&E]
 
     size(*self) -> usize = self.items.size()
 
@@ -52,4 +52,4 @@ struct IdentitySet[E]
     remove_all(*self) = self.items.remove_all()
 end IdentitySet
 
-identity_set[E]() -> &IdentitySet[E] = IdentitySet(vector_of_size(initial_size))
+identity_set[E]() -> &IdentitySet[E] = IdentitySet(Vector(slot_storage(initial_size), 0, 0))
