@@ -38,9 +38,9 @@
     Name##Entry* next;                                                         \
   };                                                                           \
                                                                                \
-  static inline void Name##Entry_destroy(Name##Entry* self) { free(self); }    \
+  SOM_INLINE void Name##Entry_destroy(Name##Entry* self) { free(self); }    \
                                                                                \
-  static inline bool Name##IdEntry_match(const Name##Entry* self, uint32_t h,  \
+  SOM_INLINE bool Name##IdEntry_match(const Name##Entry* self, uint32_t h,  \
                                          const K* k) {                         \
     return self->hash == h && self->key == k;                                  \
   }                                                                            \
@@ -61,7 +61,7 @@
     uint32_t capacity;                                                         \
   };                                                                           \
                                                                                \
-  static inline uint32_t Name##_hash(const K* key) {                           \
+  SOM_INLINE uint32_t Name##_hash(const K* key) {                           \
     if (key == NULL) {                                                         \
       return 0;                                                                \
     }                                                                          \
@@ -69,16 +69,16 @@
     return h ^ (h >> 16U);                                                     \
   }                                                                            \
                                                                                \
-  static inline uint32_t Name##_bucket_idx(const Name* self, uint32_t hash) {  \
+  SOM_INLINE uint32_t Name##_bucket_idx(const Name* self, uint32_t hash) {  \
     return (self->capacity - 1) & hash;                                        \
   }                                                                            \
                                                                                \
-  static inline Name##Entry* Name##_get_bucket(const Name* self,               \
+  SOM_INLINE Name##Entry* Name##_get_bucket(const Name* self,               \
                                                uint32_t hash) {                \
     return self->buckets[Name##_bucket_idx(self, hash)];                       \
   }                                                                            \
                                                                                \
-  static inline void Name##_remove_all(Name* self) {                           \
+  SOM_INLINE void Name##_remove_all(Name* self) {                           \
     for (uint32_t i = 0; i < self->capacity; i += 1) {                         \
       Name##Entry* current = self->buckets[i];                                 \
       while (current != NULL) {                                                \
@@ -91,18 +91,18 @@
     self->size = 0;                                                            \
   }                                                                            \
                                                                                \
-  static inline void Name##_deinit(Name* self) {                               \
+  SOM_INLINE void Name##_deinit(Name* self) {                               \
     Name##_remove_all(self);                                                   \
     free(self->buckets);                                                       \
   }                                                                            \
                                                                                \
-  static inline void Name##_destroy(Name* self) {                              \
+  SOM_INLINE void Name##_destroy(Name* self) {                              \
     Name##_deinit(self);                                                       \
     free(self);                                                                \
   }                                                                            \
                                                                                \
   /* IdentityDictionary::newEntry */                                           \
-  static inline Name##Entry* Name##_new_id_entry(Name* self, const K* key,     \
+  SOM_INLINE Name##Entry* Name##_new_id_entry(Name* self, const K* key,     \
                                                  V value, uint32_t hash) {     \
     (void)self;                                                                \
     Name##Entry* e = (Name##Entry*)malloc(sizeof(Name##Entry));                \
@@ -116,27 +116,27 @@
                                                                                \
   static const Name##Vtbl Name##_vtbl = {Name##_destroy, Name##_new_id_entry}; \
                                                                                \
-  static inline void Name##_init(Name* self, uint32_t capacity) {              \
+  SOM_INLINE void Name##_init(Name* self, uint32_t capacity) {              \
     self->vt = &Name##_vtbl;                                                   \
     self->buckets = (Name##Entry**)calloc(capacity, sizeof(Name##Entry*));     \
     self->size = 0;                                                            \
     self->capacity = capacity;                                                 \
   }                                                                            \
                                                                                \
-  static inline Name* Name##_new(void) {                                       \
+  SOM_INLINE Name* Name##_new(void) {                                       \
     Name* d = (Name*)malloc(sizeof(Name));                                     \
     Name##_init(d, DICTIONARY_INITIAL_CAPACITY);                               \
     return d;                                                                  \
   }                                                                            \
                                                                                \
   /* delete through the base pointer: the virtual destructor */                \
-  static inline void Name##_delete(Name* self) { self->vt->destroy(self); }    \
+  SOM_INLINE void Name##_delete(Name* self) { self->vt->destroy(self); }    \
                                                                                \
-  static inline uint32_t Name##_get_size(const Name* self) {                   \
+  SOM_INLINE uint32_t Name##_get_size(const Name* self) {                   \
     return self->size;                                                         \
   }                                                                            \
                                                                                \
-  static inline bool Name##_contains_key(const Name* self, const K* key) {     \
+  SOM_INLINE bool Name##_contains_key(const Name* self, const K* key) {     \
     const uint32_t h = Name##_hash(key);                                       \
     Name##Entry* e = Name##_get_bucket(self, h);                               \
     while (e != NULL) {                                                        \
@@ -148,7 +148,7 @@
     return false;                                                              \
   }                                                                            \
                                                                                \
-  static inline V* Name##_at(const Name* self, const K* key) {                 \
+  SOM_INLINE V* Name##_at(const Name* self, const K* key) {                 \
     const uint32_t h = Name##_hash(key);                                       \
     Name##Entry* e = Name##_get_bucket(self, h);                               \
     while (e != NULL) {                                                        \
@@ -160,7 +160,7 @@
     return NULL;                                                               \
   }                                                                            \
                                                                                \
-  static inline void Name##_insert_bucket_entry(                               \
+  SOM_INLINE void Name##_insert_bucket_entry(                               \
       Name* self, const K* key, V value, uint32_t hash, Name##Entry* head) {   \
     Name##Entry* current = head;                                               \
     for (;;) {                                                                 \
@@ -177,7 +177,7 @@
     }                                                                          \
   }                                                                            \
                                                                                \
-  static inline void Name##_split_bucket(Name* self, uint32_t old_capacity,    \
+  SOM_INLINE void Name##_split_bucket(Name* self, uint32_t old_capacity,    \
                                          uint32_t idx, Name##Entry* head) {    \
     Name##Entry* lo_head = NULL;                                               \
     Name##Entry* lo_tail = NULL;                                               \
@@ -212,7 +212,7 @@
     }                                                                          \
   }                                                                            \
                                                                                \
-  static inline void Name##_transfer_entries(                                  \
+  SOM_INLINE void Name##_transfer_entries(                                  \
       Name* self, Name##Entry** old_storage, uint32_t old_capacity) {          \
     for (uint32_t i = 0; i < old_capacity; i += 1) {                           \
       Name##Entry* current = old_storage[i];                                   \
@@ -227,7 +227,7 @@
     }                                                                          \
   }                                                                            \
                                                                                \
-  static inline void Name##_resize(Name* self) {                               \
+  SOM_INLINE void Name##_resize(Name* self) {                               \
     Name##Entry** old_storage = self->buckets;                                 \
     const uint32_t old_capacity = self->capacity;                              \
     self->capacity *= 2;                                                       \
@@ -237,7 +237,7 @@
     free(old_storage);                                                         \
   }                                                                            \
                                                                                \
-  static inline void Name##_at_put(Name* self, const K* key, V value) {        \
+  SOM_INLINE void Name##_at_put(Name* self, const K* key, V value) {        \
     const uint32_t h = Name##_hash(key);                                       \
     const uint32_t i = Name##_bucket_idx(self, h);                             \
     Name##Entry* current = self->buckets[i];                                   \
@@ -252,7 +252,7 @@
     }                                                                          \
   }                                                                            \
                                                                                \
-  static inline KeyVec* Name##_get_keys(const Name* self) {                    \
+  SOM_INLINE KeyVec* Name##_get_keys(const Name* self) {                    \
     KeyVec* keys = KeyVec##_new(0);                                            \
     for (uint32_t i = 0; i < self->capacity; i += 1) {                         \
       Name##Entry* current = self->buckets[i];                                 \
@@ -264,7 +264,7 @@
     return keys;                                                               \
   }                                                                            \
                                                                                \
-  static inline void Name##_destroy_values(Name* self, void (*destroy)(V)) {   \
+  SOM_INLINE void Name##_destroy_values(Name* self, void (*destroy)(V)) {   \
     for (uint32_t i = 0; i < self->capacity; i += 1) {                         \
       Name##Entry* current = self->buckets[i];                                 \
       while (current != NULL) {                                                \

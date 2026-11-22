@@ -46,4 +46,16 @@ if (( ${LANGS[(Ie)zig]} )); then
   fi
 fi
 
+# C: only when it is one of the languages run. The C++ column's clang and OPT.
+if (( ${LANGS[(Ie)c]} )); then
+  t0=$EPOCHREALTIME
+  print -r -- "(cd benchmarks/C && CC=clang OPT='$C_OPT' bash ./build.sh <build>/harness-c)" > $BUILD/c.command
+  if CC=$CLANG OPT=$C_OPT bash $AWFY_ROOT/benchmarks/C/build.sh $BUILD/harness-c >$BUILD/c.log 2>&1; then
+    print -r -- $(( EPOCHREALTIME - t0 )) > $BUILD/c.build-seconds
+    printf "built    c     %6.1f s\n" $(<$BUILD/c.build-seconds)
+  else
+    print "FAILED   c (see build/c.log)"; failed=1
+  fi
+fi
+
 exit $failed

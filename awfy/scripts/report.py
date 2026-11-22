@@ -32,7 +32,7 @@ import sys
 
 BASELINE = "cpp"
 SUBJECT = "sysl"
-LANG_NAMES = {"sysl": "sysl", "cpp": "C++", "zig": "Zig"}
+LANG_NAMES = {"sysl": "sysl", "cpp": "C++", "zig": "Zig", "c": "C"}
 RUNTIME = re.compile(r"^(\w+): iterations=1 runtime: (\d+)us$", re.M)
 PEAK_RSS = re.compile(r"(\d+)\s+maximum resident set size")
 BOOTSTRAP = 10_000

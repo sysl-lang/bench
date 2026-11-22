@@ -65,10 +65,15 @@ SYSL_FLAGS=(--release -O3 --cpu native --lto full)
 ZIG=${ZIG:-$(command -v zig)}
 ZIG_FLAGS=(-O fast -mcpu=native -lc)
 
+# C: the same clang and the same OPT as C++ (benchmarks/C/build.sh compiles every file in one
+# invocation with -ffp-contract=off -std=c17, as upstream's build.sh does C++ with -std=c++17).
+C_OPT=${C_OPT:-$CPP_OPT}
+
 harness_of() {  # <lang>
   case $1 in
     sysl) print -r -- $BUILD/harness-sysl ;;
     cpp)  print -r -- $UPSTREAM_DIR/benchmarks/C++/harness ;;
     zig)  print -r -- $BUILD/harness-zig ;;
+    c)    print -r -- $BUILD/harness-c ;;
   esac
 }

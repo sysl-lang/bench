@@ -50,6 +50,9 @@ if (( ${LANGS[(Ie)zig]} )); then
     need "zig 0.17 (the Zig column)" "brew install zig"
   fi
 fi
+if (( ${LANGS[(Ie)c]} )); then
+  print "C        $CLANG  (the C column: the C++ column's clang)"
+fi
 command -v git >/dev/null || need git "xcode-select --install"
 command -v bash >/dev/null || need bash "upstream's build.sh is a bash script"
 (( failed == 0 )) || return 1

@@ -20,6 +20,10 @@
 
 #define VECTOR_INITIAL_SIZE ((size_t)10)
 
+// The members a typed module generates. Like a C++ template's members, an
+// instantiation's unused ones are not an error: they are marked unused.
+#define SOM_INLINE static inline __attribute__((unused))
+
 #define DEFINE_VECTOR(Name, E)                                                 \
   typedef struct Name {                                                        \
     E* storage;                                                                \
@@ -28,34 +32,34 @@
     size_t last_idx;                                                           \
   } Name;                                                                      \
                                                                                \
-  static inline void Name##_init(Name* self, size_t size) {                    \
+  SOM_INLINE void Name##_init(Name* self, size_t size) {                    \
     self->storage = size == 0 ? NULL : (E*)malloc(size * sizeof(E));           \
     self->capacity = size;                                                     \
     self->first_idx = 0;                                                       \
     self->last_idx = 0;                                                        \
   }                                                                            \
                                                                                \
-  static inline Name* Name##_new(size_t size) {                                \
+  SOM_INLINE Name* Name##_new(size_t size) {                                \
     Name* v = (Name*)malloc(sizeof(Name));                                     \
     Name##_init(v, size);                                                      \
     return v;                                                                  \
   }                                                                            \
                                                                                \
-  static inline void Name##_deinit(Name* self) { free(self->storage); }        \
+  SOM_INLINE void Name##_deinit(Name* self) { free(self->storage); }        \
                                                                                \
-  static inline void Name##_delete(Name* self) {                               \
+  SOM_INLINE void Name##_delete(Name* self) {                               \
     Name##_deinit(self);                                                       \
     free(self);                                                                \
   }                                                                            \
                                                                                \
-  static inline E* Name##_at(const Name* self, size_t idx) {                   \
+  SOM_INLINE E* Name##_at(const Name* self, size_t idx) {                   \
     if (self->storage == NULL || idx >= self->last_idx - self->first_idx) {    \
       return NULL;                                                             \
     }                                                                          \
     return &self->storage[self->first_idx + idx];                              \
   }                                                                            \
                                                                                \
-  static inline void Name##_at_put(Name* self, size_t idx, E val) {           \
+  SOM_INLINE void Name##_at_put(Name* self, size_t idx, E val) {           \
     if (self->storage == NULL) {                                               \
       self->capacity =                                                         \
           idx + 1 > VECTOR_INITIAL_SIZE ? idx + 1 : VECTOR_INITIAL_SIZE;       \
@@ -77,7 +81,7 @@
     }                                                                          \
   }                                                                            \
                                                                                \
-  static inline void Name##_append(Name* self, E elem) {                       \
+  SOM_INLINE void Name##_append(Name* self, E elem) {                       \
     if (self->storage == NULL) {                                               \
       self->storage = (E*)malloc(VECTOR_INITIAL_SIZE * sizeof(E));             \
       self->capacity = VECTOR_INITIAL_SIZE;                                    \
@@ -92,29 +96,29 @@
     self->last_idx += 1;                                                       \
   }                                                                            \
                                                                                \
-  static inline Name* Name##_with(E elem) {                                    \
+  SOM_INLINE Name* Name##_with(E elem) {                                    \
     Name* v = Name##_new(1);                                                   \
     Name##_append(v, elem);                                                    \
     return v;                                                                  \
   }                                                                            \
                                                                                \
-  static inline bool Name##_is_empty(const Name* self) {                       \
+  SOM_INLINE bool Name##_is_empty(const Name* self) {                       \
     return self->last_idx == self->first_idx;                                  \
   }                                                                            \
                                                                                \
-  static inline size_t Name##_size(const Name* self) {                         \
+  SOM_INLINE size_t Name##_size(const Name* self) {                         \
     return self->last_idx - self->first_idx;                                   \
   }                                                                            \
                                                                                \
-  static inline void Name##_for_each(                                          \
-      const Name* self, void (*fn)(void* ctx, const E* e), void* ctx) {        \
+  SOM_INLINE void Name##_for_each(                                          \
+      const Name* self, void (*fn)(void* ctx, E const* e), void* ctx) {        \
     for (size_t i = self->first_idx; i < self->last_idx; i += 1) {             \
       fn(ctx, &self->storage[i]);                                              \
     }                                                                          \
   }                                                                            \
                                                                                \
-  static inline bool Name##_has_some(                                          \
-      const Name* self, bool (*fn)(void* ctx, const E* e), void* ctx) {        \
+  SOM_INLINE bool Name##_has_some(                                          \
+      const Name* self, bool (*fn)(void* ctx, E const* e), void* ctx) {        \
     for (size_t i = self->first_idx; i < self->last_idx; i += 1) {             \
       if (fn(ctx, &self->storage[i])) {                                        \
         return true;                                                           \
@@ -126,20 +130,20 @@
 #define DEFINE_VECTOR_OF_POINTERS(Name, E)                                     \
   DEFINE_VECTOR(Name, E)                                                       \
                                                                                \
-  static inline void Name##_destroy_values(Name* self, void (*destroy)(E)) {   \
+  SOM_INLINE void Name##_destroy_values(Name* self, void (*destroy)(E)) {   \
     for (size_t i = self->first_idx; i < self->last_idx; i += 1) {             \
       destroy(self->storage[i]);                                               \
     }                                                                          \
   }                                                                            \
                                                                                \
-  static inline E Name##_first(const Name* self) {                             \
+  SOM_INLINE E Name##_first(const Name* self) {                             \
     if (Name##_is_empty(self)) {                                               \
       return NULL;                                                             \
     }                                                                          \
     return self->storage[self->first_idx];                                     \
   }                                                                            \
                                                                                \
-  static inline E Name##_remove_first(Name* self) {                            \
+  SOM_INLINE E Name##_remove_first(Name* self) {                            \
     if (Name##_is_empty(self)) {                                               \
       return NULL;                                                             \
     }                                                                          \
@@ -147,7 +151,7 @@
     return self->storage[self->first_idx - 1];                                 \
   }                                                                            \
                                                                                \
-  static inline bool Name##_remove(Name* self, E obj) {                        \
+  SOM_INLINE bool Name##_remove(Name* self, E obj) {                        \
     if (self->storage == NULL || Name##_is_empty(self)) {                      \
       return false;                                                            \
     }                                                                          \
@@ -165,7 +169,7 @@
     return found;                                                              \
   }                                                                            \
                                                                                \
-  static inline void Name##_remove_all(Name* self, void (*destroy)(E)) {       \
+  SOM_INLINE void Name##_remove_all(Name* self, void (*destroy)(E)) {       \
     Name##_destroy_values(self, destroy);                                      \
     self->first_idx = 0;                                                       \
     self->last_idx = 0;                                                        \
@@ -176,7 +180,7 @@
   }                                                                            \
                                                                                \
   /* Upstream's C++ sort calls a swap that is not implemented: it exits. */   \
-  static inline void Name##_swap(E* storage, size_t i, size_t j) {             \
+  SOM_INLINE void Name##_swap(E* storage, size_t i, size_t j) {             \
     (void)storage;                                                             \
     (void)i;                                                                   \
     (void)j;                                                                   \
@@ -184,7 +188,7 @@
     exit(1);                                                                   \
   }                                                                            \
                                                                                \
-  static inline void Name##_sort_range(Name* self, size_t i, size_t j,         \
+  SOM_INLINE void Name##_sort_range(Name* self, size_t i, size_t j,         \
                                        int32_t (*c)(E, E)) {                   \
     if (c == NULL) {                                                           \
       fprintf(stderr, "defaultSort not implemented\n");                        \
@@ -237,7 +241,7 @@
     }                                                                          \
   }                                                                            \
                                                                                \
-  static inline void Name##_sort(Name* self, int32_t (*c)(E, E)) {             \
+  SOM_INLINE void Name##_sort(Name* self, int32_t (*c)(E, E)) {             \
     if (Name##_size(self) > 0) {                                               \
       Name##_sort_range(self, self->first_idx, self->last_idx - 1, c);         \
     }                                                                          \

@@ -16,41 +16,41 @@
     Vec items;                                                                 \
   } Name;                                                                      \
                                                                                \
-  static inline void Name##_init(Name* self) {                                 \
+  SOM_INLINE void Name##_init(Name* self) {                                 \
     Vec##_init(&self->items, VECTOR_INITIAL_SIZE);                             \
   }                                                                            \
                                                                                \
-  static inline Name* Name##_new(void) {                                       \
+  SOM_INLINE Name* Name##_new(void) {                                       \
     Name* s = (Name*)malloc(sizeof(Name));                                     \
     Name##_init(s);                                                            \
     return s;                                                                  \
   }                                                                            \
                                                                                \
-  static inline void Name##_deinit(Name* self) { Vec##_deinit(&self->items); } \
+  SOM_INLINE void Name##_deinit(Name* self) { Vec##_deinit(&self->items); } \
                                                                                \
-  static inline void Name##_delete(Name* self) {                               \
+  SOM_INLINE void Name##_delete(Name* self) {                               \
     Name##_deinit(self);                                                       \
     free(self);                                                                \
   }                                                                            \
                                                                                \
-  static inline size_t Name##_size(const Name* self) {                         \
+  SOM_INLINE size_t Name##_size(const Name* self) {                         \
     return Vec##_size(&self->items);                                           \
   }                                                                            \
                                                                                \
-  static inline void Name##_for_each(                                          \
-      const Name* self, void (*fn)(void* ctx, const E* e), void* ctx) {        \
+  SOM_INLINE void Name##_for_each(                                          \
+      const Name* self, void (*fn)(void* ctx, E const* e), void* ctx) {        \
     Vec##_for_each(&self->items, fn, ctx);                                     \
   }                                                                            \
                                                                                \
-  static inline bool Name##_contains_test(void* ctx, const E* e) {             \
-    return equal(*e, *(const E*)ctx);                                          \
+  SOM_INLINE bool Name##_contains_test(void* ctx, E const* e) {             \
+    return equal(*e, *(E const*)ctx);                                          \
   }                                                                            \
                                                                                \
-  static inline bool Name##_contains(const Name* self, E obj) {                \
+  SOM_INLINE bool Name##_contains(const Name* self, E obj) {                \
     return Vec##_has_some(&self->items, Name##_contains_test, &obj);           \
   }                                                                            \
                                                                                \
-  static inline void Name##_add(Name* self, E obj) {                           \
+  SOM_INLINE void Name##_add(Name* self, E obj) {                           \
     if (!Name##_contains(self, obj)) {                                         \
       Vec##_append(&self->items, obj);                                         \
     }                                                                          \

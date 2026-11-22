@@ -50,7 +50,10 @@ exactly those sizes.
 sysl and C++ run here. Zig is an opt-in extra column, `zsh reproduce.zsh --langs sysl,cpp,zig`:
 upstream has no Zig port, so `benchmarks/Zig/` is written here from upstream's C++ port, with C++'s
 structure and allocation pattern (SOURCES.md, "The Zig port"), and built by Zig 0.17.1 with
-`-O fast -mcpu=native`. Upstream's other ports (Crystal, Java, JavaScript, Lua, Python, Ruby,
+`-O fast -mcpu=native`. C is another, `--langs sysl,cpp,c`: upstream has no C port either, so
+`benchmarks/C/` is written here from the C++ port the same way, templates as typed macro modules and
+virtuals as vtables (SOURCES.md, "The C port"), and built by the C++ column's clang with its flags,
+`-O3 -flto -mcpu=native`, as C17. The columns combine: `--langs sysl,cpp,zig,c`. Upstream's other ports (Crystal, Java, JavaScript, Lua, Python, Ruby,
 Smalltalk, SOM, SOMns) are garbage-collected, and most of them are dynamic. Upstream has no Rust or
 Go port. METHODOLOGY.md, section 2, gives the reason for each port, and the open question of
 adding Java and Crystal as reference columns.

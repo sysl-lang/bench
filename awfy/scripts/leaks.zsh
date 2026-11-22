@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Checks that the sysl port, and the Zig port when LANGS holds zig, frees everything it allocates
+# Checks that the sysl port, and the Zig and C ports when LANGS holds them, frees everything it allocates
 # (upstream's C++ rule: "benchmarks have to run without memory leaks"). Builds the sysl harness with sysl's counted heap (SYSL_COUNT_ALLOCS=1),
 # which reports a non-zero net count of allocations on stderr at exit, and runs every benchmark once
 # at its timed size. Not part of a timing run; the counted heap is slower.
@@ -35,6 +35,28 @@ if (( ${LANGS[(Ie)zig]} )); then
       print "no leak  $bench zig"
     else
       print "LEAK     $bench zig: $(head -3 $err)"
+      failures=$((failures + 1))
+    fi
+  done
+fi
+
+# C, when it is one of the languages run, at the same small sizes. Two builds, because Apple's
+# AddressSanitizer has no leak detector on macOS: an ASan build catches use-after-free, double free
+# and overflow; a plain debug build runs under macOS `leaks --atExit`, which exits 1 when any block is
+# unreachable at exit.
+if (( ${LANGS[(Ie)c]} )); then
+  typeset -A SMALL
+  SMALL=(CD 10 DeltaBlue 20)
+  CC=$CLANG OPT='-O1 -g -fsanitize=address -fno-omit-frame-pointer' bash $AWFY_ROOT/benchmarks/C/build.sh $BUILD/leaks/harness-c-asan >$BUILD/leaks/c-build.log 2>&1 &&
+    CC=$CLANG OPT='-O0 -g' bash $AWFY_ROOT/benchmarks/C/build.sh $BUILD/leaks/harness-c-debug >>$BUILD/leaks/c-build.log 2>&1 ||
+    { print "FAILED   c debug builds (see build/leaks/c-build.log)"; exit 1 }
+  for bench in $BENCHMARKS; do
+    err=$BUILD/leaks/c-$bench.err
+    if $BUILD/leaks/harness-c-asan $bench 1 ${SMALL[$bench]:-1} >/dev/null 2>$err &&
+       leaks --atExit -- $BUILD/leaks/harness-c-debug $bench 1 ${SMALL[$bench]:-1} >$err 2>&1; then
+      print "no leak  $bench c  ($(grep -m1 'leaks for' $err))"
+    else
+      print "LEAK     $bench c: $(grep -m3 'ERROR\|leaks for\|Leak:' $err)"
       failures=$((failures + 1))
     fi
   done
