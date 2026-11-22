@@ -1,6 +1,6 @@
 #!/bin/zsh
-# Checks that the sysl port frees everything it allocates (upstream's C++ rule: "benchmarks have to
-# run without memory leaks"). Builds the sysl harness with sysl's counted heap (SYSL_COUNT_ALLOCS=1),
+# Checks that the sysl port, and the Zig port when LANGS holds zig, frees everything it allocates
+# (upstream's C++ rule: "benchmarks have to run without memory leaks"). Builds the sysl harness with sysl's counted heap (SYSL_COUNT_ALLOCS=1),
 # which reports a non-zero net count of allocations on stderr at exit, and runs every benchmark once
 # at its timed size. Not part of a timing run; the counted heap is slower.
 
@@ -19,4 +19,24 @@ for bench in $BENCHMARKS; do
     failures=$((failures + 1))
   fi
 done
+
+# Zig, when it is one of the languages run: a Debug build allocates through DebugAllocator, and the
+# harness exits 1 with "memory leaked" when anything is still live at exit. Debug keeps every safety
+# check, so the sizes are small: one inner iteration, CD 10 and DeltaBlue 20 (their smallest that
+# reach every path of the benchmark).
+if (( ${LANGS[(Ie)zig]} )); then
+  typeset -A SMALL
+  SMALL=(CD 10 DeltaBlue 20)
+  (cd $AWFY_ROOT/benchmarks/Zig && $ZIG build-exe -O debug -lc --cache-dir $BUILD/zig-cache -femit-bin=$BUILD/leaks/harness-zig-debug harness.zig) >$BUILD/leaks/zig-build.log 2>&1 ||
+    { print "FAILED   zig debug build (see build/leaks/zig-build.log)"; exit 1 }
+  for bench in $BENCHMARKS; do
+    err=$BUILD/leaks/zig-$bench.err
+    if $BUILD/leaks/harness-zig-debug $bench 1 ${SMALL[$bench]:-1} >/dev/null 2>$err; then
+      print "no leak  $bench zig"
+    else
+      print "LEAK     $bench zig: $(head -3 $err)"
+      failures=$((failures + 1))
+    fi
+  done
+fi
 (( failures == 0 ))

@@ -9,6 +9,8 @@ Upstream is <https://github.com/smarr/are-we-fast-yet> at commit
 | `LICENSE-awfy.md`, `CITATION.bib` | upstream `LICENSE.md`, `CITATION.bib`, byte for byte |
 | `benchmarks/sysl/` | this port, from upstream's C++ and Java ports (below) |
 | `benchmarks/sysl/json_data.sysl` | the document of upstream `benchmarks/Java/src/Json.java` line 39, character for character (checked by `scripts/check-upstream.zsh`) |
+| `benchmarks/Zig/` | the Zig port, written here from upstream's C++ port (below, "The Zig port") |
+| `benchmarks/Zig/json_data.zig` | json.h's `rapBenchmarkMinified`, written out by a 15-line C++ program that includes json.h and escapes `"` and `\` |
 | `reproduce.zsh`, `scripts/`, `README.md`, `METHODOLOGY.md`, this file | written here |
 
 Everything the track needs is inside `awfy/`; upstream is fetched into `build/upstream` (ignored by
@@ -187,3 +189,48 @@ These were differences of structure or of work, now made as upstream's:
 - **Json** answered each captured string as a slice of the input, sharing its storage, where C++ and
   Java copy it. It now copies it; the slice had made sysl Json 22% faster (16.86 to 13.10 ms).
 - **The manifest** said sysl 0.11.10; the sources need 0.12.0 (`@no_fuse`).
+
+## The Zig port
+
+Upstream has no Zig port. The only public one found (`larrydewey/Resid`, `bench/v2/t1-awfy/zig`, MIT)
+does not build on Zig 0.17.1 and uses arenas where the C++ port frees objects one by one, so
+`benchmarks/Zig/` is original, written for this benchmark from the C++ port at the pinned commit, file
+for file: `harness.zig`, `run.zig`, `benchmark.zig`, `mem.zig` (the heap and `object_tracker`),
+`som/` (Vector, Dictionary, Set, Random) and one file per benchmark. It is built as one module by
+Zig 0.17.1: `zig build-exe -O fast -mcpu=native -lc harness.zig` (`-O fast` is ReleaseFast).
+
+What keeps C++'s structure:
+
+- **Allocation**: every `new`/`delete` is a `mem.create`/`mem.destroy` through libc's malloc and
+  free, the allocator C++'s `new` uses; objects are freed where C++ frees them, and the graphs C++
+  hands to `ObjectTracker` (DeltaBlue, Richards) go through the same tracker. A Debug build
+  allocates through `DebugAllocator` and the harness fails a run that leaks (`scripts/leaks.zsh`).
+- **Dispatch**: the `Benchmark` interface and DeltaBlue's constraint hierarchy are vtables (a table of
+  function pointers plus `@fieldParentPtr`), C++'s virtual calls. Richards' task functions are a
+  context (the scheduler) plus a function pointer, the indirect call of C++'s `std::function`; its
+  data records are `*anyopaque`. Json's values are a kind tag plus `@fieldParentPtr`; their virtual
+  methods are only type tests, and each node is still its own allocation.
+- Collection `forEach`/`hasSome` take a context plus a comptime function, as `std.sort` does; C++
+  passes a lambda to a template.
+- An uncaught C++ exception is a `@panic`.
+
+Every structural difference from the C++ port, and why:
+
+- **Bounds checks**: ReleaseFast has no safety checks, so the indexing C++ does with `.at()` (CD,
+  DeltaBlue, Havlak, Json, NBody, Richards, Towers; upstream's C++ guideline) is unchecked here. The suite's own `Vector` is unchecked in
+  both.
+- **List**: the element value is an `i32`; C++ holds it in a `std::any` (an `int` in its small buffer,
+  no allocation), upstream's Java in an `Object`. Zig has no `std::any`.
+- **The `Benchmark` interface**: `benchmark()` answers the benchmark's own result type; C++ answers a
+  `std::any` that `verifyResult` casts back.
+- **Json**: a string borrows from the constant input unless it holds an escape (std.json's
+  `.alloc_if_needed`); C++ copies each into a `std::string`, which for most of the document's short
+  strings is its small buffer, no allocation. The document has no escapes.
+- **Dictionary**: `Entry::match` is a plain method; C++'s override has the same body as the base.
+- **IdentitySet** is `Set`: C++'s `IdentitySet::contains` hides rather than overrides
+  `Set::contains`, so `add`, its only caller, uses `equal` in both.
+- **CD** calls Zig's `@cos`/`@sin` builtins where C++ calls libm's `cos`/`sin`; the collision counts
+  the benchmark checks come out the same at every size run (`scripts/verify.zsh`).
+- **Null checks** C++ makes on a pointer its types guarantee non-null are dropped where Zig's types
+  forbid null (`*T` against `?*T`).
+
