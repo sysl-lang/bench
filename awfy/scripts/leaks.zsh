@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Checks that the sysl port, and the Zig port when LANGS holds zig, frees everything it allocates
+# Checks that the sysl port, and the Zig and Rust ports when LANGS holds them, frees everything it allocates
 # (upstream's C++ rule: "benchmarks have to run without memory leaks"). Builds the sysl harness with sysl's counted heap (SYSL_COUNT_ALLOCS=1),
 # which reports a non-zero net count of allocations on stderr at exit, and runs every benchmark once
 # at its timed size. Not part of a timing run; the counted heap is slower.
@@ -35,6 +35,23 @@ if (( ${LANGS[(Ie)zig]} )); then
       print "no leak  $bench zig"
     else
       print "LEAK     $bench zig: $(head -3 $err)"
+      failures=$((failures + 1))
+    fi
+  done
+fi
+
+# Rust, when it is one of the languages run: stable Rust has no sanitizer, so the release harness runs
+# under macOS's leaks(1), which scans the heap at exit for blocks nothing references and exits 1 if
+# it finds one. The same small sizes as Zig's.
+if (( ${LANGS[(Ie)rust]} )); then
+  typeset -A SMALL
+  SMALL=(CD 10 DeltaBlue 20)
+  for bench in $BENCHMARKS; do
+    err=$BUILD/leaks/rust-$bench.log
+    if MallocStackLogging=1 leaks --atExit -- $(harness_of rust) $bench 1 ${SMALL[$bench]:-1} >$err 2>&1; then
+      print "no leak  $bench rust"
+    else
+      print "LEAK     $bench rust: $(grep -m1 'leaks for' $err)"
       failures=$((failures + 1))
     fi
   done

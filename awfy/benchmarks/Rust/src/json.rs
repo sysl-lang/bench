@@ -47,7 +47,9 @@ impl HashIndexTable {
     }
 }
 
-trait JsonValue {
+// Upstream's whole JsonValue interface; the benchmark itself calls only some of it, in C++ as here.
+#[allow(dead_code)]
+pub(crate) trait JsonValue {
     fn is_object(&self) -> bool {
         false
     }
@@ -86,7 +88,7 @@ trait JsonValue {
     }
 }
 
-struct JsonArray {
+pub(crate) struct JsonArray {
     values: Vector<Box<dyn JsonValue>>,
 }
 
@@ -118,6 +120,7 @@ impl JsonValue for JsonArray {
     }
 }
 
+#[allow(dead_code)]
 struct JsonLiteral {
     value: String,
     is_null: bool,
@@ -183,7 +186,7 @@ impl JsonValue for JsonNumber {
     }
 }
 
-struct JsonObject {
+pub(crate) struct JsonObject {
     names: Vector<String>,
     values: Vector<Box<dyn JsonValue>>,
     table: HashIndexTable,
@@ -608,7 +611,7 @@ impl<'s> JsonPureStringParser<'s> {
     }
 }
 
-pub struct Json;
+pub(crate) struct Json;
 
 impl Json {
     fn has_expected_content(&self, result: &dyn JsonValue) -> bool {

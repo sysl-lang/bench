@@ -65,10 +65,17 @@ SYSL_FLAGS=(--release -O3 --cpu native --lto full)
 ZIG=${ZIG:-$(command -v zig)}
 ZIG_FLAGS=(-O fast -mcpu=native -lc)
 
+# Rust: cargo's release profile in benchmarks/Rust/Cargo.toml (opt-level 3, fat LTO, one codegen
+# unit, panic=abort), and this machine's processor, as C++'s -mcpu=native. RUSTC is the rustc beside
+# CARGO, so a rustup proxy that cannot resolve a toolchain is not in the way.
+CARGO=${CARGO:-$(command -v cargo)}
+RUSTFLAGS_AWFY='-C target-cpu=native'
+
 harness_of() {  # <lang>
   case $1 in
     sysl) print -r -- $BUILD/harness-sysl ;;
     cpp)  print -r -- $UPSTREAM_DIR/benchmarks/C++/harness ;;
     zig)  print -r -- $BUILD/harness-zig ;;
+    rust) print -r -- $BUILD/harness-rust ;;
   esac
 }

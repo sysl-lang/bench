@@ -40,4 +40,14 @@ else
   differ=1
 fi
 
+# The Rust port's literal is the Java port's line too, written as a Rust string.
+rust_line=$(sed -n 4p benchmarks/Rust/src/json_data.rs)
+rust_doc=${${rust_line#pub const RAP_BENCHMARK_MINIFIED: &str = }%;}
+if [[ $rust_line == pub\ const\ RAP_BENCHMARK_MINIFIED* && $java_doc == $rust_doc ]]; then
+  print "same     benchmarks/Rust/src/json_data.rs  =  upstream benchmarks/Java/src/Json.java:39 (${#java_doc} characters)"
+else
+  print "DIFFERS  benchmarks/Rust/src/json_data.rs  vs  upstream benchmarks/Java/src/Json.java:39"
+  differ=1
+fi
+
 exit $differ

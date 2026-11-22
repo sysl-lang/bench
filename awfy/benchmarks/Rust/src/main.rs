@@ -10,6 +10,7 @@ mod cd;
 mod deltablue;
 mod havlak;
 mod json;
+mod json_data;
 mod list;
 mod mandelbrot;
 mod nbody;

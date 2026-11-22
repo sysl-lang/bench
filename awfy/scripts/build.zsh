@@ -46,4 +46,19 @@ if (( ${LANGS[(Ie)zig]} )); then
   fi
 fi
 
+# Rust: only when it is one of the languages run. --locked builds from the committed Cargo.lock (the
+# crate has no dependencies); CARGO_HOME and the target directory stay under build/.
+if (( ${LANGS[(Ie)rust]} )); then
+  t0=$EPOCHREALTIME
+  print -r -- "(cd benchmarks/Rust && RUSTFLAGS='$RUSTFLAGS_AWFY' cargo build --release --locked && cp target/release/harness <build>/harness-rust)" > $BUILD/rust.command
+  if (cd $AWFY_ROOT/benchmarks/Rust && CARGO_HOME=$BUILD/cargo-home RUSTC=${CARGO:h}/rustc RUSTFLAGS=$RUSTFLAGS_AWFY \
+        $CARGO build --release --locked --target-dir $BUILD/rust-target) >$BUILD/rust.log 2>&1 &&
+     cp $BUILD/rust-target/release/harness $BUILD/harness-rust; then
+    print -r -- $(( EPOCHREALTIME - t0 )) > $BUILD/rust.build-seconds
+    printf "built    rust  %6.1f s  %s\n" $(<$BUILD/rust.build-seconds) "$(${CARGO:h}/rustc --version)"
+  else
+    print "FAILED   rust (see build/rust.log)"; failed=1
+  fi
+fi
+
 exit $failed

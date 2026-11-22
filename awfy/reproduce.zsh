@@ -7,7 +7,7 @@
 #   zsh reproduce.zsh --smoke             one invocation of one iteration, into build/smoke: proves
 #                                         the pipeline end to end; its numbers are not a result
 #   zsh reproduce.zsh --invocations N --iterations N --out DIR
-#   zsh reproduce.zsh --langs sysl,cpp,zig   the languages run (default sysl,cpp; METHODOLOGY.md § 2)
+#   zsh reproduce.zsh --langs sysl,cpp,zig,rust   the languages run (default sysl,cpp; METHODOLOGY.md § 2)
 #
 # Writes <out>/<stamp>.json (every iteration, the machine, versions, flags), <out>/<stamp>.md and
 # <out>/report.html. <out> is results/ by default. Needs sysl 0.12.0 or later, clang, python3, git.
@@ -75,7 +75,8 @@ python3 -I $AWFY_ROOT/scripts/report.py collect $raw $BUILD $out/$stamp.json \
   sysl=$SYSL clang=$CLANG \
   sysl_binary_bytes=$(stat -f %z $(harness_of sysl) 2>/dev/null || stat -c %s $(harness_of sysl)) \
   cpp_binary_bytes=$(stat -f %z ${$(harness_of cpp):A} 2>/dev/null || stat -c %s ${$(harness_of cpp):A}) \
-  $( (( ${LANGS[(Ie)zig]} )) && print -- zig_version=$($ZIG version) zig_binary_bytes=$(stat -f %z $(harness_of zig) 2>/dev/null || stat -c %s $(harness_of zig)))
+  $( (( ${LANGS[(Ie)zig]} )) && print -- zig_version=$($ZIG version) zig_binary_bytes=$(stat -f %z $(harness_of zig) 2>/dev/null || stat -c %s $(harness_of zig))) \
+  $( (( ${LANGS[(Ie)rust]} )) && print -- rust_version=${${(z)$(${CARGO:h}/rustc --version)}[2]} rust_binary_bytes=$(stat -f %z $(harness_of rust) 2>/dev/null || stat -c %s $(harness_of rust)))
 python3 -I $AWFY_ROOT/scripts/report.py render $out/$stamp.json $out/$stamp.md $out/report.html
 rm -rf $raw
 print "wrote $out/$stamp.json, $out/$stamp.md, $out/report.html"

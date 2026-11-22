@@ -75,6 +75,7 @@ impl Strength {
         self.arithmetic_value > s.arithmetic_value
     }
 
+    #[allow(dead_code)]
     fn strongest<'s>(&'s self, s: &'s Strength) -> &'s Strength {
         if s.stronger(self) {
             s
@@ -905,7 +906,7 @@ impl<'a> Planner<'a> {
         drop(plan);
         drop(vars);
         drop(planner);
-        drop(objects);
+        // `objects` is freed at the end of the scope: C++'s ObjectTracker::releaseAll().
     }
 
     fn projection_test(n: i32, strengths: &Strengths) {
@@ -956,7 +957,7 @@ impl<'a> Planner<'a> {
         }
         drop(dests);
         drop(planner);
-        drop(objects);
+        // `objects` is freed at the end of the scope: C++'s ObjectTracker::releaseAll().
     }
 }
 
@@ -986,9 +987,4 @@ impl Benchmark for DeltaBlue {
     fn verify_result(&mut self, _result: ()) -> bool {
         false
     }
-}
-
-#[allow(dead_code)]
-fn unused_strength_operations(a: &Strength, b: &Strength) -> bool {
-    std::ptr::eq(a.strongest(b), b) && ABSOLUTE_STRONGEST.hash == 0 && WEAK_DEFAULT.hash == 6
 }
