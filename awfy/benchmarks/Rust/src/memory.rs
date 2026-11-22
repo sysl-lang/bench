@@ -17,7 +17,8 @@
 //   tasks, records and closures: references, `Cell`s and integers). It frees their memory without
 //   running anything, which a compile-time assertion makes the only possible use.
 //
-// These are the crate's only `unsafe` blocks outside CD's red-black tree; each states its proof.
+// `Tracker<T>` also holds CD's red-black tree nodes and Havlak's blocks, loops and union-find nodes.
+// These are the crate's only `unsafe` blocks; each states its proof.
 
 use std::alloc::{dealloc, Layout};
 use std::cell::RefCell;

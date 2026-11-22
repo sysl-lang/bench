@@ -13,6 +13,8 @@ Upstream is <https://github.com/smarr/are-we-fast-yet> at commit
 | `benchmarks/Zig/json_data.zig` | json.h's `rapBenchmarkMinified`, written out by a 15-line C++ program that includes json.h and escapes `"` and `\` |
 | `benchmarks/C/` | the C port, written here from upstream's C++ port (below, "The C port") |
 | `benchmarks/C/src/json_data.inc` | upstream `benchmarks/C++/src/json.h` lines 13-451, byte for byte (checked by `scripts/check-upstream.zsh`) |
+| `benchmarks/Rust/` | the Rust port, written here from upstream's C++ port (below, "The Rust port") |
+| `benchmarks/Rust/src/json_data.rs` | the document of upstream `benchmarks/Java/src/Json.java` line 39, character for character (checked by `scripts/check-upstream.zsh`) |
 | `reproduce.zsh`, `scripts/`, `README.md`, `METHODOLOGY.md`, this file | written here |
 
 Everything the track needs is inside `awfy/`; upstream is fetched into `build/upstream` (ignored by
@@ -288,4 +290,71 @@ Every structural difference from the C++ port, and why:
   without freeing it, as C++'s; the benchmark never removes an aircraft, so it never runs.
 - **IdentitySet** is `Set`, as in the Zig port: C++'s `IdentitySet::contains` hides `Set::contains`,
   so `add`, its only caller, uses `equal` in both.
+
+## The Rust port
+
+Upstream has no Rust port. The public ones found were rejected: `larrydewey/Resid`
+(`bench/v2/t1-awfy/rust`, MIT) replaces Richards' task closures with an enum dispatch over index
+arenas, and `icantcodefyi/sakuralang` has only Havlak, over arena indices. So `benchmarks/Rust/` is
+original, written for this benchmark from the C++ port at the pinned commit, file for file:
+`src/main.rs` (`harness.cpp` and `run.h`), `src/benchmark.rs`, `src/memory.rs` (`object_tracker`),
+`src/som/` (Vector, Set, IdentityDictionary, Random) and one file per benchmark. It has no
+dependencies. It is built by cargo with Rust 1.94.0 (`rustc 1.94.0 (4a4ef493e 2026-03-02)`, LLVM 21.1.8)
+at `opt-level = 3`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"` (`Cargo.toml`) and
+`RUSTFLAGS='-C target-cpu=native'`: the counterpart of C++'s `-O3 -flto -mcpu=native`. Rust never
+contracts a multiply and an add, which is C++'s `-ffp-contract=off`.
+
+It is safe Rust except three `unsafe` blocks, all in `memory.rs`, each with its proof in a `SAFETY`
+comment:
+
+- **`Tracker::track`** answers a `&T` into a `Box` the tracker owns. Why: the objects C++ links with
+  raw pointers in cyclic graphs (DeltaBlue's variables and constraints, CD's red-black tree nodes with
+  their parent pointers, Havlak's blocks, loops and union-find nodes) are each one allocation,
+  referenced by `&` and mutated through `Cell`s, and freed together when the tracker is, which is where
+  C++ frees them. `Rc`/`Weak` would add a reference count to every link and a count update to every
+  traversal step, work the C++ port does not do; indices into a `Vec` would make the objects one
+  allocation, not one each.
+- **`ObjectTracker::track` and its `Drop`** hold Richards' objects of different types and free their
+  memory without running anything; a compile-time assertion admits only types with no destructor.
+  Why: Richards' task functions are `dyn Fn` closures, and Rust's drop checker refuses a `dyn` value
+  inside a self-referential tracker (it assumes a trait object's destructor may read the references in
+  its type, E0597), so the typed `Tracker` cannot hold them.
+
+What keeps C++'s structure:
+
+- **Allocation**: every `new` is one `Box` (or `Box<[T]>`) or one tracked object, at the same place and
+  of the same object, and is freed where C++ deletes it (`Drop` at the end of the owner's scope, as a
+  C++ destructor). The graphs C++ hands to `ObjectTracker` (DeltaBlue, Richards) are in a tracker.
+- **Virtuals**: the `Benchmark` harness call, DeltaBlue's constraint hierarchy and Json's `JsonValue`
+  are trait objects called through `&dyn`/`Box<dyn>`, C++'s virtual calls. Richards' task functions
+  are closures capturing the scheduler, called through `&dyn Fn`, the indirect call of
+  `std::function`.
+- **som/**: the suite's own `Vector` (first index, capacity 10 doubling, its quicksort), `Set`,
+  `IdentityDictionary` (C++'s bucket splitting, quirks included) and `Random`. A `Vec` is only the
+  storage C++ allocates with `new E[n]`; its algorithms are never used.
+- An uncaught C++ exception is a panic, which aborts.
+
+Every structural difference from the C++ port, and why:
+
+- **Tracker beside its owner** (CD's trees, Havlak's graph, loop structure graphs and loop finder):
+  a Rust struct cannot hold references into its own fields, so the caller declares the tracker on the
+  line before the object that owns the nodes in C++, and both are freed at the end of the same scope.
+- **The `Benchmark` interface**: `benchmark()` answers an associated `Result` type; C++ answers a
+  `std::any` that `verifyResult` casts back.
+- **List**: the element value is an `i32`; C++ holds it in a `std::any`, an `int` in its small buffer.
+- **Bounds checks**: Rust's indexing is checked, so the suite's own `Vector` checks where C++'s does
+  not; the indexing C++ does with `.at()` is checked in both.
+- **DeltaBlue**: C++ keeps the strength tables in static members, set up at the start of `chainTest`
+  and released at the end of `projectionTest`; Rust has no mutable global without `unsafe` or a lock,
+  so `inner_benchmark_loop` builds the same tables at the same point and passes them to both tests.
+- **Richards' `dynamic_cast`** of a task's data record is a `match` on the record's enum.
+- **Json**: a parse error is a panic with C++'s `ParseException` message. The parser borrows the copy
+  of the document the caller makes, where C++'s by-value constructor copies it, so the current
+  character can be a one-character slice. Strings are `String`s, which allocate where libc++ keeps the
+  document's short strings in its small buffer: more work for Rust, not less.
+- **CD**: a node's value is a `RefCell`, so `get` answers it for in-place appends as C++'s `V*` does,
+  and a voxel's motion vector is an `Option<Box<Vector>>` so the voxel map can hand it on, as C++
+  copies the pointer. The tree's `remove` unlinks its node; the node is freed with the tree (C++ never
+  frees it). The benchmark never removes an aircraft, so it never runs.
+- **IdentitySet** is `Set`, as in the Zig and C ports.
 

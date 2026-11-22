@@ -53,9 +53,14 @@ structure and allocation pattern (SOURCES.md, "The Zig port"), and built by Zig 
 `-O fast -mcpu=native`. C is another, `--langs sysl,cpp,c`: upstream has no C port either, so
 `benchmarks/C/` is written here from the C++ port the same way, templates as typed macro modules and
 virtuals as vtables (SOURCES.md, "The C port"), and built by the C++ column's clang with its flags,
-`-O3 -flto -mcpu=native`, as C17. The columns combine: `--langs sysl,cpp,zig,c`. Upstream's other ports (Crystal, Java, JavaScript, Lua, Python, Ruby,
-Smalltalk, SOM, SOMns) are garbage-collected, and most of them are dynamic. Upstream has no Rust or
-Go port. METHODOLOGY.md, section 2, gives the reason for each port, and the open question of
+`-O3 -flto -mcpu=native`, as C17. Rust is a third, `--langs sysl,cpp,rust`: upstream has no Rust
+port, so `benchmarks/Rust/` is written here from the C++ port the same way, in safe Rust except three
+`unsafe` blocks in its object tracker, C++'s raw-pointer graphs as references into that tracker
+(SOURCES.md, "The Rust port"), and built by cargo with Rust 1.94.0 at `opt-level = 3`, fat LTO, one
+codegen unit and `-C target-cpu=native`. The columns combine: `--langs sysl,cpp,zig,c,rust`.
+Upstream's other ports (Crystal, Java, JavaScript, Lua, Python, Ruby, Smalltalk, SOM, SOMns) are
+garbage-collected, and most of them are dynamic. Upstream has no Go port. METHODOLOGY.md, section 2,
+gives the reason for each port, and the open question of
 adding Java and Crystal as reference columns.
 
 ## Reproducing
