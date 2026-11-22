@@ -44,6 +44,10 @@ CLANGXX=${CLANGXX:-${CLANG:h}/clang++}
 SYSL=${SYSL:-$(command -v sysl)}
 SYSL_MIN=0.12.0
 
+# The versions the published run was made with (README.md). setup.zsh warns when they differ.
+RECORDED_SYSL=0.12.0
+RECORDED_CLANG='Apple clang version 21.0.0 (clang-2100.4.1.1)'
+
 # C++: upstream build.sh's own OPT knob. Upstream's default is '-O3 -flto -march=native'; on arm64
 # Apple clang reads -march=native as apple-m1, -mcpu=native as this machine's processor, which is what
 # sysl's --cpu native asks for (METHODOLOGY.md, "Flags"). build.sh adds -ffp-contract=off -std=c++17.

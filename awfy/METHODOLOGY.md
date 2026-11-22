@@ -188,23 +188,64 @@ benchmark process runs at a time.
 
 ## 9. Threats to validity
 
-- **One machine, one OS, one architecture** (Apple silicon, macOS). Ratios on x86 or Linux may differ.
+- **One machine, one OS, one architecture: tested on macOS arm64 only.** Ratios on x86 or Linux may
+  differ, and the scripts have not been run there. Three things are known to break or skew a run
+  off macOS arm64: `run.zsh` times each process with `/usr/bin/time -l`, which GNU time rejects, so a
+  Linux run stops at its first process; `reproduce.zsh` reads binary sizes with BSD `stat -f %z`;
+  and on x86 clang reads `-mcpu=native` as the generic `x86-64` while sysl's `--cpu native` still
+  targets the host, so C++ would lose its native instruction set (upstream's `-march=native` is the
+  x86 flag; section 3). `setup.zsh` warns on any other platform.
 - **Apple clang 21, not upstream's clang 22.** Both columns use the same clang, so the comparison is
-  fair to both; the absolute C++ times are not those of upstream's CI.
-- **Closures.** Upstream's C++ passes every closure as a `std::function` (`som/vector.h`,
-  `forEach`), a type-erased call that the optimiser may or may not inline. sysl's ordinary closure
-  parameter (`f: E -> unit`) is a generic parameter, so each call site gets its own copy, like a C++
-  `template <typename F>`. Both are each language's idiomatic form and both are the same source-level
-  closure, which is what AWFY measures ("exercises the compiler's abilities to optimize closures",
-  upstream guidelines). But a reader should know the C++ form is the harder one to optimise: it can
-  favour sysl on the closure-heavy benchmarks (CD, DeltaBlue, Havlak, Json, Richards). Unmeasured.
+  fair to both; the absolute C++ times are not those of upstream's CI. Whether Homebrew's LLVM 22
+  would make the C++ column faster was not measured; `CLANG=<llvm 22 clang>` runs both columns with
+  it.
+- **Versions are recorded, not pinned.** The published run used the versions in README.md
+  (`config.zsh`, `RECORDED_SYSL` and `RECORDED_CLANG`); a reproduction with a different sysl or clang
+  measures a different optimiser, and `setup.zsh` prints a warning naming the difference.
 - **The harness dispatch.** C++ calls `benchmark()` and `verify_result(std::any)` through a virtual
   table on every inner iteration; sysl's harness selects the benchmark by name and runs it through a
   generic, so those two calls are direct (SOURCES.md). One indirect call per inner iteration against
   the iteration's work is far below the measurement noise, but it is a difference in sysl's favour.
+  The audit checked that the direct calls let nothing be hoisted out of the inner loop: doubling the
+  inner iterations doubles the time in both languages for all seven benchmarks that use the default
+  loop (sysl 1.978 to 2.039, C++ 1.983 to 2.013).
 - **Work sysl does that C++ does not.** sysl counts references on every shared object; C++ frees by
   hand. sysl heap-allocates some objects C++ keeps on the stack (CD's per-frame vectors and trees),
   and checks every subscript (C++ checks only `std::array::at`). These cost sysl time.
+- **Work C++ does that sysl does not.** Each is upstream's C++, which stays unmodified; the numbers
+  are the audit's (one `marshal --exclusive` job, 10 alternating invocations x 10 iterations of each
+  variant against its base, both built with this track's flags).
+  - *Closures.* Upstream's C++ takes every closure as a `std::function` (`som/vector.h` `forEach`,
+    `hasSome`, `getOne`; `som/set.h`; `cd.h:458`): a type-erased call built and made per element.
+    sysl's ordinary closure parameter (`f: E -> unit`) is generic, so each call site gets its own
+    copy, like a C++ `template <typename F>`. Both are each language's idiomatic form of the same
+    source-level closure, which is what AWFY measures ("exercises the compiler's abilities to optimize
+    closures", upstream guidelines), and upstream's own compiled port does what sysl does: Crystal
+    takes `&block` and calls it with `yield` (`benchmarks/Crystal/som.cr:100`), which its compiler
+    inlines at each call site. Measured, C++ with its closure parameters made templates is faster by
+    **25.3% on Havlak, 6.6% on DeltaBlue**, and 2.7% on CD, 3.2% on Richards, 0.9% on Json. That is a
+    lower bound: DeltaBlue's virtual `inputsDo` and the Planner's `std::function` parameters were left
+    as they are.
+  - *Richards' `dynamic_cast`.* C++ takes a task's private data apart with four `dynamic_cast`s
+    (`richards.h:274, 303, 342, 383`), a library call on every task step on macOS; sysl matches an
+    enum tag (SOURCES.md). C++ with `static_cast` in their place is **29.7% faster** on Richards.
+  - *Json's document.* C++ copies the 25,820-byte document into the parser's `_input` on every inner
+    iteration (`json.h:981` passes the `const string` to the constructor's by-value parameter,
+    `json.h:963`). Java does not, and sysl, like
+    Java, parses the literal in place. Copying it in sysl as well costs sysl a further 4.0% on Json.
+  - *`std::any`.* C++'s `benchmark()` answers a `std::any` and List stores one per element; sysl
+    answers a typed `Result` and stores an `int` (SOURCES.md). Unmeasured separately; the dispatch
+    check above bounds the per-iteration part to a few nanoseconds against 4 µs or more of work.
+
+  **Sensitivity of the headline.** Every item in this list favours sysl. If C++ took its closures as
+  templates, the geometric mean of the sysl/C++ ratios would rise by about **3.1%** (Havlak's ratio
+  alone by 34%); with `static_cast` in Richards, by a further **2.5%** (Richards' ratio by 42%); the
+  Json document copy is 0.3%. Together that is about **6%** against sysl, more since the closure
+  figure is a lower bound. The headline is upstream's C++ as published, and these are the amounts by
+  which a C++ programmer free to depart from it could move it.
+- **A result check cannot catch every change.** Each benchmark checks its own result, which catches
+  a wrong program, but not every edit to one: the audit changed Bounce's `x_limit` to 499 and the
+  count stayed 1331 in both languages. The checks are upstream's, unchanged.
 - **Mean, not median.** An outlier iteration moves the mean; the standard deviation, the interval and
   the raw JSON show whether one did.
 - **The interval assumes invocations are independent and alike.** A machine whose state changes
@@ -214,5 +255,7 @@ benchmark process runs at a time.
   several milliseconds, so rounding is below 0.1%.
 - **The sysl port is written by the sysl project.** It follows upstream's guidelines, and every
   structural difference from upstream's C++ and Java is listed with its reason in SOURCES.md, so a
-  reader can check that it does the same work. An independent audit of the port and the scripts is
-  made before the first published run.
+  reader can check that it does the same work. An independent audit of the port and the scripts was
+  made before the first published run. It found two differences that favoured sysl by about 4.5% of
+  the geometric mean, NBody's loop bound and Json's uncopied captures; both are fixed in the port
+  (SOURCES.md, "Fixed in the port"). Its other findings are disclosed in this section.

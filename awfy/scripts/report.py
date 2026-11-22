@@ -87,6 +87,19 @@ def collect(raw, build, out, pairs):
             "invocation": int(inv), "iterations_us": times,
             "peak_rss_bytes": int(rss.group(1)) if rss else None})
     langs = meta.get("langs", "sysl cpp").split()
+    # Every invocation must hold exactly ITERATIONS times, and every benchmark every language's
+    # INVOCATIONS: a short or missing process is a failed run, never silently fewer samples.
+    want_iters, want_invs = int(meta["iterations"]), int(meta["invocations"])
+    want_benches = set(json.loads(meta.get("inner", "{}")))
+    problems = [f"{b} {lang} invocation {r['invocation']}: {len(r['iterations_us'])} iterations, want {want_iters}"
+                for b, by_lang in runs.items() for lang, rs in by_lang.items()
+                for r in rs if len(r["iterations_us"]) != want_iters]
+    problems += [f"{b} {lang}: {len(runs.get(b, {}).get(lang, []))} invocations, want {want_invs}"
+                 for b in sorted(want_benches) for lang in langs
+                 if len(runs.get(b, {}).get(lang, [])) != want_invs]
+    problems += [f"{b}: not a benchmark of this run" for b in sorted(set(runs) - want_benches)]
+    if problems:
+        sys.exit("report.py collect: incomplete run\n  " + "\n  ".join(problems))
     toolchain = {
         "sysl": sh(meta.get("sysl", "sysl"), "--version"),
         "clang": sh(meta.get("clang", "clang"), "--version").splitlines()[0:1],
