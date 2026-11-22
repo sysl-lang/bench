@@ -422,6 +422,17 @@ loop_tester_app() -> LoopTesterApp
     app
 
 struct Havlak
+    // C++'s verifyResult; sysl refuses a member colliding with the trait's verify_result.
+    private verify_havlak(*self, r: (int, int), inner_iterations: int) -> bool
+        if inner_iterations == 15000 then return r.0 == 46602 && r.1 == 5213
+        if inner_iterations == 1500 then return r.0 == 6102 && r.1 == 5213
+        if inner_iterations == 150 then return r.0 == 2052 && r.1 == 5213
+        if inner_iterations == 15 then return r.0 == 1647 && r.1 == 5213
+        if inner_iterations == 1 then return r.0 == 1605 && r.1 == 5213
+
+        print(f"No verification result for $inner_iterations found")
+        print(f"Result is: ${r.0}, ${r.1}")
+        false
 end Havlak
 
 impl Benchmark for Havlak
@@ -434,15 +445,4 @@ impl Benchmark for Havlak
     override inner_benchmark_loop(*self, inner_iterations: int) -> bool
         var app = loop_tester_app()
 
-        verify_havlak(app.main(inner_iterations, 50, 10, 10, 5), inner_iterations)
-
-private verify_havlak(r: (int, int), inner_iterations: int) -> bool
-    if inner_iterations == 15000 then return r.0 == 46602 && r.1 == 5213
-    if inner_iterations == 1500 then return r.0 == 6102 && r.1 == 5213
-    if inner_iterations == 150 then return r.0 == 2052 && r.1 == 5213
-    if inner_iterations == 15 then return r.0 == 1647 && r.1 == 5213
-    if inner_iterations == 1 then return r.0 == 1605 && r.1 == 5213
-
-    print(f"No verification result for $inner_iterations found")
-    print(f"Result is: ${r.0}, ${r.1}")
-    false
+        self.verify_havlak(app.main(inner_iterations, 50, 10, 10, 5), inner_iterations)

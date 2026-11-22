@@ -1,29 +1,33 @@
 @no_fuse
 
+import sysl.slices.fill
+
 struct Sieve
+    // The flags are passed by value, as C++ passes its std::array: the sieve works on its own copy.
+    private sieve(*self, flags: [5000]bool, size: int) -> int
+        var prime_count = 0
+
+        for i in 2..size
+            if flags[i - 1]
+                prime_count += 1
+
+                var k = i + i
+
+                while k <= size
+                    flags[k - 1] = false
+                    k += i
+
+        prime_count
 end Sieve
 
 impl Benchmark for Sieve
     type Result = int
 
     benchmark(*self) -> int
-        var flags: [5000]bool = [true; 5000]
+        var flags = [false; 5000]
 
-        sieve(flags, 5000)
+        fill(flags[..], true)
+
+        self.sieve(flags, 5000)
 
     verify_result(*self, result: int) -> bool = result == 669
-
-private sieve(flags: []bool, size: int) -> int
-    var prime_count = 0
-
-    for i in 2..size
-        if flags[i - 1]
-            prime_count += 1
-
-            var k = i + i
-
-            while k <= size
-                flags[k - 1] = false
-                k += i
-
-    prime_count

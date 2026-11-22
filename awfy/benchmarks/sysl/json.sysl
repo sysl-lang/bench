@@ -9,19 +9,20 @@ struct HashIndexTable
     hash_table: [32]int
 
     add(*self, name: string, index: int)
-        val slot = hash_slot_for(name)
+        val slot = self.hash_slot_for(name)
 
         // increment by 1, 0 stands for empty
         self.hash_table[slot] = if index < 0xff then (index + 1) & 0xff else 0
 
     // subtract 1, 0 stands for empty
-    get(*self, name: string) -> int = (self.hash_table[hash_slot_for(name)] & 0xff) - 1
+    get(*self, name: string) -> int = (self.hash_table[self.hash_slot_for(name)] & 0xff) - 1
+
+    // this is not a proper hash, but sufficient for the benchmark, and very portable!
+    private string_hash(*self, s: string) -> int = int(s.len) * 1402589
+
+    private hash_slot_for(*self, element: string) -> int =
+        self.string_hash(element) & (int(self.hash_table.len) - 1)
 end HashIndexTable
-
-// this is not a proper hash, but sufficient for the benchmark, and very portable!
-private string_hash(s: string) -> int = int(s.len) * 1402589
-
-private hash_slot_for(element: string) -> int = string_hash(element) & 31
 
 trait JsonValue
     is_object(*self) -> bool = false
@@ -316,17 +317,18 @@ struct JsonPureStringParser
     private pause_capture(*self)
         val end = if self.current.len == 0 then self.index else self.index - 1
 
-        self.capture_buffer = f"${self.capture_buffer}${self.input[self.capture_start..end]}"
+        self.capture_buffer = f"${self.capture_buffer}${self.input[self.capture_start..end].copy()}"
         self.capture_start = -1
 
     private end_capture(*self) -> string
         val end = if self.current.len == 0 then self.index else self.index - 1
         var captured = ""
 
+        // Every capture is a copy of its part of the input, as C++'s `substr` and Java's `substring`.
         if self.capture_buffer.len == 0
-            captured = self.input[self.capture_start..end]
+            captured = self.input[self.capture_start..end].copy()
         else
-            self.capture_buffer = f"${self.capture_buffer}${self.input[self.capture_start..end]}"
+            self.capture_buffer = f"${self.capture_buffer}${self.input[self.capture_start..end].copy()}"
             captured = self.capture_buffer
             self.capture_buffer = ""
 

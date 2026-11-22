@@ -1,21 +1,27 @@
-# Are We Fast Yet, in sysl
+# Are We Fast Yet: sysl and C++
 
-A port of the **Are We Fast Yet** benchmark suite to sysl, timed against the suite's own C++ port
-(the comparison baseline). Upstream's Java port is not run: the bench times no garbage-collected
-language (the repository README, rule 9).
+The **Are We Fast Yet** benchmark suite, run in sysl against the suite's own C++ port.
 
 Are We Fast Yet (AWFY) is fourteen benchmarks designed for comparing language implementations
-fairly. Unlike the Benchmarks Game, a port may not pick its own algorithm or data structure: every
-language uses the same *core language* — objects with fields, polymorphic methods, closures,
-fixed-size arrays, strings — the same collection classes, written as part of the suite (`som`), the
-same harness, and a built-in check of every result. What is compared is how well each compiler does
-with the same program.
+fairly. Unlike the Benchmarks Game, a port may not pick its own algorithm or data structure. Every
+language uses the same *core language*: objects with fields, polymorphic methods, closures,
+fixed-size arrays and strings. Every port also uses the same collection classes, written as part of
+the suite (`som`), the same harness, and a built-in check of every result. What is compared is how
+well each compiler does with the same program.
 
 > Stefan Marr, Benoit Daloze, Hanspeter Mössenböck. *Cross-Language Compiler Benchmarking: Are We
 > Fast Yet?* Proceedings of the 12th Symposium on Dynamic Languages (DLS '16), ACM, 2016, pp.
 > 120–131. [doi:10.1145/2989225.2989232](https://doi.org/10.1145/2989225.2989232).
 > Source: <https://github.com/smarr/are-we-fast-yet> (MIT, [LICENSE-awfy.md](LICENSE-awfy.md),
 > [CITATION.bib](CITATION.bib)).
+
+- **C++ is upstream's port, unmodified**, at commit `f35aed0a`, and it is built by upstream's own
+  `build.sh`. Every upstream file kept here is checked byte for byte against upstream on every run.
+- **The sysl port** follows upstream's porting guidelines. [SOURCES.md](SOURCES.md) lists every
+  structural difference from upstream's C++ and Java ports, and why each one is there.
+- **[METHODOLOGY.md](METHODOLOGY.md)** gives every choice and its justification: the languages, the
+  flags, the iteration counts, the statistic, the machine, what is excluded, and the threats to
+  validity.
 
 ## The benchmarks
 
@@ -33,96 +39,79 @@ with the same program.
 | macro | CD | collision detection: a red-black tree, vectors of values, closures | 250 |
 | | DeltaBlue | a constraint solver: polymorphism over constraints, an object graph | 12000 |
 | | Havlak | loop recognition: graphs, sets, a dictionary, union-find | 1500 |
-| | Json | parsing a 30 KB document into a tree | 100 |
+| | Json | parsing a 25.8 KB document into a tree | 100 |
 | | Richards | an OS task scheduler: closures, linked queues | 100 |
 
-The inner iterations are upstream's (`rebench.conf`); a benchmark's own check is written against
+The inner iterations are upstream's (`rebench.conf`). Each benchmark's own check is written against
 exactly those sizes.
 
-## The rules this port follows
+## Languages
 
-Upstream's [guidelines](https://github.com/smarr/are-we-fast-yet/blob/main/docs/guidelines.md) and
-[core language](https://github.com/smarr/are-we-fast-yet/blob/main/docs/core-language.md), applied to
-sysl:
+sysl and C++ run here. Upstream's other ports (Crystal, Java, JavaScript, Lua, Python, Ruby,
+Smalltalk, SOM, SOMns) are garbage-collected, and most of them are dynamic. Upstream has no Rust,
+Go or Zig port. METHODOLOGY.md, section 2, gives the reason for each port, and the open question of
+adding Java and Crystal as reference columns.
 
-1. **As identical as possible.** Each class, method and loop of upstream's Java and C++ ports has its
-   counterpart, in the same order and under the same name (in sysl's `snake_case`). Iteration over a
-   collection is its `for_each` with a closure, as upstream asks.
-2. **The suite's own collections.** `som/` is upstream's `Vector`, `Set`, `IdentitySet`,
-   `IdentityDictionary` and `Random`, written in sysl over fixed-size storage that the collection
-   grows itself — never `Buf` or `Map`.
-3. **Idiomatic within that.** The sysl is written as the org writes sysl (`~/dev/sysl-lang/CLAUDE.md`,
-   "Writing sysl — style"): inferred types, `&T` for shared objects, `Option` where C++ has a null
-   pointer, a trait where C++ has a virtual method, `match` and `is` over options. Where idiom and
-   the guidelines disagree, the guidelines win (SOURCES.md lists every case).
-4. **No `break` or `continue` in a benchmark's loops**, and a `return` from inside a loop only in an
-   `if`, as the core language requires; loops over an optional link are `while x is Some(n)`.
-5. **No leaks.** AWFY's C++ rules say a benchmark runs without leaking. sysl counts references, so a
-   cycle needs breaking: each owner that C++ frees with a destructor breaks its graph's cycles in a
-   `Drop` (Havlak's graphs and loop finder, CD's red-black tree), and Richards releases its tasks at
-   the end of a run as C++'s object tracker does. A counted-heap build (`SYSL_COUNT_ALLOCS=1`) ends
-   every benchmark with a net count of zero.
-6. **Built-in verification.** The harness stops with `Benchmark failed with incorrect result` and exit
-   status 1 when a benchmark's check fails. `run.zsh verify` runs every benchmark once at its standard
-   size in every language.
+## Reproducing
 
-## Flags and versions
+You need macOS on Apple silicon (arm64), sysl 0.12.0 or later, clang, python3 (standard library
+only) and git. That is the only platform the track is tested on. Linux and x86 are untested and
+known not to work as they stand: GNU time rejects `/usr/bin/time -l`, GNU stat rejects `stat -f`,
+and on x86 clang reads `-mcpu=native` as generic `x86-64` (METHODOLOGY.md, section 9).
 
-| language | compiler | flags |
+The published run was made with **sysl 0.12.0** and **Apple clang 21.0.0 (clang-2100.4.1.1)**, from
+Xcode 27.2 and its command-line tools, on macOS 27. `reproduce.zsh` prints a warning when the sysl or
+clang it finds is not these: a different optimiser is a different measurement.
+
+```
+brew install sysl-lang/tap/sysl
+git clone https://github.com/sysl-lang/bench
+cd bench/awfy
+zsh reproduce.zsh --smoke
+zsh reproduce.zsh
+```
+
+1. `brew install sysl-lang/tap/sysl` installs sysl together with the LLVM it needs. On macOS, clang
+   comes with the Xcode command-line tools (`xcode-select --install`).
+2. `zsh reproduce.zsh --smoke` runs everything once, with one invocation of one iteration, into
+   `build/smoke/`. It takes about a minute and proves that the toolchain and the pipeline work. Its
+   numbers are not a result.
+3. `zsh reproduce.zsh` is the full run: 30 invocations of 10 iterations of every benchmark in both
+   languages. On an Apple M5 Pro it takes about five minutes. Keep the machine on AC power and otherwise idle;
+   `reproduce.zsh` keeps it awake with `caffeinate`.
+
+`reproduce.zsh` does every step in order and stops at the first failure:
+
+| step | script | what it does |
 |---|---|---|
-| sysl | the `sysl` on PATH (Homebrew), **0.12.0 or later**, and with `SYSL_DEV=<binary> SYSL_DEV_LIB=<library dir>` a second compiler as `sysl-dev`; each run's results name both versions | `sysl build --release -O3 --cpu native`; every file of the module is `@no_fuse` |
-| C++ | Apple clang 21.0.0 (clang-2100.4.1.1) | `-O3 -flto -mcpu=native -ffp-contract=off -std=c++17` (upstream `build.sh`, with `-mcpu=native` for its `-march=native`) |
+| setup | `scripts/setup.zsh` | prints the versions of sysl, clang and python3, says how to install any that is missing, and warns when the platform or a version is not the published run's; clones upstream at the pinned commit into `build/upstream`; then runs `scripts/check-upstream.zsh`, which fails if any upstream file kept here differs from upstream |
+| build | `scripts/build.zsh` | builds C++ with upstream's `build.sh` in the upstream checkout, and builds sysl with `sysl build`, both with the same clang |
+| verify | `scripts/verify.zsh` | runs every benchmark once at its timed size in both languages; the harness checks the result and exits 1 if it is wrong |
+| time | `scripts/run.zsh` | runs the invocations, alternating the languages, under `/usr/bin/time -l` |
+| report | `scripts/report.py` | `collect` writes `results/<stamp>.json`, which holds every iteration, the machine, the OS, the CPU, the versions, the flags and the build times; `render` writes `results/<stamp>.md` and `results/report.html` from that JSON |
 
-**The two languages are built with the same floating-point and processor settings.** Upstream builds
-C++ with `-ffp-contract=off`, so no multiply is fused with the add it feeds; every sysl file starts
-with `@no_fuse`, which is the same rule for the whole module. Before it, sysl fused where C++ did not,
-which gave sysl one instruction fewer per multiply-add on CD and kept Mandelbrot and NBody from
-passing their exact checks (AUDIT.md A5). On arm64 Apple clang reads `-march=native` as the apple-m1
-processor and its features, while `-mcpu=native` and sysl's `--cpu native` name this machine's own
-(AUDIT.md A1).
+The settings (upstream commit, inner iterations, flags, counts) are all in `scripts/config.zsh`.
+The environment variables `INVOCATIONS`, `ITERATIONS`, `SYSL`, `CLANG` and `CPP_OPT` override them.
+`scripts/leaks.zsh` checks that the sysl port frees everything it allocates. It uses sysl's counted
+heap and is not part of a timing run.
 
-**Rust:** upstream has no Rust port (its README asks for one, "guided by our C++ port"), so none is
-timed here.
-
-## What is measured
-
-`scripts/run.zsh time` runs each benchmark in each language as
-`harness <Benchmark> <outer> <inner>`, three invocations by default. Each outer iteration runs the
-benchmark's inner loop and is timed **by the harness itself** with a monotonic clock, as upstream's
-harness does and as upstream reports (ReBench parses those lines). The outer iterations are upstream's
-per executor: 10 for C++, and so for sysl, also compiled ahead of time.
-
-The harness's own times are used rather than hyperfine over the process because what AWFY compares is
-the steady-state cost of the benchmark's code, as upstream reports it. Each
-invocation also runs under `/usr/bin/time -l` for its peak resident set size.
-
-Reported, in `results/<date>.json` (every iteration) and `results/<date>.md`:
-
-- mean time per iteration ± standard deviation, per benchmark and language;
-- each language's ratio to C++ per benchmark, and the geometric mean of the ratios;
-- peak RSS per benchmark and language;
-- the size of the harness binary;
-- the build time of each harness (for sysl, `sysl build` of the whole suite from cold).
-
-## Running it
+**On the sysl project's own machine**, every heavy run goes through its job manager, marshal, which
+others do not need. A timed run is the only job on the machine:
 
 ```
-zsh scripts/run.zsh build
-zsh scripts/run.zsh verify
-zsh scripts/run.zsh time
+caffeinate -dimsu marshal run --kind build --dir ~/dev/sysl-lang/bench/awfy --deadline 15m --label "awfy smoke" -- zsh reproduce.zsh --smoke
+caffeinate -dimsu marshal run --exclusive --quiet-load auto --dir ~/dev/sysl-lang/bench/awfy --deadline 2h --label "awfy time" -- zsh reproduce.zsh
 ```
 
-Every heavy run on this machine goes through marshal, and a timing run owns it:
+## Layout
 
-```
-caffeinate -dimsu marshal run --dir ~/dev/sysl-lang/bench/awfy --deadline 30m --label "awfy build+verify" -- zsh scripts/run.zsh build
-caffeinate -dimsu marshal run --exclusive --quiet-load auto --dir ~/dev/sysl-lang/bench/awfy --deadline 2h --label "awfy time" -- zsh scripts/run.zsh time
-```
+Everything the track needs is in this directory. Nothing here reads a file outside `awfy/`.
 
-## Gaps
-
-None from sysl 0.12.0: every benchmark runs in both languages, so no geometric mean is taken over a
-subset. `run.zsh` keeps its `SKIP` and `OMIT` tables, empty, for a benchmark a sysl compiler cannot
-run, and says why when one is listed. The sources need 0.12.0: DeltaBlue compares its
-`&AbstractConstraint` trait objects with `===`, which 0.11 refuses, and every file is `@no_fuse`,
-which 0.11 does not have. All fourteen benchmarks were verified on a 0.12 candidate (AUDIT.md A5).
+| path | |
+|---|---|
+| `reproduce.zsh` | the one command |
+| `scripts/` | `config.zsh` (every setting), `setup.zsh`, `check-upstream.zsh`, `build.zsh`, `verify.zsh`, `run.zsh`, `report.py`, `leaks.zsh` |
+| `benchmarks/C++/`, `benchmarks/script.inc`, `rebench.conf` | upstream, byte for byte |
+| `benchmarks/sysl/` | the sysl port, with its manifest `sysl.hocon` |
+| `results/` | published runs: raw JSON, Markdown and HTML reports |
+| `build/` | upstream checkout, binaries, logs (ignored by git) |
