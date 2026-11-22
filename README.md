@@ -13,6 +13,10 @@ in [`awfy/`](awfy/) with its own scripts and results: fourteen object-oriented b
 language writes with the same core language, collections and harness, timed against the suite's own
 C++ port (its Java port is not run: rule 9 below).
 
+A third, **[plb2](plb2/README.md)** (Heng Li's Programming Language Benchmark v2), lives in
+[`plb2/`](plb2/): four small programs (nqueen, matmul, sudoku, bedcov) run as upstream's own C, Rust,
+Zig, Swift, Nim and D, unmodified, beside sysl ports of upstream's C.
+
 ## What it measures
 
 Each program is written once per language. sysl has two versions:

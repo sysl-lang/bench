@@ -1,0 +1,47 @@
+import sysl.text.parse_int
+
+// The most queens a board may have: one bit of a u32 mask per column.
+const NQ_MAX = 31
+
+// Counts the placements of n queens on an n-by-n board, by upstream C's backtracking over bit masks:
+// a[k] is the column chosen at row k (-1 for none yet), and l, c and r are the columns row k may not
+// take because of a queen on a left diagonal, the same column or a right diagonal.
+nq_solve(n: int) -> int
+    var a: [NQ_MAX]int = [-1; NQ_MAX]
+    var l: [NQ_MAX]u32 = [0; NQ_MAX]
+    var c: [NQ_MAX]u32 = [0; NQ_MAX]
+    var r: [NQ_MAX]u32 = [0; NQ_MAX]
+    val y0 = (1u32 << n) - 1
+    var m = 0
+    var k = 0
+
+    while k >= 0
+        val y = (l[k] | c[k] | r[k]) & y0
+
+        if (y ^ y0) >> (a[k] + 1) != 0
+            var i = a[k] + 1
+
+            while i < n && y & (1u32 << i) != 0 do i += 1
+
+            if k < n - 1
+                val z = 1u32 << i
+                a[k] = i
+                k += 1
+                l[k] = (l[k - 1] | z) << 1
+                c[k] = c[k - 1] | z
+                r[k] = (r[k - 1] | z) >> 1
+            else
+                m += 1
+                k -= 1
+        else
+            a[k] = -1
+            k -= 1
+
+    return m
+
+main(args: []string)
+    val n = if args.len > 1 then parse_int(args[1]).unwrap() else 15
+
+    if n > NQ_MAX || n <= 0 then panic("n must be in 1..31")
+
+    print(nq_solve(n))

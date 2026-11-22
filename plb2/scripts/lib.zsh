@@ -4,7 +4,7 @@
 # read: the programs, the expected outputs and the scripts are all here, and the build goes to
 # plb2/build/.
 
-PLB2=${0:A:h:h}
+PLB2=${${(%):-%x}:A:h:h}
 BUILD=$PLB2/build
 
 # The upstream commit vendored in upstream/ (UPSTREAM.md).
@@ -13,68 +13,43 @@ UPSTREAM_COMMIT=1181b3b83fea52ee85a66548845f8bf92e33fb67
 
 # Toolchains that are not on a default PATH on the machine the results were taken on. Each is put in
 # front of PATH only where it exists, so another machine's PATH is left as it is.
-for dir in $HOME/.local/gnat-16.1.0/bin /Users/work/.cargo/bin $HOME/.cargo/bin /opt/homebrew/bin; do
+for dir in /Users/work/.cargo/bin $HOME/.cargo/bin /opt/homebrew/bin; do
   [[ -d $dir ]] && PATH=$dir:$PATH
 done
 export PATH
 
+# The sysl compiler: `sysl` on PATH unless SYSL names another binary.
+SYSL=${SYSL:-sysl}
+
 PROGRAMS=(nqueen matmul sudoku bedcov)
 
-# The bench's eleven languages (METHODOLOGY.md §2). C is the baseline of every ratio.
-LANGS=(c cpp rust go zig swift ada fortran odin c3 sysl)
+# The languages (README.md). C is the baseline of every ratio. Every program but sysl's is upstream's
+# own, unmodified.
+LANGS=(c rust zig swift nim d sysl)
 
 # Where each program comes from: upstream/src/... is upstream's own file, byte-identical to the commit
-# above (scripts/check-upstream.zsh); written/... is original, written for this benchmark
-# (METHODOLOGY.md §3). This table is the one place provenance is decided.
+# above; written/... is original, written for this benchmark (sysl only, which upstream lacks). A pair
+# with no entry has no upstream program (Zig has only nqueen and matmul) and is reported as absent.
+# This table is the one place provenance is decided.
 typeset -A SRC
-SRC=(
-  c:nqueen        upstream/src/c/nqueen.c
-  c:matmul        upstream/src/c/matmul.c
-  c:sudoku        upstream/src/c/sudoku.c
-  c:bedcov        upstream/src/c/bedcov.c
-  rust:nqueen     upstream/src/rust/nqueen.rs
-  rust:matmul     upstream/src/rust/matmul.rs
-  rust:sudoku     upstream/src/rust/sudoku.rs
-  rust:bedcov     upstream/src/rust/bedcov.rs
-  go:nqueen       upstream/src/go/nqueen.go
-  go:matmul       upstream/src/go/matmul.go
-  go:sudoku       upstream/src/go/sudoku.go
-  go:bedcov       upstream/src/go/bedcov.go
-  swift:nqueen    upstream/src/swift/nqueen.swift
-  swift:matmul    upstream/src/swift/matmul.swift
-  swift:sudoku    upstream/src/swift/sudoku.swift
-  swift:bedcov    upstream/src/swift/bedcov.swift
-  fortran:nqueen  upstream/src/fortran/nqueen.F90
-  fortran:matmul  upstream/src/fortran/matmul.F90
-  fortran:sudoku  upstream/src/fortran/sudoku.F90
-  fortran:bedcov  written/fortran/bedcov.F90
-  zig:nqueen      written/zig/nqueen.zig
-  zig:matmul      written/zig/matmul.zig
-  zig:sudoku      written/zig/sudoku.zig
-  zig:bedcov      written/zig/bedcov.zig
-  cpp:nqueen      written/cpp/nqueen.cpp
-  cpp:matmul      written/cpp/matmul.cpp
-  cpp:sudoku      written/cpp/sudoku.cpp
-  cpp:bedcov      written/cpp/bedcov.cpp
-  ada:nqueen      written/ada/nqueen.adb
-  ada:matmul      written/ada/matmul.adb
-  ada:sudoku      written/ada/sudoku.adb
-  ada:bedcov      written/ada/bedcov.adb
-  odin:nqueen     written/odin/nqueen.odin
-  odin:matmul     written/odin/matmul.odin
-  odin:sudoku     written/odin/sudoku.odin
-  odin:bedcov     written/odin/bedcov.odin
-  c3:nqueen       written/c3/nqueen.c3
-  c3:matmul       written/c3/matmul.c3
-  c3:sudoku       written/c3/sudoku.c3
-  c3:bedcov       written/c3/bedcov.c3
-  sysl:nqueen     written/sysl/nqueen.sysl
-  sysl:matmul     written/sysl/matmul.sysl
-  sysl:sudoku     written/sysl/sudoku.sysl
-  sysl:bedcov     written/sysl/bedcov.sysl
-)
+for lang ext in c c rust rs swift swift nim nim d d; do
+  for prog in nqueen matmul sudoku bedcov; do
+    SRC[$lang:$prog]=upstream/src/$lang/$prog.$ext
+  done
+done
+SRC[zig:nqueen]=upstream/src/zig/nqueen.zig
+SRC[zig:matmul]=upstream/src/zig/matmul.zig
+for prog in nqueen matmul sudoku bedcov; do
+  SRC[sysl:$prog]=written/sysl/$prog.sysl
+done
 
-provenance() { [[ ${SRC[$1:$2]} == upstream/* ]] && print upstream || print written; }
+provenance() {
+  case ${SRC[$1:$2]} in
+    upstream/*) print upstream ;;
+    written/*)  print written ;;
+    *)          print absent ;;
+  esac
+}
 
 exe() { print -r -- $BUILD/bin/$1/$2; }
 

@@ -1,0 +1,39 @@
+import sysl.text.parse_int
+
+// An n-by-n matrix in one zeroed block, row i at [i*n, (i+1)*n) — upstream C's calloc'd block,
+// reached through row views instead of its table of row pointers.
+mat_gen(n: usize) -> []real
+    val tmp = 1.0 / real(n) / real(n)
+    var a: []real = [0.0; n * n]
+
+    for i in 0..<n
+        val ai = a[i * n..<(i + 1) * n]
+
+        for j in 0..<n do ai[j] = tmp * real(int(i) - int(j)) * real(i + j)
+
+    return a
+
+// c = a * b in upstream's i-k-j order, the innermost loop running along a row of b and of c.
+mat_mul(n: usize, a: []const real, b: []const real) -> []real
+    var c: []real = [0.0; n * n]
+
+    for i in 0..<n
+        val ai = a[i * n..<(i + 1) * n]
+        val ci = c[i * n..<(i + 1) * n]
+
+        for k in 0..<n
+            val aik = ai[k]
+            val bk = b[k * n..<(k + 1) * n]
+
+            for j in 0..<n do ci[j] += aik * bk[j]
+
+    return c
+
+main(args: []string)
+    val n = usize(if args.len > 1 then parse_int(args[1]).unwrap() else 1500)
+    val a = mat_gen(n)
+    val b = mat_gen(n)
+    val c = mat_mul(n, a, b)
+    val h = n >> 1
+
+    print(f"${c[h * n + h]}%f")

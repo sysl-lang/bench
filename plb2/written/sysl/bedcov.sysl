@@ -1,0 +1,247 @@
+import sysl.buf.{Buf, buf}
+import sysl.text.parse_int
+
+// Interval coverage by upstream C's algorithm (bedcov.c): n random intervals are indexed as an
+// implicit interval tree over a radix-sorted array, and for each of n more the total length of it
+// covered by the first set is summed.
+
+// An interval [st, en), with the largest end in the subtree it roots once indexed.
+struct Intv
+    st: long
+    en: long
+    max: long
+    data: long
+
+// -- radix sort, by st ------------------------------------------------------------------------------
+
+const RS_MIN_SIZE: usize = 64
+const RS_MAX_BITS = 8
+const RS_BUCKETS = 1 << RS_MAX_BITS
+
+// A bucket of the sort: the part of the array from b to e.
+struct Bucket
+    b: usize
+    e: usize
+
+rs_key(v: Intv, s: int, m: long) -> usize = usize((v.st >> s) & m)
+
+rs_insertsort(a: []Intv)
+    for i in 1..<a.len
+        if a[i].st < a[i - 1].st
+            val tmp = a[i]
+            var j = i
+
+            while j > 0 && tmp.st < a[j - 1].st
+                a[j] = a[j - 1]
+                j -= 1
+
+            a[j] = tmp
+
+// One pass on the n_bits bits of the key from bit s, in place, then each bucket by the next bits.
+rs_sort(a: []Intv, n_bits: int, s: int)
+    val size = 1 << n_bits
+    val m = long(size - 1)
+    var b: [RS_BUCKETS]Bucket = [Bucket(0, 0); RS_BUCKETS]
+
+    if n_bits > RS_MAX_BITS then panic("n_bits past RS_MAX_BITS")
+
+    for v in a do b[rs_key(v, s, m)].e += 1
+
+    for k in 1..<size
+        b[k].e += b[k - 1].e
+        b[k].b = b[k - 1].e
+
+    var k = 0
+
+    while k != size
+        if b[k].b != b[k].e
+            var l = rs_key(a[b[k].b], s, m)
+
+            if l != usize(k)
+                var tmp = a[b[k].b]
+
+                loop
+                    val swap = tmp
+                    tmp = a[b[l].b]
+                    a[b[l].b++] = swap
+                    l = rs_key(tmp, s, m)
+
+                    if l == usize(k) then break
+
+                a[b[k].b++] = tmp
+            else
+                b[k].b += 1
+        else
+            k += 1
+
+    b[0].b = 0
+
+    for k in 1..<size do b[k].b = b[k - 1].e
+
+    if s != 0
+        val s2 = if s > n_bits then s - n_bits else 0
+
+        for k in 0..<size
+            val bucket = a[b[k].b..<b[k].e]
+
+            if bucket.len > RS_MIN_SIZE then rs_sort(bucket, n_bits, s2)
+            else if bucket.len > 1 then rs_insertsort(bucket)
+
+radix_sort(a: []Intv)
+    if a.len <= RS_MIN_SIZE then rs_insertsort(a)
+    else rs_sort(a, RS_MAX_BITS, (8 - 1) * RS_MAX_BITS)
+
+// -- splitmix32 -------------------------------------------------------------------------------------
+
+struct SplitMix32
+    x: u32
+
+    next(*self) -> u32
+        self.x +%= 0x9e3779b9
+        var z = self.x
+        z = (z ^ (z >> 16)) *% 0x21f0aaad
+        z = (z ^ (z >> 15)) *% 0x735a2d97
+        return z ^ (z >> 15)
+
+// -- the implicit interval tree ---------------------------------------------------------------------
+
+// Sorts a and records each node's subtree maximum; answers the tree's height (-1 when a is empty).
+//
+// Sorted, the array is a complete binary tree with its leaves at the even indices: a node x at level
+// k has its lowest k-1 bits set and bit k clear, children x - 2^(k-1) and x + 2^(k-1), and a parent
+// at x + 2^k or x - 2^k as bit k+1 is clear or set. Where the array cannot fill the tree, last_i
+// follows the rightmost node present and last carries its maximum.
+iit_index(a: []Intv) -> int
+    val n = a.len
+
+    if n == 0 then return -1
+
+    radix_sort(a)
+
+    var last_i: usize = 0
+    var last: long = 0
+    var i: usize = 0
+
+    while i < n
+        last_i = i
+        a[i].max = a[i].en
+        last = a[i].max
+        i += 2
+
+    var k = 1
+
+    while usize(1) << k <= n
+        val x = usize(1) << (k - 1)
+        val step = x << 2
+        i = (x << 1) - 1
+
+        while i < n
+            val el = a[i - x].max
+            val er = if i + x < n then a[i + x].max else last
+            var e = a[i].en
+            e = if e > el then e else el
+            e = if e > er then e else er
+            a[i].max = e
+            i += step
+
+        last_i = if (last_i >> k) & 1 != 0 then last_i - x else last_i + x
+
+        if last_i < n && a[last_i].max > last then last = a[last_i].max
+
+        k += 1
+
+    return k - 1
+
+// A node waiting on the traversal's stack: x at level k, w = 1 once its left child is done.
+struct StackCell
+    x: usize
+    k: int
+    w: int
+
+// Puts in b every interval of a overlapping [st, en), in order of st.
+iit_overlap(a: []const Intv, max_level: int, st: long, en: long, b: Buf[Intv])
+    val n = a.len
+    var stack: [64]StackCell = [StackCell(0, 0, 0); 64]
+    var t = 0
+
+    b.clear()
+    stack[t++] = StackCell((usize(1) << max_level) - 1, max_level, 0)
+
+    while t > 0
+        val z = stack[--t]
+
+        if z.k <= 3
+            // A small subtree: every node of it, in order.
+            val i0 = z.x >> z.k << z.k
+            var i1 = i0 + (usize(1) << (z.k + 1)) - 1
+
+            if i1 >= n then i1 = n
+
+            var i = i0
+
+            while i < i1 && a[i].st < en
+                if st < a[i].en then b.push(a[i])
+
+                i += 1
+        else if z.w == 0
+            // Back to z once its left child is done; the left child (which may be past the end)
+            // only if something under it may overlap.
+            val y = z.x - (usize(1) << (z.k - 1))
+            stack[t++] = StackCell(z.x, z.k, 1)
+
+            if y >= n || a[y].max > st then stack[t++] = StackCell(y, z.k - 1, 0)
+        else if z.x < n && a[z.x].st < en
+            if st < a[z.x].en then b.push(a[z.x])
+
+            stack[t++] = StackCell(z.x + (usize(1) << (z.k - 1)), z.k - 1, 0)
+
+// -- the benchmark ----------------------------------------------------------------------------------
+
+gen_intv(n: usize, rng: *SplitMix32, bit_st: int, bit_len: int) -> []Intv
+    val mask_st = long((1 << bit_st) - 1)
+    val mask_len = long((1 << bit_len) - 1)
+    var a: []Intv = [Intv(0, 0, 0, 0); n]
+
+    for i in 0..<n
+        a[i].st = long(rng.next()) & mask_st
+        a[i].en = a[i].st + (long(rng.next()) & mask_len)
+        a[i].data = long(i)
+
+    return a
+
+main(args: []string)
+    val n = usize(if args.len > 1 then parse_int(args[1]).unwrap() else 1000000)
+    var rng = SplitMix32(11)
+    val a1 = gen_intv(n, &rng, 28, 14)
+    val a2 = gen_intv(n, &rng, 28, 14)
+    val max_level = iit_index(a1)
+    var b: Buf[Intv] = buf()
+    var tot_cov: long = 0
+
+    for q in a2
+        val st0 = q.st
+        val en0 = q.en
+
+        iit_overlap(a1, max_level, st0, en0, b)
+
+        if b.len() == 0 then continue
+
+        var cov: long = 0
+        var cov_st = if b[0].st > st0 then b[0].st else st0
+        var cov_en = if b[0].en < en0 then b[0].en else en0
+
+        for i in 1..<b.len()
+            val st1 = if b[i].st > st0 then b[i].st else st0
+            val en1 = if b[i].en < en0 then b[i].en else en0
+
+            if st1 > cov_en
+                cov += cov_en - cov_st
+                cov_st = st1
+                cov_en = en1
+            else
+                cov_en = if cov_en > en1 then cov_en else en1
+
+        cov += cov_en - cov_st
+        tot_cov += cov
+
+    print(tot_cov)
