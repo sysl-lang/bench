@@ -47,9 +47,12 @@ exactly those sizes.
 
 ## Languages
 
-sysl and C++ run here. Upstream's other ports (Crystal, Java, JavaScript, Lua, Python, Ruby,
-Smalltalk, SOM, SOMns) are garbage-collected, and most of them are dynamic. Upstream has no Rust,
-Go or Zig port. METHODOLOGY.md, section 2, gives the reason for each port, and the open question of
+sysl and C++ run here. Zig is an opt-in extra column, `zsh reproduce.zsh --langs sysl,cpp,zig`:
+upstream has no Zig port, so `benchmarks/Zig/` is written here from upstream's C++ port, with C++'s
+structure and allocation pattern (SOURCES.md, "The Zig port"), and built by Zig 0.17.1 with
+`-O fast -mcpu=native`. Upstream's other ports (Crystal, Java, JavaScript, Lua, Python, Ruby,
+Smalltalk, SOM, SOMns) are garbage-collected, and most of them are dynamic. Upstream has no Rust or
+Go port. METHODOLOGY.md, section 2, gives the reason for each port, and the open question of
 adding Java and Crystal as reference columns.
 
 ## Reproducing

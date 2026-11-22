@@ -20,7 +20,10 @@ UPSTREAM_FILES=(
 )
 
 # The languages run, in the order a timing invocation starts with (it alternates; run.zsh).
-LANGS=(sysl cpp)
+# reproduce.zsh --langs overrides it and hands it to each script as a space-separated LANGS in the
+# environment (an array cannot be exported); the second line splits that string.
+(( ${+LANGS} )) || LANGS=(sysl cpp)
+LANGS=(${=LANGS})
 
 # Each benchmark's inner iterations: upstream rebench.conf, benchmark_suites.all.benchmarks.
 BENCHMARKS=(DeltaBlue Richards Json CD Havlak Bounce List Mandelbrot NBody Permute Queens Sieve Storage Towers)
@@ -56,9 +59,16 @@ CPP_OPT=${CPP_OPT:-'-O3 -flto -mcpu=native'}
 # sysl: the same settings in sysl's words. -ffp-contract=off is `@no_fuse` at the top of every file.
 SYSL_FLAGS=(--release -O3 --cpu native --lto full)
 
+# Zig: one module (harness.zig imports every file), so the whole program is optimised together, as
+# -flto gives C++ and sysl. `-O fast` is Zig 0.17's name for ReleaseFast. libc is linked for malloc,
+# the allocator C++'s new/delete use.
+ZIG=${ZIG:-$(command -v zig)}
+ZIG_FLAGS=(-O fast -mcpu=native -lc)
+
 harness_of() {  # <lang>
   case $1 in
     sysl) print -r -- $BUILD/harness-sysl ;;
     cpp)  print -r -- $UPSTREAM_DIR/benchmarks/C++/harness ;;
+    zig)  print -r -- $BUILD/harness-zig ;;
   esac
 }
