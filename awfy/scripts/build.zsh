@@ -34,4 +34,16 @@ else
   print "FAILED   sysl (see build/sysl.log)"; failed=1
 fi
 
+# Zig: only when it is one of the languages run.
+if (( ${LANGS[(Ie)zig]} )); then
+  t0=$EPOCHREALTIME
+  print -r -- "(cd benchmarks/Zig && zig build-exe ${ZIG_FLAGS[*]} -femit-bin=<build>/harness-zig harness.zig)" > $BUILD/zig.command
+  if (cd $AWFY_ROOT/benchmarks/Zig && $ZIG build-exe $ZIG_FLAGS --cache-dir $BUILD/zig-cache -femit-bin=$BUILD/harness-zig harness.zig) >$BUILD/zig.log 2>&1; then
+    print -r -- $(( EPOCHREALTIME - t0 )) > $BUILD/zig.build-seconds
+    printf "built    zig   %6.1f s  zig %s\n" $(<$BUILD/zig.build-seconds) "$($ZIG version)"
+  else
+    print "FAILED   zig (see build/zig.log)"; failed=1
+  fi
+fi
+
 exit $failed

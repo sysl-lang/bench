@@ -43,6 +43,13 @@ if command -v python3 >/dev/null; then
 else
   need "python3 (3.8 or later; standard library only)" "xcode-select --install, or python.org"
 fi
+if (( ${LANGS[(Ie)zig]} )); then
+  if [[ -n $ZIG && -x $ZIG ]]; then
+    print "zig      $ZIG  ($($ZIG version))"
+  else
+    need "zig 0.17 (the Zig column)" "brew install zig"
+  fi
+fi
 command -v git >/dev/null || need git "xcode-select --install"
 command -v bash >/dev/null || need bash "upstream's build.sh is a bash script"
 (( failed == 0 )) || return 1

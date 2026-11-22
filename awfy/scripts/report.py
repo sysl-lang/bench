@@ -13,7 +13,8 @@ render computes everything from that JSON (METHODOLOGY.md, "The statistic"):
   - per benchmark and language: the mean of every iteration of every invocation, and its sd;
   - the ratio sysl / C++ of those means, with a 95% bootstrap interval;
   - the geometric mean of the fourteen ratios, with a 95% bootstrap interval;
-  - the same geometric mean without each invocation's first iteration (a sensitivity check).
+  - the same geometric mean without each invocation's first iteration (a sensitivity check);
+  - the same for every other language run (reproduce.zsh --langs), each against C++.
 The bootstrap resamples whole invocations (each process's iterations stay together), separately per
 benchmark and language, 10,000 times, with a fixed seed so the report is reproducible from the JSON.
 """
@@ -31,7 +32,7 @@ import sys
 
 BASELINE = "cpp"
 SUBJECT = "sysl"
-LANG_NAMES = {"sysl": "sysl", "cpp": "C++"}
+LANG_NAMES = {"sysl": "sysl", "cpp": "C++", "zig": "Zig"}
 RUNTIME = re.compile(r"^(\w+): iterations=1 runtime: (\d+)us$", re.M)
 PEAK_RSS = re.compile(r"(\d+)\s+maximum resident set size")
 BOOTSTRAP = 10_000
@@ -105,6 +106,7 @@ def collect(raw, build, out, pairs):
         "clang": sh(meta.get("clang", "clang"), "--version").splitlines()[0:1],
         "python": platform.python_version(),
     }
+    toolchain.update({lang: meta[f"{lang}_version"] for lang in langs if meta.get(f"{lang}_version")})
     builds = {lang: {
         "command": read(os.path.join(build, f"{lang}.command")).strip(),
         "seconds": float(read(os.path.join(build, f"{lang}.build-seconds")) or "nan"),
@@ -145,9 +147,9 @@ def percentile(sorted_xs, p):
     return sorted_xs[lo] + (sorted_xs[hi] - sorted_xs[lo]) * (k - lo)
 
 
-def analyse(doc):
+def analyse(doc, subject=SUBJECT):
     rng = random.Random(SEED)
-    benches = [b for b in doc["runs"] if all(l in doc["runs"][b] for l in (SUBJECT, BASELINE))]
+    benches = [b for b in doc["runs"] if all(l in doc["runs"][b] for l in (subject, BASELINE))]
     rows, boot = [], {b: [] for b in benches}
     for b in benches:
         row = {"benchmark": b, "inner": doc["inner_iterations"].get(b)}
@@ -161,24 +163,24 @@ def analyse(doc):
                          "n": len(xs), "invocations": len(invs[lang]),
                          "peak_rss_mib": max(rss) / 2**20 if rss else None,
                          "mean_after_first": pooled_mean(invs[lang], True) if all(len(i) > 1 for i in invs[lang]) else None}
-        row["ratio"] = row[SUBJECT]["mean"] / row[BASELINE]["mean"]
+        row["ratio"] = row[subject]["mean"] / row[BASELINE]["mean"]
         # Each invocation as (sum, count): a resample's pooled mean is the sum of sums over counts.
-        sums = {lang: [(sum(inv), len(inv)) for inv in invs[lang]] for lang in (SUBJECT, BASELINE)}
+        sums = {lang: [(sum(inv), len(inv)) for inv in invs[lang]] for lang in (subject, BASELINE)}
         for _ in range(BOOTSTRAP):
             m = {}
             for lang, v in sums.items():
                 picks = [v[rng.randrange(len(v))] for _ in v]
                 m[lang] = sum(s for s, _ in picks) / sum(c for _, c in picks)
-            boot[b].append(m[SUBJECT] / m[BASELINE])
+            boot[b].append(m[subject] / m[BASELINE])
         s = sorted(boot[b])
         row["ratio_ci"] = [percentile(s, 0.025), percentile(s, 0.975)]
         rows.append(row)
     g = geomean([r["ratio"] for r in rows])
     gs = sorted(geomean([boot[b][i] for b in benches]) for i in range(BOOTSTRAP))
     after = None
-    if all(r[SUBJECT]["mean_after_first"] and r[BASELINE]["mean_after_first"] for r in rows):
-        after = geomean([r[SUBJECT]["mean_after_first"] / r[BASELINE]["mean_after_first"] for r in rows])
-    single = min(min(r[l]["invocations"] for l in (SUBJECT, BASELINE)) for r in rows) < 2
+    if all(r[subject]["mean_after_first"] and r[BASELINE]["mean_after_first"] for r in rows):
+        after = geomean([r[subject]["mean_after_first"] / r[BASELINE]["mean_after_first"] for r in rows])
+    single = min(min(r[l]["invocations"] for l in (subject, BASELINE)) for r in rows) < 2
     return {"rows": rows, "geomean": g, "geomean_ci": [percentile(gs, 0.025), percentile(gs, 0.975)],
             "geomean_after_first": after, "single_invocation": single, "complete": len(rows) == 14}
 
@@ -207,6 +209,8 @@ def summary_lines(doc):
         ("clang", "".join(t.get("clang", []))),
         ("sysl build", doc["builds"].get("sysl", {}).get("command", "")),
         ("C++ build", doc["builds"].get("cpp", {}).get("command", "")),
+        *[(f"{LANG_NAMES.get(l, l)} build", f"{t.get(l, '')}: {doc['builds'].get(l, {}).get('command', '')}")
+          for l in extra_langs(doc)],
         ("Upstream", f"{doc['upstream']['url']} at {doc['upstream']['commit']}"),
         ("Runs", f"{doc['invocations']} invocations × {doc['iterations']} iterations per benchmark and "
                  f"language, languages alternating, one thread; started {doc['started']}, finished {doc['finished']}"),
@@ -214,11 +218,43 @@ def summary_lines(doc):
     ]
 
 
+def extra_langs(doc):
+    return [l for l in doc["languages"] if l not in (SUBJECT, BASELINE)]
+
+
+def extra_md(doc, extras):
+    out = []
+    for lang, e in extras.items():
+        n = LANG_NAMES.get(lang, lang)
+        out += ["", f"## {n} and C++", "",
+                f"**{n} / C++, geometric mean over {len(e['rows'])} benchmarks: {e['geomean']:.3f}** "
+                f"(95% bootstrap interval {ci_text(e, e['geomean_ci'])}). Below 1 is {n} faster.", "",
+                f"| benchmark | {n}, mean ± sd per iteration | {n} / C++ | 95% interval | peak RSS {n} |",
+                "|---|---:|---:|---:|---:|"]
+        for r in e["rows"]:
+            rss = f"{r[lang]['peak_rss_mib']:.1f} MiB" if r[lang]["peak_rss_mib"] else ""
+            out.append(f"| {r['benchmark']} | {fmt_pm(r[lang])} | {r['ratio']:.3f} | {ci_text(e, r['ratio_ci'])} | {rss} |")
+    return out
+
+
+def extra_html(extras):
+    out = ""
+    for lang, e in extras.items():
+        n = html.escape(LANG_NAMES.get(lang, lang))
+        rows = "".join(f"<tr><td>{r['benchmark']}</td><td>{html.escape(fmt_pm(r[lang]))}</td><td>{r['ratio']:.3f}</td>"
+                       f"<td>{html.escape(ci_text(e, r['ratio_ci']))}</td></tr>" for r in e["rows"])
+        out += (f"<h2>{n} and C++</h2><p>{n} / C++, geometric mean over {len(e['rows'])} benchmarks: "
+                f"<strong>{e['geomean']:.3f}</strong>; 95% bootstrap interval {html.escape(ci_text(e, e['geomean_ci']))}. "
+                f"Below 1 is {n} faster.</p><div class=\"scroll\"><table><thead><tr><th>benchmark</th><th>{n}, mean ± sd</th>"
+                f"<th>{n} / C++</th><th>95% interval</th></tr></thead><tbody>{rows}</tbody></table></div>\n")
+    return out
+
+
 def ci_text(a, ci):
     return "n/a (one invocation)" if a["single_invocation"] else f"{ci[0]:.3f}–{ci[1]:.3f}"
 
 
-def render_md(doc, a):
+def render_md(doc, a, extras):
     out = ["# Are We Fast Yet: sysl and C++", "",
            "Generated by `scripts/report.py` from the raw JSON beside this file; METHODOLOGY.md says how "
            "each number is made and why.", ""]
@@ -242,6 +278,7 @@ def render_md(doc, a):
         b = doc["builds"].get(lang, {})
         out.append(f"| {LANG_NAMES.get(lang, lang)} binary, build time | {b.get('binary_bytes') or '?'} bytes, "
                    f"{b.get('seconds', float('nan')):.1f} s |")
+    out += extra_md(doc, extras)
     return "\n".join(out) + "\n"
 
 
@@ -343,7 +380,7 @@ METHOD = [
 ]
 
 
-def render_html(doc, a):
+def render_html(doc, a, extras):
     rows = []
     for r in a["rows"]:
         rows.append(f"<tr><td>{r['benchmark']}</td><td>{r['inner']}</td><td>{html.escape(fmt_pm(r[SUBJECT]))}</td>"
@@ -373,7 +410,7 @@ dashed: the geometric mean. Hover a row for its times.</figcaption></figure>
 <h2>Times per iteration</h2>
 <div class="scroll"><table><thead><tr><th>benchmark</th><th>inner</th><th>sysl, mean ± sd</th><th>C++, mean ± sd</th>
 <th>sysl / C++</th><th>95% interval</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>
-<h2>How it was measured</h2>
+{extra_html(extras)}<h2>How it was measured</h2>
 <ul>{''.join(f'<li>{html.escape(s)}</li>' for s in METHOD)}</ul>
 <p>The full reasoning, and the threats to validity, are in METHODOLOGY.md.</p>
 <h2>Machine and toolchain</h2>
@@ -389,11 +426,13 @@ def main():
         with open(sys.argv[2]) as f:
             doc = json.load(f)
         a = analyse(doc)
+        extras = {lang: analyse(doc, lang) for lang in extra_langs(doc)}
         with open(sys.argv[3], "w") as f:
-            f.write(render_md(doc, a))
+            f.write(render_md(doc, a, extras))
         with open(sys.argv[4], "w") as f:
-            f.write(render_html(doc, a))
-        print(f"geomean sysl/C++ {a['geomean']:.3f}  95% {ci_text(a, a['geomean_ci'])}  ({len(a['rows'])} benchmarks)")
+            f.write(render_html(doc, a, extras))
+        for lang, e in {SUBJECT: a, **extras}.items():
+            print(f"geomean {LANG_NAMES.get(lang, lang)}/C++ {e['geomean']:.3f}  95% {ci_text(e, e['geomean_ci'])}  ({len(e['rows'])} benchmarks)")
     else:
         sys.exit(__doc__)
 
