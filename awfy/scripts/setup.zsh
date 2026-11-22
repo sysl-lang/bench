@@ -43,6 +43,23 @@ if command -v python3 >/dev/null; then
 else
   need "python3 (3.8 or later; standard library only)" "xcode-select --install, or python.org"
 fi
+if (( ${LANGS[(Ie)zig]} )); then
+  if [[ -n $ZIG && -x $ZIG ]]; then
+    print "zig      $ZIG  ($($ZIG version))"
+  else
+    need "zig 0.17 (the Zig column)" "brew install zig"
+  fi
+fi
+if (( ${LANGS[(Ie)c]} )); then
+  print "C        $CLANG  (the C column: the C++ column's clang)"
+fi
+if (( ${LANGS[(Ie)rust]} )); then
+  if [[ -n $CARGO && -x $CARGO && -x ${CARGO:h}/rustc ]]; then
+    print "cargo    $CARGO  ($(${CARGO:h}/rustc --version))"
+  else
+    need "cargo and rustc 1.94 or later (the Rust column; CARGO=<toolchain>/bin/cargo if not on PATH)" "rustup.rs"
+  fi
+fi
 command -v git >/dev/null || need git "xcode-select --install"
 command -v bash >/dev/null || need bash "upstream's build.sh is a bash script"
 (( failed == 0 )) || return 1

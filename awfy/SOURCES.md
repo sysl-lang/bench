@@ -9,6 +9,12 @@ Upstream is <https://github.com/smarr/are-we-fast-yet> at commit
 | `LICENSE-awfy.md`, `CITATION.bib` | upstream `LICENSE.md`, `CITATION.bib`, byte for byte |
 | `benchmarks/sysl/` | this port, from upstream's C++ and Java ports (below) |
 | `benchmarks/sysl/json_data.sysl` | the document of upstream `benchmarks/Java/src/Json.java` line 39, character for character (checked by `scripts/check-upstream.zsh`) |
+| `benchmarks/Zig/` | the Zig port, written here from upstream's C++ port (below, "The Zig port") |
+| `benchmarks/Zig/json_data.zig` | json.h's `rapBenchmarkMinified`, written out by a 15-line C++ program that includes json.h and escapes `"` and `\` |
+| `benchmarks/C/` | the C port, written here from upstream's C++ port (below, "The C port") |
+| `benchmarks/C/src/json_data.inc` | upstream `benchmarks/C++/src/json.h` lines 13-451, byte for byte (checked by `scripts/check-upstream.zsh`) |
+| `benchmarks/Rust/` | the Rust port, written here from upstream's C++ port (below, "The Rust port") |
+| `benchmarks/Rust/src/json_data.rs` | the document of upstream `benchmarks/Java/src/Json.java` line 39, character for character (checked by `scripts/check-upstream.zsh`) |
 | `reproduce.zsh`, `scripts/`, `README.md`, `METHODOLOGY.md`, this file | written here |
 
 Everything the track needs is inside `awfy/`; upstream is fetched into `build/upstream` (ignored by
@@ -187,3 +193,168 @@ These were differences of structure or of work, now made as upstream's:
 - **Json** answered each captured string as a slice of the input, sharing its storage, where C++ and
   Java copy it. It now copies it; the slice had made sysl Json 22% faster (16.86 to 13.10 ms).
 - **The manifest** said sysl 0.11.10; the sources need 0.12.0 (`@no_fuse`).
+
+## The Zig port
+
+Upstream has no Zig port. The only public one found (`larrydewey/Resid`, `bench/v2/t1-awfy/zig`, MIT)
+does not build on Zig 0.17.1 and uses arenas where the C++ port frees objects one by one, so
+`benchmarks/Zig/` is original, written for this benchmark from the C++ port at the pinned commit, file
+for file: `harness.zig`, `run.zig`, `benchmark.zig`, `mem.zig` (the heap and `object_tracker`),
+`som/` (Vector, Dictionary, Set, Random) and one file per benchmark. It is built as one module by
+Zig 0.17.1: `zig build-exe -O fast -mcpu=native -lc harness.zig` (`-O fast` is ReleaseFast).
+
+What keeps C++'s structure:
+
+- **Allocation**: every `new`/`delete` is a `mem.create`/`mem.destroy` through libc's malloc and
+  free, the allocator C++'s `new` uses; objects are freed where C++ frees them, and the graphs C++
+  hands to `ObjectTracker` (DeltaBlue, Richards) go through the same tracker. A Debug build
+  allocates through `DebugAllocator` and the harness fails a run that leaks (`scripts/leaks.zsh`).
+- **Dispatch**: the `Benchmark` interface and DeltaBlue's constraint hierarchy are vtables (a table of
+  function pointers plus `@fieldParentPtr`), C++'s virtual calls. Richards' task functions are a
+  context (the scheduler) plus a function pointer, the indirect call of C++'s `std::function`; its
+  data records are `*anyopaque`. Json's values are a kind tag plus `@fieldParentPtr`; their virtual
+  methods are only type tests, and each node is still its own allocation.
+- Collection `forEach`/`hasSome` take a context plus a comptime function, as `std.sort` does; C++
+  passes a lambda to a template.
+- An uncaught C++ exception is a `@panic`.
+
+Every structural difference from the C++ port, and why:
+
+- **Bounds checks**: ReleaseFast has no safety checks, so the indexing C++ does with `.at()` (CD,
+  DeltaBlue, Havlak, Json, NBody, Richards, Towers; upstream's C++ guideline) is unchecked here. The suite's own `Vector` is unchecked in
+  both.
+- **List**: the element value is an `i32`; C++ holds it in a `std::any` (an `int` in its small buffer,
+  no allocation), upstream's Java in an `Object`. Zig has no `std::any`.
+- **The `Benchmark` interface**: `benchmark()` answers the benchmark's own result type; C++ answers a
+  `std::any` that `verifyResult` casts back.
+- **Json**: a string borrows from the constant input unless it holds an escape (std.json's
+  `.alloc_if_needed`); C++ copies each into a `std::string`, which for most of the document's short
+  strings is its small buffer, no allocation. The document has no escapes.
+- **Dictionary**: `Entry::match` is a plain method; C++'s override has the same body as the base.
+- **IdentitySet** is `Set`: C++'s `IdentitySet::contains` hides rather than overrides
+  `Set::contains`, so `add`, its only caller, uses `equal` in both.
+- **CD** calls Zig's `@cos`/`@sin` builtins where C++ calls libm's `cos`/`sin`; the collision counts
+  the benchmark checks come out the same at every size run (`scripts/verify.zsh`).
+- **Null checks** C++ makes on a pointer its types guarantee non-null are dropped where Zig's types
+  forbid null (`*T` against `?*T`).
+
+## The C port
+
+Upstream has no C port. The only public one (`rochus-keller/Are-we-fast-yet`, `C/`, MIT) does not
+build without `-w` (13 calls through mismatched function-pointer types, which are undefined
+behaviour), is pinned to upstream 770c6649, and was derived from its author's own C++ port, not
+upstream's: DeltaBlue uses tagged unions where C++ has virtuals. So `benchmarks/C/` is original,
+written for this benchmark from the C++ port at the pinned commit, file for file: `src/harness.c`
+(`harness.cpp` and `run.h`), `src/benchmark.h`, `src/memory/object_tracker.{h,c}`, `src/som/`
+(Vector, Set, IdentityDictionary, Random, Error) and one `.c` per benchmark. `build.sh` compiles every
+file in one clang invocation with the C++ column's clang and `OPT` (`-O3 -flto -mcpu=native`), plus
+`-ffp-contract=off -std=c17 -Wall -Wextra -Werror`, as upstream's `build.sh` adds
+`-ffp-contract=off -std=c++17` for C++.
+
+What keeps C++'s structure:
+
+- **Templates are typed modules**: `DEFINE_VECTOR`, `DEFINE_SET`, `DEFINE_IDENTITY_DICTIONARY` and
+  CD's `DEFINE_RED_BLACK_TREE` generate a struct and its functions for one element type, as a C++
+  template instantiation does: elements stored inline and by value, monomorphic code. Upstream's
+  quirks are kept (`atPut` reallocates past the end, `sort`'s `swap` exits, `removeAll` reallocates).
+- **Virtuals are vtables**: every class with a virtual member has a `const` table of function
+  pointers, and a call through it is C++'s virtual call: `Benchmark`, DeltaBlue's constraint
+  hierarchy (one table per concrete class, filled as C++ resolves the overrides), Json's `JsonValue`
+  (every `is*`/`as*` test is a call through the table), the dictionary's entries and `newEntry`, and
+  the virtual destructor of every `TrackedObject`.
+- **Allocation**: every `new`/`delete` is a `malloc`/`free`, at the same place and of the same object;
+  destructors are `_deinit`/`_delete` functions called where C++ runs them (a stack object's at the end
+  of its scope). DeltaBlue and Richards register their objects with the same `ObjectTracker`.
+- **Closures** are a function pointer and a context pointer, the indirect call of C++'s
+  `std::function`.
+- An uncaught C++ exception is `error()`: it prints the message and exits 1.
+
+Every structural difference from the C++ port, and why:
+
+- **`std::any`** (the `Benchmark` result, List's element value) is a `Result` union and an `int32_t`:
+  C has no top type. Each benchmark reads back the member it wrote.
+- **Bounds checks**: the indexing C++ does with `.at()` is plain indexing; the suite's own `Vector`
+  checks as C++'s does.
+- **Overloads**: C has none, so CD's static `benchmark(int)` is `CD_run` and the private
+  `verify_result` overloads (CD, Havlak, Mandelbrot, NBody) are named `verify`.
+- **Richards' `dynamic_cast`** is a comparison of the vtable pointer, a checked downcast that yields
+  `NULL` on a mismatch, as `dynamic_cast` does.
+- **Json**: the current character is an `int` (a byte, or -1 at the end) where C++ holds a
+  one-character `std::string` in its small buffer; C has a character type and no string type. Owned
+  strings are `{char*, length}`, each `malloc`ed, where libc++ keeps the document's short strings in
+  its small buffer without allocating: more work for C, not less. A parsed name moves into its object
+  where C++ copies it in and destroys its own. `toString()` answers the stored bytes where C++ copies
+  them; it is reached only on an error. The parser copies the document into its own buffer on every
+  iteration, as C++'s by-value constructor does.
+- **CD**: `std::optional<V>` is a `{has_value, value}` struct. The tree's `remove` unlinks its node
+  without freeing it, as C++'s; the benchmark never removes an aircraft, so it never runs.
+- **IdentitySet** is `Set`, as in the Zig port: C++'s `IdentitySet::contains` hides `Set::contains`,
+  so `add`, its only caller, uses `equal` in both.
+
+## The Rust port
+
+Upstream has no Rust port. The public ones found were rejected: `larrydewey/Resid`
+(`bench/v2/t1-awfy/rust`, MIT) replaces Richards' task closures with an enum dispatch over index
+arenas, and `icantcodefyi/sakuralang` has only Havlak, over arena indices. So `benchmarks/Rust/` is
+original, written for this benchmark from the C++ port at the pinned commit, file for file:
+`src/main.rs` (`harness.cpp` and `run.h`), `src/benchmark.rs`, `src/memory.rs` (`object_tracker`),
+`src/som/` (Vector, Set, IdentityDictionary, Random) and one file per benchmark. It has no
+dependencies. It is built by cargo with Rust 1.94.0 (`rustc 1.94.0 (4a4ef493e 2026-03-02)`, LLVM 21.1.8)
+at `opt-level = 3`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"` (`Cargo.toml`) and
+`RUSTFLAGS='-C target-cpu=native'`: the counterpart of C++'s `-O3 -flto -mcpu=native`. Rust never
+contracts a multiply and an add, which is C++'s `-ffp-contract=off`.
+
+It is safe Rust except three `unsafe` blocks, all in `memory.rs`, each with its proof in a `SAFETY`
+comment:
+
+- **`Tracker::track`** answers a `&T` into a `Box` the tracker owns. Why: the objects C++ links with
+  raw pointers in cyclic graphs (DeltaBlue's variables and constraints, CD's red-black tree nodes with
+  their parent pointers, Havlak's blocks, loops and union-find nodes) are each one allocation,
+  referenced by `&` and mutated through `Cell`s, and freed together when the tracker is, which is where
+  C++ frees them. `Rc`/`Weak` would add a reference count to every link and a count update to every
+  traversal step, work the C++ port does not do; indices into a `Vec` would make the objects one
+  allocation, not one each.
+- **`ObjectTracker::track` and its `Drop`** hold Richards' objects of different types and free their
+  memory without running anything; a compile-time assertion admits only types with no destructor.
+  Why: Richards' task functions are `dyn Fn` closures, and Rust's drop checker refuses a `dyn` value
+  inside a self-referential tracker (it assumes a trait object's destructor may read the references in
+  its type, E0597), so the typed `Tracker` cannot hold them.
+
+What keeps C++'s structure:
+
+- **Allocation**: every `new` is one `Box` (or `Box<[T]>`) or one tracked object, at the same place and
+  of the same object, and is freed where C++ deletes it (`Drop` at the end of the owner's scope, as a
+  C++ destructor). The graphs C++ hands to `ObjectTracker` (DeltaBlue, Richards) are in a tracker.
+- **Virtuals**: the `Benchmark` harness call, DeltaBlue's constraint hierarchy and Json's `JsonValue`
+  are trait objects called through `&dyn`/`Box<dyn>`, C++'s virtual calls. Richards' task functions
+  are closures capturing the scheduler, called through `&dyn Fn`, the indirect call of
+  `std::function`.
+- **som/**: the suite's own `Vector` (first index, capacity 10 doubling, its quicksort), `Set`,
+  `IdentityDictionary` (C++'s bucket splitting, quirks included) and `Random`. A `Vec` is only the
+  storage C++ allocates with `new E[n]`; its algorithms are never used.
+- An uncaught C++ exception is a panic, which aborts.
+
+Every structural difference from the C++ port, and why:
+
+- **Tracker beside its owner** (CD's trees, Havlak's graph, loop structure graphs and loop finder):
+  a Rust struct cannot hold references into its own fields, so the caller declares the tracker on the
+  line before the object that owns the nodes in C++, and both are freed at the end of the same scope.
+- **The `Benchmark` interface**: `benchmark()` answers an associated `Result` type; C++ answers a
+  `std::any` that `verifyResult` casts back.
+- **List**: the element value is an `i32`; C++ holds it in a `std::any`, an `int` in its small buffer.
+- **Bounds checks**: Rust's indexing is checked, so the suite's own `Vector` checks where C++'s does
+  not; the indexing C++ does with `.at()` is checked in both.
+- **DeltaBlue**: C++ keeps the strength tables in static members, set up at the start of `chainTest`
+  and released at the end of `projectionTest`; Rust has no mutable global without `unsafe` or a lock,
+  so `inner_benchmark_loop` builds the same tables at the same point and passes them to both tests.
+- **Richards' `dynamic_cast`** of a task's data record is a `match` on the record's enum.
+- **Json**: a parse error is a panic with C++'s `ParseException` message. The parser borrows the copy
+  of the document the caller makes, where C++'s by-value constructor copies it, so the current
+  character can be a one-character slice. Strings are `String`s, which allocate where libc++ keeps the
+  document's short strings in its small buffer: more work for Rust, not less.
+- **CD**: a node's value is a `RefCell`, so `get` answers it for in-place appends as C++'s `V*` does,
+  and a voxel's motion vector is an `Option<Box<Vector>>` so the voxel map can hand it on, as C++
+  copies the pointer. The tree's `remove` unlinks its node; the node is freed with the tree (C++ never
+  frees it). The benchmark never removes an aircraft, so it never runs.
+- **IdentitySet** is `Set`, as in the Zig and C ports.
+

@@ -1,0 +1,22 @@
+# The Rust port of the Are We Fast Yet suite: original, written for this benchmark (SOURCES.md, "Rust").
+# No dependencies: everything the benchmarks use is std or the suite's own som/ library.
+[package]
+name = "awfy"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94"
+publish = false
+
+[[bin]]
+name = "harness"
+path = "src/main.rs"
+
+# METHODOLOGY.md, "Flags": the counterpart of C++'s -O3 -flto on this machine's processor.
+# target-cpu=native is in .cargo/config.toml, beside this file.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+incremental = false

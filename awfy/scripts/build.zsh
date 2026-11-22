@@ -34,4 +34,43 @@ else
   print "FAILED   sysl (see build/sysl.log)"; failed=1
 fi
 
+# Zig: only when it is one of the languages run.
+if (( ${LANGS[(Ie)zig]} )); then
+  t0=$EPOCHREALTIME
+  print -r -- "(cd benchmarks/Zig && zig build-exe ${ZIG_FLAGS[*]} -femit-bin=<build>/harness-zig harness.zig)" > $BUILD/zig.command
+  if (cd $AWFY_ROOT/benchmarks/Zig && $ZIG build-exe $ZIG_FLAGS --cache-dir $BUILD/zig-cache -femit-bin=$BUILD/harness-zig harness.zig) >$BUILD/zig.log 2>&1; then
+    print -r -- $(( EPOCHREALTIME - t0 )) > $BUILD/zig.build-seconds
+    printf "built    zig   %6.1f s  zig %s\n" $(<$BUILD/zig.build-seconds) "$($ZIG version)"
+  else
+    print "FAILED   zig (see build/zig.log)"; failed=1
+  fi
+fi
+
+# C: only when it is one of the languages run. The C++ column's clang and OPT.
+if (( ${LANGS[(Ie)c]} )); then
+  t0=$EPOCHREALTIME
+  print -r -- "(cd benchmarks/C && CC=clang OPT='$C_OPT' bash ./build.sh <build>/harness-c)" > $BUILD/c.command
+  if CC=$CLANG OPT=$C_OPT bash $AWFY_ROOT/benchmarks/C/build.sh $BUILD/harness-c >$BUILD/c.log 2>&1; then
+    print -r -- $(( EPOCHREALTIME - t0 )) > $BUILD/c.build-seconds
+    printf "built    c     %6.1f s\n" $(<$BUILD/c.build-seconds)
+  else
+    print "FAILED   c (see build/c.log)"; failed=1
+  fi
+fi
+
+# Rust: only when it is one of the languages run. --locked builds from the committed Cargo.lock (the
+# crate has no dependencies); CARGO_HOME and the target directory stay under build/.
+if (( ${LANGS[(Ie)rust]} )); then
+  t0=$EPOCHREALTIME
+  print -r -- "(cd benchmarks/Rust && RUSTFLAGS='$RUSTFLAGS_AWFY' cargo build --release --locked && cp target/release/harness <build>/harness-rust)" > $BUILD/rust.command
+  if (cd $AWFY_ROOT/benchmarks/Rust && CARGO_HOME=$BUILD/cargo-home RUSTC=${CARGO:h}/rustc RUSTFLAGS=$RUSTFLAGS_AWFY \
+        $CARGO build --release --locked --target-dir $BUILD/rust-target) >$BUILD/rust.log 2>&1 &&
+     cp $BUILD/rust-target/release/harness $BUILD/harness-rust; then
+    print -r -- $(( EPOCHREALTIME - t0 )) > $BUILD/rust.build-seconds
+    printf "built    rust  %6.1f s  %s\n" $(<$BUILD/rust.build-seconds) "$(${CARGO:h}/rustc --version)"
+  else
+    print "FAILED   rust (see build/rust.log)"; failed=1
+  fi
+fi
+
 exit $failed
