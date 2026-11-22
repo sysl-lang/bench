@@ -1,0 +1,29 @@
+program	language	verdict	note
+nqueen	c	ok	
+nqueen	rust	ok	
+nqueen	zig	failed	
+nqueen	swift	ok	
+nqueen	nim	ok	
+nqueen	d	ok	
+nqueen	sysl	ok	
+matmul	c	ok	
+matmul	rust	ok	
+matmul	zig	failed	
+matmul	swift	ok	
+matmul	nim	ok	
+matmul	d	format	prints -143.5: right to the 1 decimal(s) printed
+matmul	sysl	ok	
+sudoku	c	ok	
+sudoku	rust	ok	
+sudoku	zig	absent	
+sudoku	swift	ok	
+sudoku	nim	format	the same solutions, without the blank line after each puzzle
+sudoku	d	ok	
+sudoku	sysl	ok	
+bedcov	c	ok	
+bedcov	rust	WRONG	prints 8195479573, C prints 8195494005
+bedcov	zig	absent	
+bedcov	swift	ok	
+bedcov	nim	ok	
+bedcov	d	ok	
+bedcov	sysl	ok	

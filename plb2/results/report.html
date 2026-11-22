@@ -1,0 +1,95 @@
+<!doctype html><html lang=en><meta charset=utf-8>
+<meta name=viewport content='width=device-width, initial-scale=1'>
+<title>plb2 results</title><style>
+:root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fff; --muted: #6e6e73; --line: #d2d2d7;
+        --bar: #3a6fd8; --c: #8a8a8e; --sysl: #d8743a; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg: #f2f2f7; --bg: #1c1c1e; --muted: #98989d; --line: #3a3a3c; --bar: #6a9bf4;
+          --c: #8e8e93; --sysl: #f0955d; } }
+body { font: 14px/1.45 -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg);
+       max-width: 70rem; margin: 2rem auto; padding: 0 1rem; }
+h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 2rem; }
+p, li { color: var(--muted); }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: .3rem .5rem; border-bottom: 1px solid var(--line); text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+.bars td { text-align: left; }
+.bar { height: .8rem; background: var(--bar); border-radius: 2px; display: inline-block;
+       vertical-align: middle; }
+.bar.c { background: var(--c); } .bar.sysl { background: var(--sysl); }
+.na { color: var(--muted); font-style: italic; }
+</style>
+<h1>plb2 results — 2026-11-22T01:54:10-05:00</h1>
+<p>Apple M5 Pro (Mac17,8), 27.0.1; hyperfine 2.0.0, <code>-N --warmup 1</code>, order shuffled from seed 1795330186. Mean wall time ± standard deviation in seconds; the ratio is to C's mean (lower is faster).</p>
+<table><tr><th>program</th><th>C</th><th>Rust</th><th>Zig</th><th>Swift</th><th>Nim</th><th>D</th><th>sysl</th></tr>
+<tr><td>nqueen</td>
+<td>1.772 ± 0.007<br>1.00×</td>
+<td>1.823 ± 0.008<br>1.03×</td>
+<td class=na>does not build</td>
+<td>1.992 ± 0.029<br>1.12×</td>
+<td>1.745 ± 0.018<br>0.98×</td>
+<td>1.778 ± 0.006<br>1.00×</td>
+<td>1.912 ± 0.035<br>1.08×</td>
+</tr>
+<tr><td>matmul</td>
+<td>0.385 ± 0.002<br>1.00×</td>
+<td>0.391 ± 0.001<br>1.02×</td>
+<td class=na>does not build</td>
+<td>0.385 ± 0.001<br>1.00×</td>
+<td>0.386 ± 0.001<br>1.00×</td>
+<td>0.387 ± 0.001<br>1.01× *</td>
+<td>0.386 ± 0.001<br>1.00×</td>
+</tr>
+<tr><td>sudoku</td>
+<td>1.103 ± 0.002<br>1.00×</td>
+<td>1.161 ± 0.003<br>1.05×</td>
+<td class=na>no upstream program</td>
+<td>1.153 ± 0.001<br>1.05×</td>
+<td>1.090 ± 0.007<br>0.99× *</td>
+<td>1.086 ± 0.002<br>0.98×</td>
+<td>1.100 ± 0.002<br>1.00×</td>
+</tr>
+<tr><td>bedcov</td>
+<td>0.596 ± 0.006<br>1.00×</td>
+<td>0.653 ± 0.003<br>1.10× <b>wrong answer</b></td>
+<td class=na>no upstream program</td>
+<td>0.777 ± 0.005<br>1.30×</td>
+<td>0.661 ± 0.018<br>1.11×</td>
+<td>0.632 ± 0.010<br>1.06×</td>
+<td>0.614 ± 0.003<br>1.03×</td>
+</tr>
+<tr><th>geomean vs C</th><th>1.00×</th><th>1.03× (over 3)</th><th>—</th><th>1.11×</th><th>1.02×</th><th>1.01×</th><th>1.03×</th></tr></table>
+<p>* [1] D matmul: prints -143.5: right to the 1 decimal(s) printed<br>[2] Nim sudoku: the same solutions, without the blank line after each puzzle<br>[3] Rust bedcov: WRONG ANSWER — prints 8195479573, C prints 8195494005</p>
+<h2>nqueen — time relative to C</h2><table class=bars>
+<tr><td style='width:6rem'>C</td><td><span class='bar c' style='width:65.2%'></span> 1.00×</td></tr>
+<tr><td style='width:6rem'>Rust</td><td><span class='bar ' style='width:67.0%'></span> 1.03×</td></tr>
+<tr><td style='width:6rem'>Swift</td><td><span class='bar ' style='width:73.3%'></span> 1.12×</td></tr>
+<tr><td style='width:6rem'>Nim</td><td><span class='bar ' style='width:64.2%'></span> 0.98×</td></tr>
+<tr><td style='width:6rem'>D</td><td><span class='bar ' style='width:65.4%'></span> 1.00×</td></tr>
+<tr><td style='width:6rem'>sysl</td><td><span class='bar sysl' style='width:70.3%'></span> 1.08×</td></tr>
+</table>
+<h2>matmul — time relative to C</h2><table class=bars>
+<tr><td style='width:6rem'>C</td><td><span class='bar c' style='width:65.2%'></span> 1.00×</td></tr>
+<tr><td style='width:6rem'>Rust</td><td><span class='bar ' style='width:66.3%'></span> 1.02×</td></tr>
+<tr><td style='width:6rem'>Swift</td><td><span class='bar ' style='width:65.2%'></span> 1.00×</td></tr>
+<tr><td style='width:6rem'>Nim</td><td><span class='bar ' style='width:65.4%'></span> 1.00×</td></tr>
+<tr><td style='width:6rem'>D</td><td><span class='bar ' style='width:65.6%'></span> 1.01×</td></tr>
+<tr><td style='width:6rem'>sysl</td><td><span class='bar sysl' style='width:65.4%'></span> 1.00×</td></tr>
+</table>
+<h2>sudoku — time relative to C</h2><table class=bars>
+<tr><td style='width:6rem'>C</td><td><span class='bar c' style='width:65.2%'></span> 1.00×</td></tr>
+<tr><td style='width:6rem'>Rust</td><td><span class='bar ' style='width:68.6%'></span> 1.05×</td></tr>
+<tr><td style='width:6rem'>Swift</td><td><span class='bar ' style='width:68.2%'></span> 1.05×</td></tr>
+<tr><td style='width:6rem'>Nim</td><td><span class='bar ' style='width:64.4%'></span> 0.99×</td></tr>
+<tr><td style='width:6rem'>D</td><td><span class='bar ' style='width:64.2%'></span> 0.98×</td></tr>
+<tr><td style='width:6rem'>sysl</td><td><span class='bar sysl' style='width:65.1%'></span> 1.00×</td></tr>
+</table>
+<h2>bedcov — time relative to C</h2><table class=bars>
+<tr><td style='width:6rem'>C</td><td><span class='bar c' style='width:65.2%'></span> 1.00×</td></tr>
+<tr><td style='width:6rem'>Rust</td><td><span class='bar ' style='width:71.4%'></span> 1.10×</td></tr>
+<tr><td style='width:6rem'>Swift</td><td><span class='bar ' style='width:85.0%'></span> 1.30×</td></tr>
+<tr><td style='width:6rem'>Nim</td><td><span class='bar ' style='width:72.4%'></span> 1.11×</td></tr>
+<tr><td style='width:6rem'>D</td><td><span class='bar ' style='width:69.2%'></span> 1.06×</td></tr>
+<tr><td style='width:6rem'>sysl</td><td><span class='bar sysl' style='width:67.2%'></span> 1.03×</td></tr>
+</table>
+<h2>Toolchains and flags</h2><ul><li>C: Apple clang version 21.0.0 (clang-2100.4.1.1) — <code>-O3 -fwrapv -flto</code></li><li>Rust: rustc 1.94.0 (4a4ef493e 2026-03-02) — <code>-C debuginfo=0 -C opt-level=3</code></li><li>Zig: 0.17.1 — <code>-O ReleaseFast</code></li><li>Swift: swift-driver version: 1.168.6 Apple Swift version 6.4.2 (swiftlang-6.4.2.1.9 clang-2100.4.1.1) — <code>-Ounchecked</code></li><li>Nim: Nim Compiler Version 2.4.2 [MacOSX: arm64] — <code>-d:release -d:lto --bound_checks:off --overflow_checks:off -d:nimEmulateOverflowChecks</code></li><li>D: LDC - the LLVM D compiler (1.43.0): — <code>-O3 -release</code></li><li>sysl: sysl dev 21073aae (pre-0.13.0) — <code>--release -O3 --lto full</code></li></ul></html>

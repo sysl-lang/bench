@@ -8,6 +8,7 @@
 # every run) and results/meta.json (seed, order, machine, toolchains, flags), and copies the build
 # and verification tables into results/.
 #
+# SYSL_LABEL names the sysl compiler in meta.json where its --version does not (a dev build).
 # PLB2_RESULTS and PLB2_RUNS (a fixed run count) are for a smoke test of the scripts only; a
 # published result uses neither.
 
@@ -51,7 +52,7 @@ tool=(
   swift  "$(version swiftc --version)"
   nim    "$(version nim --version)"
   d      "$(version ldc2 --version)"
-  sysl   "$(version $SYSL --version) ($(whence -p $SYSL || print $SYSL))"
+  sysl   "${SYSL_LABEL:-$(version $SYSL --version) ($(whence -p $SYSL || print $SYSL))}"
 )
 
 python3 -I - $results/meta.json $seed "$(sw_vers -productVersion 2>/dev/null || uname -sr)" \

@@ -30,9 +30,10 @@ def load():
     cell = {}
     for f in (RESULTS / "raw").glob("*.json"):
         prog, lang = f.stem.split("-", 1)
-        r = json.loads(f.read_text())["results"][0]
-        cell[prog, lang] = {"mean": r["mean"], "sd": r["stddev"] or 0.0, "cpu": r["user"] + r["system"],
-                            "runs": len(r["times"])}
+        s = json.loads(f.read_text())["results"][0]["summary"]
+        wall = s["time_wall_clock"]
+        cell[prog, lang] = {"mean": wall["mean"], "sd": wall["stddev"] or 0.0,
+                            "cpu": s["time_user"]["mean"] + s["time_system"]["mean"], "runs": wall["count"]}
     return meta, verdict, cell
 
 

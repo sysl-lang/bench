@@ -1,0 +1,52 @@
+{
+  "date": "2026-11-22T01:54:10-05:00",
+  "seed": 1795330186,
+  "order": [
+    "sudoku/swift",
+    "sudoku/d",
+    "nqueen/rust",
+    "nqueen/d",
+    "matmul/d",
+    "bedcov/sysl",
+    "matmul/c",
+    "bedcov/rust",
+    "nqueen/c",
+    "sudoku/c",
+    "matmul/swift",
+    "sudoku/rust",
+    "bedcov/c",
+    "bedcov/d",
+    "sudoku/nim",
+    "matmul/nim",
+    "bedcov/nim",
+    "nqueen/swift",
+    "nqueen/sysl",
+    "sudoku/sysl",
+    "bedcov/swift",
+    "matmul/sysl",
+    "matmul/rust",
+    "nqueen/nim"
+  ],
+  "os": "27.0.1",
+  "cpu": "Apple M5 Pro",
+  "model": "Mac17,8",
+  "hyperfine": "hyperfine 2.0.0",
+  "toolchains": {
+    "zig": "0.17.1",
+    "rust": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "nim": "Nim Compiler Version 2.4.2 [MacOSX: arm64]",
+    "swift": "swift-driver version: 1.168.6 Apple Swift version 6.4.2 (swiftlang-6.4.2.1.9 clang-2100.4.1.1)",
+    "c": "Apple clang version 21.0.0 (clang-2100.4.1.1)",
+    "d": "LDC - the LLVM D compiler (1.43.0):",
+    "sysl": "sysl dev 21073aae (pre-0.13.0)"
+  },
+  "flags": {
+    "zig": "-O ReleaseFast",
+    "rust": "-C debuginfo=0 -C opt-level=3",
+    "nim": "-d:release -d:lto --bound_checks:off --overflow_checks:off -d:nimEmulateOverflowChecks",
+    "swift": "-Ounchecked",
+    "c": "-O3 -fwrapv -flto",
+    "d": "-O3 -release",
+    "sysl": "--release -O3 --lto full"
+  }
+}
