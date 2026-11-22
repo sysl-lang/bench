@@ -47,6 +47,15 @@ command -v git >/dev/null || need git "xcode-select --install"
 command -v bash >/dev/null || need bash "upstream's build.sh is a bash script"
 (( failed == 0 )) || return 1
 
+# The published run's platform and versions (config.zsh). A difference is allowed, but its numbers
+# are a different measurement: a different optimiser moves both columns.
+[[ $(uname -sm) == "Darwin arm64" ]] ||
+  print "WARNING: this is $(uname -sm); the track is tested only on macOS arm64 (METHODOLOGY.md, section 9). On Linux run.zsh's /usr/bin/time -l fails; on x86 clang reads -mcpu=native as generic x86-64."
+[[ $sysl_version == $RECORDED_SYSL ]] ||
+  print "WARNING: sysl $sysl_version, but the published run used sysl $RECORDED_SYSL; the results are not comparable with it"
+[[ $($CLANG --version | head -1) == $RECORDED_CLANG ]] ||
+  print "WARNING: $($CLANG --version | head -1), but the published run used $RECORDED_CLANG; the results are not comparable with it"
+
 print "== upstream"
 if [[ ! -d $UPSTREAM_DIR/.git ]]; then
   mkdir -p $BUILD
@@ -55,8 +64,14 @@ fi
 if ! git -C $UPSTREAM_DIR cat-file -e $UPSTREAM_COMMIT^{commit} 2>/dev/null; then
   git -C $UPSTREAM_DIR fetch --quiet origin
 fi
-git -C $UPSTREAM_DIR checkout --quiet --detach $UPSTREAM_COMMIT
+# -f discards any edit to a tracked file, so C++ is always built from upstream's own sources.
+git -C $UPSTREAM_DIR checkout --quiet --force --detach $UPSTREAM_COMMIT
 git -C $UPSTREAM_DIR clean --quiet -fdx
+if [[ -n $(git -C $UPSTREAM_DIR status --porcelain --ignored) ]]; then
+  print -u2 "build/upstream is not a clean checkout of $UPSTREAM_COMMIT:"
+  git -C $UPSTREAM_DIR status --short --ignored >&2
+  return 1
+fi
 print "upstream $UPSTREAM_URL at $(git -C $UPSTREAM_DIR rev-parse HEAD)"
 print "upstream HEAD of its default branch: $(git -C $UPSTREAM_DIR rev-parse origin/HEAD 2>/dev/null)"
 

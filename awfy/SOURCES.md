@@ -73,8 +73,10 @@ says so.
   Java a lambda the JIT inlines. Both are the language's idiomatic way to take a closure (G
   "Idiomatic Use"; G "As Identical as Possible" wants `forEach` with a closure because it "exercises
   the compiler's abilities to optimize closures"). A closure that is stored (Richards' task
-  functions) is a `&Fn`, as C++'s `std::function` member is. METHODOLOGY.md lists this as a threat to
-  validity: the `std::function` is the harder form to optimise.
+  functions) is a `&Fn`, as C++'s `std::function` member is. Upstream's Crystal port is the precedent:
+  it takes `&block` and calls it with `yield` (`benchmarks/Crystal/som.cr:100`), inlined at each call
+  site as sysl's is. METHODOLOGY.md, section 9, lists it with its measured size: the `std::function`
+  costs C++ 25% on Havlak and 6.6% on DeltaBlue.
 - **Renamed words.** Where a C++ or Java name is a sysl keyword it is renamed: Havlak's `type` is
   `types` and `loop` is `found_loop`; Json's `null` flag is `literal_null` (and its siblings
   `literal_true`, `literal_false`). Where C++ overloads `verify_result` with a second, private
@@ -119,6 +121,8 @@ says so.
 - **List**: `Element.value` is an `int`, where C++ has `std::any` and Java `Object`: sysl has no top
   type, and only ints are stored (G "Well-typed Behavior"). The value is never read.
 - **Mandelbrot**, **NBody**: as upstream; the private `verify_result` overloads are renamed (above).
+  NBody's `NBodySystem` holds C++'s `bodies_size` field (`_bodiesSize`, `nbody.h:96`), and every loop
+  runs to it, not to the array's length.
 - **Permute**, **Queens**: the arrays are `[]int` and `[]bool` made per run, as C++'s `new[]`.
 - **Sieve**: as C++: the flags are a `[5000]bool` zeroed, then filled with `true` (`fill`, as C++'s
   `std::fill_n`), and passed **by value**, so `sieve` works on its own copy as it does on C++'s
@@ -148,12 +152,17 @@ says so.
   upstream's ports all use a one-character string: C++ `substr(i, 1)`, Java `substring`). A sysl
   slice allocates nothing; C++'s one-character `std::string` lives in its small-string buffer and
   allocates nothing either; Java's `substring` allocates. A parse error panics with the message, line
-  and column C++ would throw. The JSON literals are allocated objects, as G "C++" says for Json. The
-  document is a `const` generated from the Java source and checked against it.
+  and column C++ would throw. A captured string (a number or a string's text) is a `.copy()` of its
+  part of the input, as C++'s `substr` and Java's `substring` copy it; a slice would share the input's
+  storage for free. The JSON literals are allocated objects, as G "C++" says for Json. The
+  document is a `const` generated from the Java source and checked against it; the parser reads it in
+  place, as Java's does, where C++ copies it into the parser on every iteration (METHODOLOGY.md,
+  section 9, gives the cost).
 - **Richards**: `RBObject` is gone: it is a base class whose only member is `append`, which uses no
   state, so its constants are module constants and `append` a module function. A task's private data
   is the enum `TaskData`, which each task function takes apart with `match` where C++ uses
-  `dynamic_cast` and Java a cast. The task functions capture the scheduler, as C++'s `[this]`;
+  `dynamic_cast` and Java a cast. The `dynamic_cast` costs C++ about 30% of Richards' time
+  (METHODOLOGY.md, section 9); the `match` is sysl's checked downcast and stays. The task functions capture the scheduler, as C++'s `[this]`;
   `Scheduler.release_all` lets go of the tasks at the end of a run, breaking that cycle, as C++'s
   `ObjectTracker::releaseAll()` frees them (G "C++", Richards).
 
@@ -171,4 +180,10 @@ These were differences of structure or of work, now made as upstream's:
   (`makeList`, `isShorterThan`, `tail`; the private `verify_result` overloads and `mandelbrot`;
   `stringHash`, `hashSlotFor`) were module functions; they are methods. Json's slot mask is computed
   from the table's size, as C++'s, instead of the constant 31.
+- **NBody** looped to `self.bodies.len`, the array's compile-time length of 5, so the optimiser could
+  unroll every loop; C++ loops to the field `_bodiesSize`. It now loops to a `bodies_size` field as
+  C++ does. Measured by the audit, the constant bound had made sysl NBody 31% faster (6.43 to 4.46
+  ms per iteration), and C++ with its bound made `constexpr` runs in 4.48 ms.
+- **Json** answered each captured string as a slice of the input, sharing its storage, where C++ and
+  Java copy it. It now copies it; the slice had made sysl Json 22% faster (16.86 to 13.10 ms).
 - **The manifest** said sysl 0.11.10; the sources need 0.12.0 (`@no_fuse`).
