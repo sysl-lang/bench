@@ -45,13 +45,16 @@ neptune() -> Body =
 sun() -> Body = body(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 
 struct NBodySystem
+    // Every loop runs to this field, as C++'s to `_bodiesSize` (nbody.h:96): a bound the optimiser
+    // reads from memory, not the array's compile-time length, which would let it unroll the loops.
+    bodies_size: int
     bodies: [5]Body
 
     advance(*self, dt: real)
-        for i in 0..<self.bodies.len
+        for i in 0..<self.bodies_size
             ref i_body = self.bodies[i]
 
-            for j in i + 1..<self.bodies.len
+            for j in i + 1..<self.bodies_size
                 ref j_body = self.bodies[j]
                 val dx = i_body.x - j_body.x
                 val dy = i_body.y - j_body.y
@@ -69,7 +72,7 @@ struct NBodySystem
                 j_body.vy += dy * i_body.mass * mag
                 j_body.vz += dz * i_body.mass * mag
 
-        for i in 0..<self.bodies.len
+        for i in 0..<self.bodies_size
             ref b = self.bodies[i]
 
             b.x += dt * b.vx
@@ -79,12 +82,12 @@ struct NBodySystem
     energy(*self) -> real
         var e = 0.0
 
-        for i in 0..<self.bodies.len
+        for i in 0..<self.bodies_size
             val i_body = self.bodies[i]
 
             e += 0.5 * i_body.mass * (i_body.vx * i_body.vx + i_body.vy * i_body.vy + i_body.vz * i_body.vz)
 
-            for j in i + 1..<self.bodies.len
+            for j in i + 1..<self.bodies_size
                 val j_body = self.bodies[j]
                 val dx = i_body.x - j_body.x
                 val dy = i_body.y - j_body.y
@@ -108,7 +111,7 @@ nbody_system() -> NBodySystem
         pz += b.vz * b.mass
 
     bodies[0].offset_momentum(px, py, pz)
-    NBodySystem(bodies)
+    NBodySystem(5, bodies)
 
 struct NBody
     // C++ overloads verify_result; sysl refuses a member colliding with a trait member.

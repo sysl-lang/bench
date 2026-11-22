@@ -39,7 +39,7 @@ well each compiler does with the same program.
 | macro | CD | collision detection: a red-black tree, vectors of values, closures | 250 |
 | | DeltaBlue | a constraint solver: polymorphism over constraints, an object graph | 12000 |
 | | Havlak | loop recognition: graphs, sets, a dictionary, union-find | 1500 |
-| | Json | parsing a 30 KB document into a tree | 100 |
+| | Json | parsing a 25.8 KB document into a tree | 100 |
 | | Richards | an OS task scheduler: closures, linked queues | 100 |
 
 The inner iterations are upstream's (`rebench.conf`). Each benchmark's own check is written against
@@ -54,7 +54,14 @@ adding Java and Crystal as reference columns.
 
 ## Reproducing
 
-You need macOS or Linux, sysl 0.12.0 or later, clang, python3 (standard library only) and git.
+You need macOS on Apple silicon (arm64), sysl 0.12.0 or later, clang, python3 (standard library
+only) and git. That is the only platform the track is tested on. Linux and x86 are untested and
+known not to work as they stand: GNU time rejects `/usr/bin/time -l`, GNU stat rejects `stat -f`,
+and on x86 clang reads `-mcpu=native` as generic `x86-64` (METHODOLOGY.md, section 9).
+
+The published run was made with **sysl 0.12.0** and **Apple clang 21.0.0 (clang-2100.4.1.1)**, from
+Xcode 27.2 and its command-line tools, on macOS 27. `reproduce.zsh` prints a warning when the sysl or
+clang it finds is not these: a different optimiser is a different measurement.
 
 ```
 brew install sysl-lang/tap/sysl
@@ -77,7 +84,7 @@ zsh reproduce.zsh
 
 | step | script | what it does |
 |---|---|---|
-| setup | `scripts/setup.zsh` | prints the versions of sysl, clang and python3, and says how to install any that is missing; clones upstream at the pinned commit into `build/upstream`; then runs `scripts/check-upstream.zsh`, which fails if any upstream file kept here differs from upstream |
+| setup | `scripts/setup.zsh` | prints the versions of sysl, clang and python3, says how to install any that is missing, and warns when the platform or a version is not the published run's; clones upstream at the pinned commit into `build/upstream`; then runs `scripts/check-upstream.zsh`, which fails if any upstream file kept here differs from upstream |
 | build | `scripts/build.zsh` | builds C++ with upstream's `build.sh` in the upstream checkout, and builds sysl with `sysl build`, both with the same clang |
 | verify | `scripts/verify.zsh` | runs every benchmark once at its timed size in both languages; the harness checks the result and exits 1 if it is wrong |
 | time | `scripts/run.zsh` | runs the invocations, alternating the languages, under `/usr/bin/time -l` |
