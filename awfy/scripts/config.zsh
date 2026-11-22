@@ -65,6 +65,10 @@ SYSL_FLAGS=(--release -O3 --cpu native --lto full)
 ZIG=${ZIG:-$(command -v zig)}
 ZIG_FLAGS=(-O fast -mcpu=native -lc)
 
+# C: the same clang and the same OPT as C++ (benchmarks/C/build.sh compiles every file in one
+# invocation with -ffp-contract=off -std=c17, as upstream's build.sh does C++ with -std=c++17).
+C_OPT=${C_OPT:-$CPP_OPT}
+
 # Rust: cargo's release profile in benchmarks/Rust/Cargo.toml (opt-level 3, fat LTO, one codegen
 # unit, panic=abort), and this machine's processor, as C++'s -mcpu=native. RUSTC is the rustc beside
 # CARGO, so a rustup proxy that cannot resolve a toolchain is not in the way.
@@ -76,6 +80,7 @@ harness_of() {  # <lang>
     sysl) print -r -- $BUILD/harness-sysl ;;
     cpp)  print -r -- $UPSTREAM_DIR/benchmarks/C++/harness ;;
     zig)  print -r -- $BUILD/harness-zig ;;
+    c)    print -r -- $BUILD/harness-c ;;
     rust) print -r -- $BUILD/harness-rust ;;
   esac
 }

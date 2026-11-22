@@ -40,6 +40,16 @@ else
   differ=1
 fi
 
+# The C port includes C++'s literal itself: json.h lines 13-451, the string after
+# `const string rapBenchmarkMinified =`, which C reads as the same string literal.
+if [[ "$(sed -n 13,451p $UPSTREAM_DIR/benchmarks/C++/src/json.h)" == "$(<benchmarks/C/src/json_data.inc)" ]] &&
+   [[ $(sed -n 12p $UPSTREAM_DIR/benchmarks/C++/src/json.h) == "const string rapBenchmarkMinified ="* ]]; then
+  print "same     benchmarks/C/src/json_data.inc  =  upstream benchmarks/C++/src/json.h:13-451"
+else
+  print "DIFFERS  benchmarks/C/src/json_data.inc  vs  upstream benchmarks/C++/src/json.h:13-451"
+  differ=1
+fi
+
 # The Rust port's literal is the Java port's line too, written as a Rust string.
 rust_line=$(sed -n 4p benchmarks/Rust/src/json_data.rs)
 rust_doc=${${rust_line#pub const RAP_BENCHMARK_MINIFIED: &str = }%;}

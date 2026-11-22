@@ -50,6 +50,9 @@ if (( ${LANGS[(Ie)zig]} )); then
     need "zig 0.17 (the Zig column)" "brew install zig"
   fi
 fi
+if (( ${LANGS[(Ie)c]} )); then
+  print "C        $CLANG  (the C column: the C++ column's clang)"
+fi
 if (( ${LANGS[(Ie)rust]} )); then
   if [[ -n $CARGO && -x $CARGO && -x ${CARGO:h}/rustc ]]; then
     print "cargo    $CARGO  ($(${CARGO:h}/rustc --version))"

@@ -11,6 +11,8 @@ Upstream is <https://github.com/smarr/are-we-fast-yet> at commit
 | `benchmarks/sysl/json_data.sysl` | the document of upstream `benchmarks/Java/src/Json.java` line 39, character for character (checked by `scripts/check-upstream.zsh`) |
 | `benchmarks/Zig/` | the Zig port, written here from upstream's C++ port (below, "The Zig port") |
 | `benchmarks/Zig/json_data.zig` | json.h's `rapBenchmarkMinified`, written out by a 15-line C++ program that includes json.h and escapes `"` and `\` |
+| `benchmarks/C/` | the C port, written here from upstream's C++ port (below, "The C port") |
+| `benchmarks/C/src/json_data.inc` | upstream `benchmarks/C++/src/json.h` lines 13-451, byte for byte (checked by `scripts/check-upstream.zsh`) |
 | `reproduce.zsh`, `scripts/`, `README.md`, `METHODOLOGY.md`, this file | written here |
 
 Everything the track needs is inside `awfy/`; upstream is fetched into `build/upstream` (ignored by
@@ -233,4 +235,57 @@ Every structural difference from the C++ port, and why:
   the benchmark checks come out the same at every size run (`scripts/verify.zsh`).
 - **Null checks** C++ makes on a pointer its types guarantee non-null are dropped where Zig's types
   forbid null (`*T` against `?*T`).
+
+## The C port
+
+Upstream has no C port. The only public one (`rochus-keller/Are-we-fast-yet`, `C/`, MIT) does not
+build without `-w` (13 calls through mismatched function-pointer types, which are undefined
+behaviour), is pinned to upstream 770c6649, and was derived from its author's own C++ port, not
+upstream's: DeltaBlue uses tagged unions where C++ has virtuals. So `benchmarks/C/` is original,
+written for this benchmark from the C++ port at the pinned commit, file for file: `src/harness.c`
+(`harness.cpp` and `run.h`), `src/benchmark.h`, `src/memory/object_tracker.{h,c}`, `src/som/`
+(Vector, Set, IdentityDictionary, Random, Error) and one `.c` per benchmark. `build.sh` compiles every
+file in one clang invocation with the C++ column's clang and `OPT` (`-O3 -flto -mcpu=native`), plus
+`-ffp-contract=off -std=c17 -Wall -Wextra -Werror`, as upstream's `build.sh` adds
+`-ffp-contract=off -std=c++17` for C++.
+
+What keeps C++'s structure:
+
+- **Templates are typed modules**: `DEFINE_VECTOR`, `DEFINE_SET`, `DEFINE_IDENTITY_DICTIONARY` and
+  CD's `DEFINE_RED_BLACK_TREE` generate a struct and its functions for one element type, as a C++
+  template instantiation does: elements stored inline and by value, monomorphic code. Upstream's
+  quirks are kept (`atPut` reallocates past the end, `sort`'s `swap` exits, `removeAll` reallocates).
+- **Virtuals are vtables**: every class with a virtual member has a `const` table of function
+  pointers, and a call through it is C++'s virtual call: `Benchmark`, DeltaBlue's constraint
+  hierarchy (one table per concrete class, filled as C++ resolves the overrides), Json's `JsonValue`
+  (every `is*`/`as*` test is a call through the table), the dictionary's entries and `newEntry`, and
+  the virtual destructor of every `TrackedObject`.
+- **Allocation**: every `new`/`delete` is a `malloc`/`free`, at the same place and of the same object;
+  destructors are `_deinit`/`_delete` functions called where C++ runs them (a stack object's at the end
+  of its scope). DeltaBlue and Richards register their objects with the same `ObjectTracker`.
+- **Closures** are a function pointer and a context pointer, the indirect call of C++'s
+  `std::function`.
+- An uncaught C++ exception is `error()`: it prints the message and exits 1.
+
+Every structural difference from the C++ port, and why:
+
+- **`std::any`** (the `Benchmark` result, List's element value) is a `Result` union and an `int32_t`:
+  C has no top type. Each benchmark reads back the member it wrote.
+- **Bounds checks**: the indexing C++ does with `.at()` is plain indexing; the suite's own `Vector`
+  checks as C++'s does.
+- **Overloads**: C has none, so CD's static `benchmark(int)` is `CD_run` and the private
+  `verify_result` overloads (CD, Havlak, Mandelbrot, NBody) are named `verify`.
+- **Richards' `dynamic_cast`** is a comparison of the vtable pointer, a checked downcast that yields
+  `NULL` on a mismatch, as `dynamic_cast` does.
+- **Json**: the current character is an `int` (a byte, or -1 at the end) where C++ holds a
+  one-character `std::string` in its small buffer; C has a character type and no string type. Owned
+  strings are `{char*, length}`, each `malloc`ed, where libc++ keeps the document's short strings in
+  its small buffer without allocating: more work for C, not less. A parsed name moves into its object
+  where C++ copies it in and destroys its own. `toString()` answers the stored bytes where C++ copies
+  them; it is reached only on an error. The parser copies the document into its own buffer on every
+  iteration, as C++'s by-value constructor does.
+- **CD**: `std::optional<V>` is a `{has_value, value}` struct. The tree's `remove` unlinks its node
+  without freeing it, as C++'s; the benchmark never removes an aircraft, so it never runs.
+- **IdentitySet** is `Set`, as in the Zig port: C++'s `IdentitySet::contains` hides `Set::contains`,
+  so `add`, its only caller, uses `equal` in both.
 
