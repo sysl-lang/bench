@@ -10,6 +10,7 @@ struct Vector[E]
     storage: []E
     first_idx: usize
     last_idx: usize
+    invariant first_idx <= last_idx && last_idx <= storage.len
 
     // The element at idx, or None past the end.
     at(*self, idx: usize) -> Option[E]

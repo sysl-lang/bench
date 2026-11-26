@@ -112,7 +112,10 @@ says so.
   no benchmark stores past the end. `remove` takes the comparison as a parameter, since the elements
   may be values (`==`) or objects (`===`); only DeltaBlue calls it, with `===`, which is C++'s pointer
   `==`. `remove_all` allocates new storage of the same size, as C++ and Java do. `swap`, which C++
-  leaves unimplemented, is Java's.
+  leaves unimplemented, is Java's. It states `invariant first_idx <= last_idx && last_idx <=
+  storage.len`, which upstream keeps only by construction: the compiler checks it where a member
+  changes the fields and hands it to the optimizer, so `last_idx - first_idx` cannot wrap and an index
+  below the size needs no bounds check.
 - **`IdentityDictionary`** is upstream's chained hash table with its resize and bucket split. Keys are
   `&K` compared with `===`, hashed by the `CustomHash` trait, as upstream's. Upstream's equality
   `Dictionary`, of which `IdentityDictionary` is a subclass, is used by no benchmark and is not ported.
